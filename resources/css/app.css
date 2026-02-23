@@ -1,0 +1,105 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Geminia CRM - brand colors (#1A559E from Sign In button) */
+:root {
+    --geminia-primary: #1A559E;
+    --geminia-primary-dark: #144177;
+    --geminia-primary-light: rgba(26, 85, 158, 0.12);
+    --geminia-primary-muted: rgba(26, 85, 158, 0.08);
+    --geminia-text: #1e293b;
+    --geminia-text-muted: #64748b;
+    --geminia-border: #e2e8f0;
+    --geminia-bg: #f8fafc;
+    --geminia-success: #059669;
+    --geminia-danger: #dc2626;
+    --geminia-warning: #d97706;
+}
+
+* { box-sizing: border-box; }
+
+body {
+    font-family: 'Inter', system-ui, sans-serif;
+    background: var(--geminia-bg);
+    color: var(--geminia-text);
+    -webkit-font-smoothing: antialiased;
+}
+
+/* Cards used across the app */
+.card, .app-card {
+    background: #fff;
+    border-radius: 12px;
+    border: 1px solid var(--geminia-border);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+
+/* Form controls */
+.form-control:focus, .form-select:focus {
+    border-color: var(--geminia-primary);
+    box-shadow: 0 0 0 3px var(--geminia-primary-muted);
+}
+
+/* Outline buttons - ensure text is always visible (fix white-on-white) */
+.btn-outline-secondary {
+    background-color: #f1f5f9 !important;
+    color: #475569 !important;
+    border-color: #94a3b8 !important;
+}
+.btn-outline-secondary:hover {
+    background-color: #e2e8f0 !important;
+    color: #334155 !important;
+    border-color: #64748b !important;
+}
+.btn-outline-primary {
+    background-color: #e8f4fc !important;
+    color: #1A559E !important;
+    border-color: #1A559E !important;
+}
+.btn-outline-primary:hover {
+    background-color: #cce5f7 !important;
+    color: #144177 !important;
+    border-color: #144177 !important;
+}
+.btn-outline-danger {
+    background-color: #fef2f2 !important;
+    color: #dc2626 !important;
+    border-color: #dc2626 !important;
+}
+.btn-outline-danger:hover {
+    background-color: #fee2e2 !important;
+    color: #b91c1c !important;
+    border-color: #b91c1c !important;
+}
+
+/* Primary button (including btn-primary-custom used across app) */
+.btn-primary, .app-btn-primary, .btn-primary-custom {
+    background: var(--geminia-primary) !important;
+    border-color: var(--geminia-primary) !important;
+    color: #fff !important;
+}
+.btn-primary:hover, .app-btn-primary:hover, .btn-primary-custom:hover {
+    background: var(--geminia-primary-dark) !important;
+    border-color: var(--geminia-primary-dark) !important;
+    color: #fff !important;
+}
+
+/* Links and accents */
+a.text-primary, .text-primary { color: var(--geminia-primary) !important; }
+.bg-primary { background: var(--geminia-primary) !important; }
+.border-primary { border-color: var(--geminia-primary) !important; }
+
+/* Table styling */
+.table thead th {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--geminia-text-muted);
+    border-bottom: 1px solid var(--geminia-border);
+}
+
+/* Page headers */
+.page-header { margin-bottom: 1.5rem; }
+.page-title { font-size: 1.5rem; font-weight: 700; color: var(--geminia-text); margin: 0 0 0.25rem; }
+.page-subtitle { font-size: 0.9rem; color: var(--geminia-text-muted); margin: 0; }
