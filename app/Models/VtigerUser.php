@@ -5,6 +5,8 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Maps to vtiger_users table.
@@ -70,29 +72,77 @@ class VtigerUser extends Authenticatable
 
     /**
      * Get the primary role (first assigned role).
+     * Cached to avoid repeated DB queries.
      */
     public function getPrimaryRoleAttribute(): ?VtigerRole
     {
-        return $this->roles()->first();
+        if (array_key_exists('primary_role', $this->relations)) {
+            return $this->getRelation('primary_role');
+        }
+        $role = $this->roles()->limit(1)->first();
+        $this->setRelation('primary_role', $role);
+        return $role;
     }
 
     /**
      * Get allowed app module keys for this user based on their role's profile.
      * Administrators always see everything.
+     * Cached per user for 10 min to avoid repeated remote DB queries.
      */
     public function getAllowedModules(): array
     {
-        $role = $this->primary_role;
-        if (!$role) {
-            return array_keys(config('modules.app_to_vtiger', []));
+        return Cache::remember('geminia_allowed_modules_' . $this->id, 600, function () {
+            return $this->fetchAllowedModules();
+        });
+    }
+
+    /**
+     * Fetch allowed modules (uncached). Used internally.
+     */
+    protected function fetchAllowedModules(): array
+    {
+        $allKeys = array_keys(config('modules.app_to_vtiger', []));
+
+        try {
+            $role = DB::connection('vtiger')
+                ->table('vtiger_user2role')
+                ->join('vtiger_role', 'vtiger_user2role.roleid', '=', 'vtiger_role.roleid')
+                ->where('vtiger_user2role.userid', $this->id)
+                ->orderBy('vtiger_user2role.roleid')
+                ->select('vtiger_user2role.roleid', 'vtiger_role.rolename')
+                ->first();
+            if (!$role) {
+                return $allKeys;
+            }
+            if (strcasecmp($role->rolename ?? '', 'Administrator') === 0) {
+                return $allKeys;
+            }
+
+            $profileId = DB::connection('vtiger')
+                ->table('vtiger_role2profile')
+                ->where('roleid', $role->roleid)
+                ->orderBy('profileid')
+                ->value('profileid');
+            if (!$profileId) {
+                return $allKeys;
+            }
+
+            $tabNames = DB::connection('vtiger')
+                ->table('vtiger_profile2tab')
+                ->join('vtiger_tab', 'vtiger_profile2tab.tabid', '=', 'vtiger_tab.tabid')
+                ->where('vtiger_profile2tab.profileid', $profileId)
+                ->pluck('vtiger_tab.name')
+                ->toArray();
+
+            $allowed = [];
+            foreach (config('modules.app_to_vtiger', []) as $appKey => $vtigerName) {
+                if ($vtigerName === null || in_array($vtigerName, $tabNames, true)) {
+                    $allowed[] = $appKey;
+                }
+            }
+            return $allowed;
+        } catch (\Throwable $e) {
+            return $allKeys;
         }
-        if (strcasecmp($role->rolename ?? '', 'Administrator') === 0) {
-            return array_keys(config('modules.app_to_vtiger', []));
-        }
-        $profile = $role->profiles()->first();
-        if (!$profile) {
-            return array_keys(config('modules.app_to_vtiger', []));
-        }
-        return $profile->getAllowedAppModules();
     }
 }

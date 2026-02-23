@@ -27,6 +27,7 @@ class AuthController extends Controller
 
         try {
             $user = VtigerUser::on('vtiger')
+                ->select(['id', 'user_name', 'first_name', 'last_name', 'email1', 'user_password'])
                 ->where('user_name', $validated['user_name'])
                 ->where('status', 'Active')
                 ->first();
@@ -41,6 +42,9 @@ class AuthController extends Controller
 
         Auth::guard('vtiger')->login($user, false); // never remember — session timeout applies
         $request->session()->regenerate();
+
+        // Pre-warm layout cache so dashboard loads fast
+        $user->getAllowedModules();
 
         return redirect()->intended(route('dashboard'));
     }

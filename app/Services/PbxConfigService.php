@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class PbxConfigService
@@ -97,21 +98,21 @@ class PbxConfigService
             return $this->gatewayParams;
         }
 
-        try {
-            $row = DB::connection('vtiger')
-                ->table('vtiger_pbxmanager_gateway')
-                ->where('gateway', 'PBXManager')
-                ->first();
-        } catch (\Throwable $e) {
-            return $this->gatewayParams = [];
-        }
-
-        if (! $row || empty($row->parameters)) {
-            return $this->gatewayParams = [];
-        }
-
-        $decoded = json_decode($row->parameters, true);
-        $this->gatewayParams = is_array($decoded) ? $decoded : [];
+        $this->gatewayParams = Cache::remember('geminia_pbx_gateway_params', 300, function () {
+            try {
+                $row = DB::connection('vtiger')
+                    ->table('vtiger_pbxmanager_gateway')
+                    ->where('gateway', 'PBXManager')
+                    ->first();
+                if (! $row || empty($row->parameters)) {
+                    return [];
+                }
+                $decoded = json_decode($row->parameters, true);
+                return is_array($decoded) ? $decoded : [];
+            } catch (\Throwable $e) {
+                return [];
+            }
+        });
 
         return $this->gatewayParams;
     }

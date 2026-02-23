@@ -45,7 +45,7 @@ class AppServiceProvider extends ServiceProvider
                 return;
             }
 
-            $layoutData = Cache::remember('geminia_user_layout_' . $user->id, 300, function () use ($user) {
+            $layoutData = Cache::remember('geminia_user_layout_' . $user->id, 600, function () use ($user) {
                 return [
                     'role' => $user->primary_role?->rolename ?? '—',
                     'allowed' => $user->getAllowedModules(),
