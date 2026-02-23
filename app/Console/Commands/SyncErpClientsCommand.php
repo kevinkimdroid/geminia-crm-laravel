@@ -62,7 +62,7 @@ class SyncErpClientsCommand extends Command
                         ->get();
                     break;
                 } catch (\Throwable $e) {
-                    $isLost = str_contains($e->getMessage(), 'ORA-03113') || str_contains($e->getMessage(), 'end-of-file');
+                    $isLost = (strpos($e->getMessage(), 'ORA-03113') !== false) || (strpos($e->getMessage(), 'end-of-file') !== false);
                     $retries++;
                     if ($isLost && $retries < $maxRetries) {
                         DB::purge('erp');

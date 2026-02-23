@@ -10,7 +10,8 @@ use Illuminate\View\View;
 
 class AuthController extends Controller
 {
-    public function showLogin(): View|RedirectResponse
+    /** @return View|RedirectResponse */
+    public function showLogin()
     {
         if (Auth::guard('vtiger')->check()) {
             return redirect()->route('dashboard');

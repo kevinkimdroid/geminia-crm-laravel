@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Services\CrmService;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
@@ -23,6 +24,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        Blade::directive('vite', function ($expression) {
+            return "<?php echo app(\App\Support\ViteAssets::class)->toHtml({$expression}); ?>";
+        });
+
         View::composer('layouts.app', function ($view) {
             try {
                 $view->with('leadsTodayCount', Cache::remember(
@@ -34,47 +39,74 @@ class AppServiceProvider extends ServiceProvider
                 $view->with('leadsTodayCount', 0);
             }
 
-            $user = Auth::guard('vtiger')->user();
+            try {
+                $user = Auth::guard('vtiger')->user();
+            } catch (\Throwable $e) {
+                $user = null;
+            }
             if (!$user) {
+                try {
+                    $view->with('allowedModules', app(\App\Services\ModuleService::class)->getEnabledModuleKeys());
+                } catch (\Throwable $e) {
+                    $view->with('allowedModules', []);
+                }
                 $view->with('currentUserName', 'User');
                 $view->with('currentUserRole', '—');
                 $view->with('currentUserEmail', '');
-                $view->with('allowedModules', app(\App\Services\ModuleService::class)->getEnabledModuleKeys());
                 $view->with('pbxCanCall', false);
                 $view->with('pbxDefaultExtension', '');
                 return;
             }
 
-            $layoutData = Cache::remember('geminia_user_layout_' . $user->id, 600, function () use ($user) {
-                return [
-                    'role' => $user->primary_role?->rolename ?? '—',
-                    'allowed' => $user->getAllowedModules(),
-                ];
-            });
-            $view->with('currentUserName', $user->full_name);
-            $view->with('currentUserRole', $layoutData['role']);
-            $view->with('currentUserEmail', $user->email1 ?? '');
-            $allowed = $layoutData['allowed'];
-            $enabled = app(\App\Services\ModuleService::class)->getEnabledModuleKeys();
-            $effective = empty($allowed) ? $enabled : array_values(array_intersect($allowed, $enabled));
-            if (empty($allowed)) {
-                $effective = $enabled;
-            }
-            if (strcasecmp($layoutData['role'], 'Administrator') === 0 && ! in_array('tools.pbx-manager', $effective, true)) {
-                $effective[] = 'tools.pbx-manager';
-            }
-            $view->with('allowedModules', $effective);
+            try {
+                $layoutData = Cache::remember('geminia_user_layout_' . $user->id, 600, function () use ($user) {
+                    return [
+                        'role' => ($user->primary_role ? $user->primary_role->rolename : null) ?? '—',
+                        'allowed' => $user->getAllowedModules(),
+                    ];
+                });
+                $view->with('currentUserName', $user->full_name);
+                $view->with('currentUserRole', $layoutData['role']);
+                $view->with('currentUserEmail', $user->email1 ?? '');
+                $allowed = $layoutData['allowed'];
+                $enabled = app(\App\Services\ModuleService::class)->getEnabledModuleKeys();
+                $effective = empty($allowed) ? $enabled : array_values(array_intersect($allowed, $enabled));
+                if (empty($allowed)) {
+                    $effective = $enabled;
+                }
+                if (strcasecmp($layoutData['role'], 'Administrator') === 0 && ! in_array('tools.pbx-manager', $effective, true)) {
+                    $effective[] = 'tools.pbx-manager';
+                }
+                $view->with('allowedModules', $effective);
 
-            $pbxConfig = app(\App\Services\PbxConfigService::class);
-            $view->with('pbxCanCall', $pbxConfig->isConfigured());
-            $view->with('pbxDefaultExtension', config('services.pbx.default_extension', env('PBX_DEFAULT_EXTENSION', '')));
+                $pbxConfig = app(\App\Services\PbxConfigService::class);
+                $view->with('pbxCanCall', $pbxConfig->isConfigured());
+                $view->with('pbxDefaultExtension', config('services.pbx.default_extension', env('PBX_DEFAULT_EXTENSION', '')));
+            } catch (\Throwable $e) {
+                $view->with('currentUserName', 'User');
+                $view->with('currentUserRole', '—');
+                $view->with('currentUserEmail', '');
+                try {
+                    $view->with('allowedModules', app(\App\Services\ModuleService::class)->getEnabledModuleKeys());
+                } catch (\Throwable $e2) {
+                    $view->with('allowedModules', []);
+                }
+                $view->with('pbxCanCall', false);
+                $view->with('pbxDefaultExtension', '');
+            }
         });
 
         View::composer('settings', function ($view) {
-            $user = Auth::guard('vtiger')->user();
-            $view->with('currentUserName', $user?->full_name ?? 'User');
-            $view->with('currentUserRole', $user?->primary_role?->rolename ?? '—');
-            $view->with('currentUserEmail', $user?->email1 ?? '');
+            try {
+                $user = Auth::guard('vtiger')->user();
+                $view->with('currentUserName', ($user ? $user->full_name : null) ?? 'User');
+                $view->with('currentUserRole', ($user && $user->primary_role ? $user->primary_role->rolename : null) ?? '—');
+                $view->with('currentUserEmail', ($user ? $user->email1 : null) ?? '');
+            } catch (\Throwable $e) {
+                $view->with('currentUserName', 'User');
+                $view->with('currentUserRole', '—');
+                $view->with('currentUserEmail', '');
+            }
         });
     }
 }

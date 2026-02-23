@@ -12,9 +12,13 @@ use Illuminate\View\View;
 
 class ActivityController extends Controller
 {
-    public function __construct(
-        private CrmService $crm
-    ) {}
+    /** @var CrmService */
+    protected $crm;
+
+    public function __construct(CrmService $crm)
+    {
+        $this->crm = $crm;
+    }
 
     public function index(Request $request): View
     {

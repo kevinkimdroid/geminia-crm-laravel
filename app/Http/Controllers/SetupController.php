@@ -90,7 +90,8 @@ class SetupController extends Controller
     /**
      * Edit a role's module permissions.
      */
-    public function editRoleModules(string $roleId): View|RedirectResponse
+    /** @return View|RedirectResponse */
+    public function editRoleModules(string $roleId)
     {
         $role = VtigerRole::on('vtiger')->find($roleId);
         if (!$role) {

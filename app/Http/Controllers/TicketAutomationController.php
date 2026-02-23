@@ -8,9 +8,13 @@ use Illuminate\Http\Request;
 
 class TicketAutomationController extends Controller
 {
-    public function __construct(
-        private TicketAutomationService $automation
-    ) {}
+    /** @var TicketAutomationService */
+    protected $automation;
+
+    public function __construct(TicketAutomationService $automation)
+    {
+        $this->automation = $automation;
+    }
 
     public function store(Request $request): RedirectResponse
     {

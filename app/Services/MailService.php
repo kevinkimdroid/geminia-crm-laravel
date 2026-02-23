@@ -12,9 +12,13 @@ use Webklex\PHPIMAP\Exceptions\ImapBadRequestException;
 
 class MailService
 {
-    public function __construct(
-        private string $account = 'geminia'
-    ) {}
+    /** @var string */
+    protected $account;
+
+    public function __construct(string $account = 'geminia')
+    {
+        $this->account = $account;
+    }
 
     /**
      * Check if Microsoft Graph is configured (best for Office 365).
@@ -130,7 +134,7 @@ class MailService
         }
 
         if (empty($emails)) {
-            $isConnectionError = $lastError && (str_contains($lastError, 'Timeout') || str_contains($lastError, 'Failed to connect') || str_contains($lastError, 'Connection refused'));
+            $isConnectionError = $lastError && ((strpos($lastError, 'Timeout') !== false) || (strpos($lastError, 'Failed to connect') !== false) || (strpos($lastError, 'Connection refused') !== false));
             if ($isConnectionError && config('email-service.fallback_to_imap', true)) {
                 Log::warning('MailService: HTTP service unreachable, falling back to IMAP. ' . $lastError);
                 return $this->fetchAndStoreEmailsViaImap($folder, $limit);
@@ -351,14 +355,14 @@ class MailService
                     DB::connection('vtiger')->table('mail_manager_emails')->insert([
                         'message_uid' => $uid,
                         'folder' => $targetFolder->path,
-                        'from_address' => $from?->mail ?? '',
-                        'from_name' => $from?->personal,
+                        'from_address' => ($from ? $from->mail : null) ?? '',
+                        'from_name' => $from ? $from->personal : null,
                         'to_addresses' => $to ?: null,
                         'cc_addresses' => $cc,
                         'subject' => $message->getSubject(),
                         'body_text' => $message->getTextBody(),
                         'body_html' => $message->getHTMLBody(),
-                        'date' => $message->getDate()?->format('Y-m-d H:i:s'),
+                        'date' => ($d = $message->getDate()) ? $d->format('Y-m-d H:i:s') : null,
                         'has_attachments' => $message->getAttachments()->count() > 0,
                         'created_at' => now(),
                         'updated_at' => now(),
@@ -373,7 +377,7 @@ class MailService
 
             $client->disconnect();
         } catch (ImapBadRequestException $e) {
-            if (str_contains($e->getMessage(), 'NOOP completed')) {
+            if (strpos($e->getMessage(), 'NOOP completed') !== false) {
                 Log::info('MailService: Ignoring NOOP response quirk from IMAP server (Microsoft 365 etc)');
                 return $results;
             }
@@ -383,7 +387,7 @@ class MailService
             $results['errors'][] = 'IMAP connection failed: ' . $e->getMessage();
             Log::error('MailService::fetchAndStoreEmails connection: ' . $e->getMessage());
         } catch (\Throwable $e) {
-            if (str_contains($e->getMessage(), 'NOOP completed')) {
+            if (strpos($e->getMessage(), 'NOOP completed') !== false) {
                 Log::info('MailService: Ignoring NOOP response quirk (Microsoft 365/Outlook)');
                 return $results;
             }

@@ -31,7 +31,6 @@ echo "[5/7] Optimizing for production..."
 php artisan config:cache
 php artisan route:cache
 php artisan view:cache
-php artisan event:cache
 
 # 6. Storage link (if not exists)
 echo "[6/7] Ensuring storage link..."

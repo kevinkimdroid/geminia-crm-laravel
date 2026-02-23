@@ -23,7 +23,7 @@ class TicketAutomationService
         foreach ($rules as $rule) {
             $keywords = $this->parseKeywords($rule->keywords);
             foreach ($keywords as $keyword) {
-                if (str_contains($text, strtolower(trim($keyword)))) {
+                if (strpos($text, strtolower(trim($keyword))) !== false) {
                     return (int) $rule->assign_to_user_id;
                 }
             }

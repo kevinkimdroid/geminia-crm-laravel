@@ -10,11 +10,16 @@ use Illuminate\View\View;
 
 class MailManagerController extends Controller
 {
-    public function __construct(
-        private MailService $mailService
-    ) {}
+    /** @var MailService */
+    protected $mailService;
 
-    public function index(Request $request): View|RedirectResponse
+    public function __construct(MailService $mailService)
+    {
+        $this->mailService = $mailService;
+    }
+
+    /** @return View|RedirectResponse */
+    public function index(Request $request)
     {
         $search = $request->get('search');
         $page = max(1, (int) $request->get('page', 1));
@@ -54,7 +59,7 @@ class MailManagerController extends Controller
         try {
             $result = $this->mailService->fetchAndStoreEmails('INBOX', $limit);
         } catch (\Throwable $e) {
-            if (str_contains($e->getMessage(), 'NOOP completed')) {
+            if (strpos($e->getMessage(), 'NOOP completed') !== false) {
                 $hint = $this->mailService->useMicrosoftGraph()
                     ? 'Check MSGRAPH_* config in .env.'
                     : 'Enable Microsoft Graph (MSGRAPH_ENABLED=true) in .env for Office 365 - see docs.';

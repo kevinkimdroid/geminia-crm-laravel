@@ -12,9 +12,13 @@ use Illuminate\View\View;
 
 class SocialMediaController extends Controller
 {
-    public function __construct(
-        private SocialMediaService $socialMedia
-    ) {}
+    /** @var SocialMediaService */
+    protected $socialMedia;
+
+    public function __construct(SocialMediaService $socialMedia)
+    {
+        $this->socialMedia = $socialMedia;
+    }
 
     public function index(): View
     {

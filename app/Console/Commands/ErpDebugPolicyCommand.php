@@ -22,7 +22,7 @@ class ErpDebugPolicyCommand extends Command
         }
 
         $url = rtrim($url, '/');
-        $sep = str_contains($url, '?') ? '&' : '?';
+        $sep = (strpos($url, '?') !== false) ? '&' : '?';
         $fullUrl = $url . $sep . 'policy=' . urlencode($policy) . '&limit=1';
 
         $this->info("Fetching: {$fullUrl}");

@@ -9,7 +9,7 @@
    APP_URL=https://your-production-domain.com
    ```
 
-2. **PHP 8.1** is required.
+2. **PHP 7.4** or **8.0** is required.
 
 3. **Writable directories** (web server user, e.g. `www-data`):
    ```
@@ -41,7 +41,6 @@ php artisan migrate --force
 php artisan config:cache
 php artisan route:cache
 php artisan view:cache
-php artisan event:cache
 
 php artisan storage:link
 ```

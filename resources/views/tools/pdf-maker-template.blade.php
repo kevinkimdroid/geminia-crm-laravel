@@ -52,7 +52,7 @@
             <div class="card pdf-tpl-card mt-4">
                 <div class="card-body">
                     <h6 class="fw-semibold mb-3">Company details</h6>
-                    @if($template?->logo_path)
+                    @if(optional($template)->logo_path)
                         <div class="mb-3">
                             <img src="{{ asset('storage/' . $template->logo_path) }}" alt="Logo" class="img-fluid rounded border mb-2" style="max-height: 50px;">
                             <form action="{{ route('tools.pdf-maker.logo.remove', $module['slug']) }}" method="POST" class="d-inline">
@@ -63,33 +63,33 @@
                     @endif
                     <input type="file" name="logo" class="form-control form-control-sm mb-3" accept="image/*">
                     <div class="mb-2">
-                        <input type="text" name="company_name" class="form-control form-control-sm" value="{{ old('company_name', $template?->company_name ?? '') }}" placeholder="Company name">
+                        <input type="text" name="company_name" class="form-control form-control-sm" value="{{ old('company_name', optional($template)->company_name ?? '') }}" placeholder="Company name">
                     </div>
                     <div class="mb-2">
-                        <input type="text" name="tagline" class="form-control form-control-sm" value="{{ old('tagline', $template?->tagline ?? '') }}" placeholder="Tagline (optional)">
+                        <input type="text" name="tagline" class="form-control form-control-sm" value="{{ old('tagline', optional($template)->tagline ?? '') }}" placeholder="Tagline (optional)">
                     </div>
                     <div class="mb-2">
-                        <input type="text" name="company_address" class="form-control form-control-sm" value="{{ old('company_address', $template?->company_address ?? '') }}" placeholder="Address">
+                        <input type="text" name="company_address" class="form-control form-control-sm" value="{{ old('company_address', optional($template)->company_address ?? '') }}" placeholder="Address">
                     </div>
                     <div class="row g-1 mb-2">
                         <div class="col-6">
-                            <input type="text" name="company_zip" class="form-control form-control-sm" value="{{ old('company_zip', $template?->company_zip ?? '') }}" placeholder="Zip">
+                            <input type="text" name="company_zip" class="form-control form-control-sm" value="{{ old('company_zip', optional($template)->company_zip ?? '') }}" placeholder="Zip">
                         </div>
                         <div class="col-6">
-                            <input type="text" name="company_city" class="form-control form-control-sm" value="{{ old('company_city', $template?->company_city ?? '') }}" placeholder="City">
+                            <input type="text" name="company_city" class="form-control form-control-sm" value="{{ old('company_city', optional($template)->company_city ?? '') }}" placeholder="City">
                         </div>
                     </div>
                     <div class="mb-2">
-                        <input type="text" name="company_country" class="form-control form-control-sm" value="{{ old('company_country', $template?->company_country ?? '') }}" placeholder="Country">
+                        <input type="text" name="company_country" class="form-control form-control-sm" value="{{ old('company_country', optional($template)->company_country ?? '') }}" placeholder="Country">
                     </div>
                     <div class="mb-2">
-                        <input type="text" name="company_phone" class="form-control form-control-sm" value="{{ old('company_phone', $template?->company_phone ?? '') }}" placeholder="Phone">
+                        <input type="text" name="company_phone" class="form-control form-control-sm" value="{{ old('company_phone', optional($template)->company_phone ?? '') }}" placeholder="Phone">
                     </div>
                     <div class="mb-2">
-                        <input type="text" name="company_fax" class="form-control form-control-sm" value="{{ old('company_fax', $template?->company_fax ?? '') }}" placeholder="Fax">
+                        <input type="text" name="company_fax" class="form-control form-control-sm" value="{{ old('company_fax', optional($template)->company_fax ?? '') }}" placeholder="Fax">
                     </div>
                     <div class="mb-0">
-                        <input type="text" name="company_website" class="form-control form-control-sm" value="{{ old('company_website', $template?->company_website ?? '') }}" placeholder="Website">
+                        <input type="text" name="company_website" class="form-control form-control-sm" value="{{ old('company_website', optional($template)->company_website ?? '') }}" placeholder="Website">
                     </div>
                 </div>
             </div>
@@ -97,10 +97,10 @@
             <div class="card pdf-tpl-card mt-4">
                 <div class="card-body">
                     <h6 class="fw-semibold mb-3">Footer</h6>
-                    <input type="text" name="footer_text" class="form-control form-control-sm mb-2" value="{{ old('footer_text', $template?->footer_text ?? '') }}" placeholder="Footer text">
+                    <input type="text" name="footer_text" class="form-control form-control-sm mb-2" value="{{ old('footer_text', optional($template)->footer_text ?? '') }}" placeholder="Footer text">
                     <div class="form-check form-check-sm">
                         <input type="hidden" name="show_page_numbers" value="0">
-                        <input type="checkbox" name="show_page_numbers" class="form-check-input" value="1" id="showPageNumbers" {{ old('show_page_numbers', $template?->show_page_numbers ?? false) ? 'checked' : '' }}>
+                        <input type="checkbox" name="show_page_numbers" class="form-check-input" value="1" id="showPageNumbers" {{ old('show_page_numbers', optional($template)->show_page_numbers ?? false) ? 'checked' : '' }}>
                         <label class="form-check-label small" for="showPageNumbers">Page numbers</label>
                     </div>
                 </div>
@@ -186,14 +186,14 @@
                             <p class="text-muted small mb-3">The header appears at the top of each page. It includes your logo and company name from the left panel.</p>
                             <div class="p-3 bg-light rounded">
                                 <div class="d-flex align-items-center gap-3">
-                                    @if($template?->logo_path)
+                                    @if(optional($template)->logo_path)
                                         <img src="{{ asset('storage/' . $template->logo_path) }}" alt="Logo" style="max-height: 40px;">
                                     @else
                                         <div class="bg-white border rounded p-2 text-muted small">[Logo]</div>
                                     @endif
                                     <div>
-                                        <strong>{{ $template?->company_name ?: 'Company Name' }}</strong>
-                                        @if($template?->tagline)<div class="small text-muted">{{ $template->tagline }}</div>@endif
+                                        <strong>{{ optional($template)->company_name ?: 'Company Name' }}</strong>
+                                        @if(optional($template)->tagline)<div class="small text-muted">{{ $template->tagline }}</div>@endif
                                     </div>
                                 </div>
                             </div>
@@ -205,8 +205,8 @@
                         <div class="card-body">
                             <p class="text-muted small mb-3">The footer appears at the bottom of each page. Configure it in the left panel.</p>
                             <div class="p-3 bg-light rounded text-center small text-muted">
-                                {{ $template?->footer_text ?: 'Footer text' }}
-                                @if($template?->show_page_numbers) · Page 1 of 1 @endif
+                                {{ optional($template)->footer_text ?: 'Footer text' }}
+                                @if(optional($template)->show_page_numbers) · Page 1 of 1 @endif
                             </div>
                         </div>
                     </div>

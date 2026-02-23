@@ -382,7 +382,7 @@ class ErpClientService
                 $errMsg = $e->getMessage();
             } catch (\Throwable $e) {
                 $errMsg = $e->getMessage();
-                $lostConnection = str_contains($errMsg, 'Lost connection') || str_contains($errMsg, 'no reconnector');
+                $lostConnection = (strpos($errMsg, 'Lost connection') !== false) || (strpos($errMsg, 'no reconnector') !== false);
                 if (! $lostConnection) {
                     Log::error('ERP policies for contact failed', ['message' => $errMsg]);
                     return ['data' => [], 'total' => null, 'error' => $errMsg];
@@ -412,7 +412,7 @@ class ErpClientService
                     return null;
                 }
                 $url = rtrim($url, '/');
-                $sep = str_contains($url, '?') ? '&' : '?';
+                $sep = (strpos($url, '?') !== false) ? '&' : '?';
                 $response = \Illuminate\Support\Facades\Http::timeout(10)->get($url . $sep . 'policy=' . urlencode($policyNumber) . '&limit=1');
                 if (! $response->successful()) {
                     return null;
@@ -567,7 +567,7 @@ class ErpClientService
                 return ['data' => $data, 'total' => $total, 'error' => null];
             } catch (\Throwable $e) {
                 $errMsg = $e->getMessage();
-                $isLostConn = str_contains($errMsg, 'ORA-03113') || str_contains($errMsg, 'Lost connection') || str_contains($errMsg, 'end-of-file');
+                $isLostConn = (strpos($errMsg, 'ORA-03113') !== false) || (strpos($errMsg, 'Lost connection') !== false) || (strpos($errMsg, 'end-of-file') !== false);
                 $attempts++;
 
                 Log::error('ERP clients list failed', [

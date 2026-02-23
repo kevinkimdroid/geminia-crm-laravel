@@ -27,7 +27,8 @@ class ProfileController extends Controller
     /**
      * Show profile detail view (matching Vtiger Profile view layout).
      */
-    public function show(string $id): View|RedirectResponse
+    /** @return View|RedirectResponse */
+    public function show(string $id)
     {
         $profile = VtigerProfile::on('vtiger')->find($id);
         if (! $profile) {
@@ -66,9 +67,9 @@ class ProfileController extends Controller
                 'name' => $tab->name,
                 'label' => $this->tabLabel($tab->name),
                 'view' => $hasView,
-                'create' => (bool) ($perms->firstWhere('operation', 0)?->permissions ?? 0),
-                'edit' => (bool) ($perms->firstWhere('operation', 1)?->permissions ?? 0),
-                'delete' => (bool) ($perms->firstWhere('operation', 2)?->permissions ?? 0),
+                'create' => (bool) (($p = $perms->firstWhere('operation', 0)) ? ($p->permissions ?? 0) : 0),
+                'edit' => (bool) (($p = $perms->firstWhere('operation', 1)) ? ($p->permissions ?? 0) : 0),
+                'delete' => (bool) (($p = $perms->firstWhere('operation', 2)) ? ($p->permissions ?? 0) : 0),
                 'fields' => $hasView ? $this->getFieldsForTab($tab->tabid, $fieldPerms->get($tab->tabid, collect())) : [],
             ];
         }

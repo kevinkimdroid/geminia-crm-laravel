@@ -61,7 +61,7 @@ class PbxConfigCommand extends Command
         foreach ($keys as $key => $label) {
             if (isset($params[$key]) && $params[$key] !== '' && ! isset($shown[strtolower($key)])) {
                 $val = $params[$key];
-                if (str_contains(strtolower($key), 'secret')) {
+                if (strpos(strtolower($key), 'secret') !== false) {
                     $val = strlen($val) ? '***' . substr($val, -4) : '(empty)';
                 }
                 $this->line(sprintf('  %-22s %s', $label . ':', $val));

@@ -112,7 +112,7 @@ class PdfMakerController extends Controller
             'name' => $validated['name'] ?? 'Default',
             'company_name' => $validated['company_name'] ?? '',
             'tagline' => $validated['tagline'] ?? '',
-            'field_layout' => $existing?->field_layout ?? $this->getDefaultFieldLayout($moduleConfig),
+            'field_layout' => ($existing ? $existing->field_layout : null) ?? $this->getDefaultFieldLayout($moduleConfig),
             'company_address' => $validated['company_address'] ?? '',
             'company_zip' => $validated['company_zip'] ?? '',
             'company_city' => $validated['company_city'] ?? '',
@@ -160,7 +160,7 @@ class PdfMakerController extends Controller
     public function removeLogo(string $module)
     {
         $template = PdfTemplate::getForModule($module);
-        if ($template?->logo_path) {
+        if ($template && $template->logo_path) {
             Storage::disk('public')->delete($template->logo_path);
             $template->update(['logo_path' => null]);
         }

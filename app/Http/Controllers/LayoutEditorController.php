@@ -19,7 +19,8 @@ class LayoutEditorController extends Controller
         ]);
     }
 
-    public function show(Request $request, LayoutService $layout, ?int $tabid = null): View|RedirectResponse
+    /** @return View|RedirectResponse */
+    public function show(Request $request, LayoutService $layout, ?int $tabid = null)
     {
         $tabid = $tabid ?? (int) $request->get('module');
         $modules = $layout->getEditableModules();

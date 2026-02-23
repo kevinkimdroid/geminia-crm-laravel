@@ -1617,7 +1617,7 @@ class CrmService
         $name = trim($erpClient['name'] ?? $erpClient['client_name'] ?? (($erpClient['first_name'] ?? '') . ' ' . ($erpClient['last_name'] ?? '')));
         $firstName = $erpClient['first_name'] ?? explode(' ', $name, 2)[0] ?? 'Client';
         $lastName = $erpClient['last_name'] ?? (explode(' ', $name, 2)[1] ?? '');
-        if ($lastName === '' && str_contains($name, ' ')) {
+        if ($lastName === '' && strpos($name, ' ') !== false) {
             $parts = explode(' ', $name, 2);
             $firstName = $parts[0];
             $lastName = $parts[1] ?? '';

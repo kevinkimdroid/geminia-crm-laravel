@@ -10,9 +10,13 @@ use Illuminate\View\View;
 
 class TicketSlaController extends Controller
 {
-    public function __construct(
-        private TicketSlaService $sla
-    ) {}
+    /** @var TicketSlaService */
+    protected $sla;
+
+    public function __construct(TicketSlaService $sla)
+    {
+        $this->sla = $sla;
+    }
 
     public function index(): View
     {

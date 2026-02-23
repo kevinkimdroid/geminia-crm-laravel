@@ -19,13 +19,25 @@ use Illuminate\View\View;
 
 class ContactController extends Controller
 {
-    public function __construct(
-        private CrmService $crm,
-        private ErpClientService $erp,
-        private PbxCallService $pbxCalls,
-        private PbxConfigService $pbxConfig,
-        private MailService $mailService
-    ) {}
+    /** @var CrmService */
+    protected $crm;
+    /** @var ErpClientService */
+    protected $erp;
+    /** @var PbxCallService */
+    protected $pbxCalls;
+    /** @var PbxConfigService */
+    protected $pbxConfig;
+    /** @var MailService */
+    protected $mailService;
+
+    public function __construct(CrmService $crm, ErpClientService $erp, PbxCallService $pbxCalls, PbxConfigService $pbxConfig, MailService $mailService)
+    {
+        $this->crm = $crm;
+        $this->erp = $erp;
+        $this->pbxCalls = $pbxCalls;
+        $this->pbxConfig = $pbxConfig;
+        $this->mailService = $mailService;
+    }
 
     public function index(Request $request): View
     {
@@ -84,7 +96,8 @@ class ContactController extends Controller
         }
     }
 
-    public function show(Request $request, int $id): View|RedirectResponse
+    /** @return View|RedirectResponse */
+    public function show(Request $request, int $id)
     {
         $contact = $this->crm->getContact($id);
         if (!$contact) {
@@ -220,7 +233,8 @@ class ContactController extends Controller
         ]);
     }
 
-    public function edit(int $id): View|RedirectResponse
+    /** @return View|RedirectResponse */
+    public function edit(int $id)
     {
         $contact = $this->crm->getContact($id);
         if (!$contact) {
@@ -281,7 +295,7 @@ class ContactController extends Controller
 
         ContactFollowup::create([
             'contact_id' => $contact,
-            'user_id' => $request->user()?->id,
+            'user_id' => ($user = $request->user()) ? $user->id : null,
             'note' => $validated['note'],
             'followup_date' => $validated['followup_date'] ?? null,
             'status' => 'pending',

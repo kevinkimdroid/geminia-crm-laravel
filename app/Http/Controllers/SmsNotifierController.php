@@ -56,7 +56,7 @@ class SmsNotifierController extends Controller
             }
             $contact = $crm->findContactByPhoneOrEmail($phone, null);
             SmsLog::create([
-                'contact_id' => $contact?->contactid,
+                'contact_id' => $contact ? $contact->contactid : null,
                 'phone' => $phone,
                 'message' => $message,
                 'status' => ($r['success'] ?? false) ? 'sent' : 'failed',

@@ -8,9 +8,13 @@ use Illuminate\Http\Request;
 
 class SearchController extends Controller
 {
-    public function __construct(
-        private CrmService $crm
-    ) {}
+    /** @var CrmService */
+    protected $crm;
+
+    public function __construct(CrmService $crm)
+    {
+        $this->crm = $crm;
+    }
 
     /**
      * Global search across contacts, leads, tickets, and deals.

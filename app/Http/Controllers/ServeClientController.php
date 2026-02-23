@@ -15,15 +15,22 @@ use Illuminate\View\View;
  */
 class ServeClientController extends Controller
 {
-    public function __construct(
-        private CrmService $crm,
-        private ErpClientService $erp
-    ) {}
+    /** @var CrmService */
+    protected $crm;
+    /** @var ErpClientService */
+    protected $erp;
+
+    public function __construct(CrmService $crm, ErpClientService $erp)
+    {
+        $this->crm = $crm;
+        $this->erp = $erp;
+    }
 
     /**
      * Serve Client page - search UI. Supports ?search= for server-side results (works without JS).
      */
-    public function index(Request $request): View|RedirectResponse
+    /** @return View|RedirectResponse */
+    public function index(Request $request)
     {
         $source = config('erp.clients_view_source', 'crm');
         $canServe = in_array($source, ['erp_sync', 'erp_http']) || $this->erp->isConfigured();
@@ -170,7 +177,7 @@ class ServeClientController extends Controller
                 $contact = null;
             }
         }
-        $contactId = $contact?->contactid ?? $this->crm->createContactFromErpClient($erpClient);
+        $contactId = ($contact ? $contact->contactid : null) ?? $this->crm->createContactFromErpClient($erpClient);
 
         if (!$contactId) {
             return redirect()->route('support.serve-client', ['search' => $policy])
@@ -274,7 +281,7 @@ class ServeClientController extends Controller
             return true;
         }
         return $contactName === $erpClientName
-            || str_contains($erpClientName, $contactName)
-            || str_contains($contactName, $erpClientName);
+            || (strpos($erpClientName, $contactName) !== false)
+            || (strpos($contactName, $erpClientName) !== false);
     }
 }

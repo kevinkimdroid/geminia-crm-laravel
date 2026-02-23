@@ -10,11 +10,19 @@ use Illuminate\View\View;
 
 class DashboardController extends Controller
 {
-    public function __construct(
-        private CrmService $crm,
-        private ErpClientService $erp,
-        private PbxConfigService $pbxConfig
-    ) {}
+    /** @var CrmService */
+    protected $crm;
+    /** @var ErpClientService */
+    protected $erp;
+    /** @var PbxConfigService */
+    protected $pbxConfig;
+
+    public function __construct(CrmService $crm, ErpClientService $erp, PbxConfigService $pbxConfig)
+    {
+        $this->crm = $crm;
+        $this->erp = $erp;
+        $this->pbxConfig = $pbxConfig;
+    }
 
     public function index(): View
     {

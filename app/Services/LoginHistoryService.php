@@ -9,7 +9,10 @@ use Illuminate\Support\Facades\Log;
 
 class LoginHistoryService
 {
-    public function getRecords(int $limit, int $offset, string $filter = 'all'): Collection|LengthAwarePaginator
+    /**
+     * @return Collection|LengthAwarePaginator
+     */
+    public function getRecords(int $limit, int $offset, string $filter = 'all')
     {
         try {
             $query = DB::connection('vtiger')

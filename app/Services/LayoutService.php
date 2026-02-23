@@ -136,7 +136,7 @@ class LayoutService
     protected function formatField(object $f): array
     {
         $typeofdata = $f->typeofdata ?? '';
-        $mandatory = str_contains($typeofdata, '~M');
+        $mandatory = strpos($typeofdata, '~M') !== false;
 
         return [
             'fieldid' => $f->fieldid,

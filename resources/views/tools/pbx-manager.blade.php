@@ -116,15 +116,15 @@
                                     <td>{{ $call->user_name ?? '—' }}</td>
                                     <td>
                                         @if(($call->from_vtiger ?? false) && !empty($call->id))
-                                            <button type="button" class="btn btn-sm btn-outline-primary pbx-play-btn" data-recording-url="{{ route('tools.pbx-manager.recording.vtiger', $call->id) }}" data-call-info="{{ $call->customer_number ?? '' }} - {{ $call->start_time?->format('d/m H:i') ?? '' }}">
+                                            <button type="button" class="btn btn-sm btn-outline-primary pbx-play-btn" data-recording-url="{{ route('tools.pbx-manager.recording.vtiger', $call->id) }}" data-call-info="{{ $call->customer_number ?? '' }} - {{ optional($call->start_time)->format('d/m H:i') ?: '' }}">
                                                 <i class="bi bi-play-circle me-1"></i>Listen
                                             </button>
                                         @elseif(!empty($call->recording_url))
-                                            <button type="button" class="btn btn-sm btn-outline-primary pbx-play-btn" data-recording-url="{{ route('tools.pbx-manager.recording', $call) }}" data-call-info="{{ $call->customer_number ?? '' }} - {{ $call->start_time?->format('d/m H:i') ?? '' }}">
+                                            <button type="button" class="btn btn-sm btn-outline-primary pbx-play-btn" data-recording-url="{{ route('tools.pbx-manager.recording', $call) }}" data-call-info="{{ $call->customer_number ?? '' }} - {{ optional($call->start_time)->format('d/m H:i') ?: '' }}">
                                                 <i class="bi bi-play-circle me-1"></i>Listen
                                             </button>
                                         @elseif(method_exists($call, 'hasRecording') && $call->hasRecording())
-                                            <button type="button" class="btn btn-sm btn-outline-primary pbx-play-btn" data-recording-url="{{ route('tools.pbx-manager.recording', $call) }}" data-call-info="{{ $call->customer_number ?? '' }} - {{ $call->start_time?->format('d/m H:i') ?? '' }}">
+                                            <button type="button" class="btn btn-sm btn-outline-primary pbx-play-btn" data-recording-url="{{ route('tools.pbx-manager.recording', $call) }}" data-call-info="{{ $call->customer_number ?? '' }} - {{ optional($call->start_time)->format('d/m H:i') ?: '' }}">
                                                 <i class="bi bi-play-circle me-1"></i>Listen
                                             </button>
                                         @else
@@ -132,7 +132,7 @@
                                         @endif
                                     </td>
                                     <td>{{ $call->duration_sec ?? 0 }}</td>
-                                    <td class="text-nowrap">{{ $call->start_time?->format('d-m-Y h:i A') ?? '—' }}</td>
+                                    <td class="text-nowrap">{{ optional($call->start_time)->format('d-m-Y h:i A') ?: '—' }}</td>
                                 </tr>
                             @empty
                                 <tr>

@@ -12,15 +12,22 @@ use Illuminate\View\View;
 
 class CustomerController extends Controller
 {
-    public function __construct(
-        private CrmService $crm,
-        private ErpClientService $erp
-    ) {}
+    /** @var CrmService */
+    protected $crm;
+    /** @var ErpClientService */
+    protected $erp;
+
+    public function __construct(CrmService $crm, ErpClientService $erp)
+    {
+        $this->crm = $crm;
+        $this->erp = $erp;
+    }
 
     /**
      * Show client details by policy number (ERP clients) or redirect to contact (CRM).
      */
-    public function show(Request $request): View|\Illuminate\Http\RedirectResponse
+    /** @return \Illuminate\View\View|\Illuminate\Http\RedirectResponse */
+    public function show(Request $request)
     {
         $policy = $request->get('policy', '');
         $policy = trim($policy);
@@ -85,7 +92,7 @@ class CustomerController extends Controller
             return response()->json(['error' => 'ERP_CLIENTS_HTTP_URL not configured'], 500);
         }
         $url = rtrim($url, '/');
-        $sep = str_contains($url, '?') ? '&' : '?';
+        $sep = (strpos($url, '?') !== false) ? '&' : '?';
         $response = \Illuminate\Support\Facades\Http::timeout(15)->get($url . $sep . 'policy=' . urlencode($policy) . '&limit=1');
         $body = $response->json();
         $parsed = parse_url($url);

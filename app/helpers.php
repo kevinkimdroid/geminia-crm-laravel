@@ -16,14 +16,14 @@ if (! function_exists('tel_href')) {
             return '';
         }
         // Kenya: strip 254 and leading 0 to get 9-digit base (7XXXXXXXX)
-        if (str_starts_with($digits, '254') && strlen($digits) === 12) {
+        if (substr($digits, 0, 3) === '254' && strlen($digits) === 12) {
             return substr($digits, 3);
         }
-        if (str_starts_with($digits, '0') && strlen($digits) === 10) {
+        if (substr($digits, 0, 1) === '0' && strlen($digits) === 10) {
             return substr($digits, 1);
         }
         // E.g. 00254722000000 - strip 00 and 254
-        if (str_starts_with($digits, '00254') && strlen($digits) >= 14) {
+        if (substr($digits, 0, 5) === '00254' && strlen($digits) >= 14) {
             return substr($digits, 5);
         }
         // Already 9 digits or other format - return as-is (avoid breaking intl numbers)

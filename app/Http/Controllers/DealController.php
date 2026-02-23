@@ -13,9 +13,13 @@ use Illuminate\View\View;
 
 class DealController extends Controller
 {
-    public function __construct(
-        private CrmService $crm
-    ) {}
+    /** @var CrmService */
+    protected $crm;
+
+    public function __construct(CrmService $crm)
+    {
+        $this->crm = $crm;
+    }
 
     public function index(Request $request): View
     {
@@ -74,7 +78,8 @@ class DealController extends Controller
         }
     }
 
-    public function show(int $id): View|RedirectResponse
+    /** @return View|RedirectResponse */
+    public function show(int $id)
     {
         $deal = $this->crm->getDeal($id);
         if (!$deal) {
@@ -83,7 +88,8 @@ class DealController extends Controller
         return view('deals.show', ['deal' => $deal]);
     }
 
-    public function edit(int $id): View|RedirectResponse
+    /** @return View|RedirectResponse */
+    public function edit(int $id)
     {
         $deal = $this->crm->getDeal($id);
         if (!$deal) {

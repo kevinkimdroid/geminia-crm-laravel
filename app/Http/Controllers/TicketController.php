@@ -16,11 +16,19 @@ use Illuminate\View\View;
 
 class TicketController extends Controller
 {
-    public function __construct(
-        private CrmService $crm,
-        private TicketAutomationService $automation,
-        private TicketSlaService $sla
-    ) {}
+    /** @var CrmService */
+    protected $crm;
+    /** @var TicketAutomationService */
+    protected $automation;
+    /** @var TicketSlaService */
+    protected $sla;
+
+    public function __construct(CrmService $crm, TicketAutomationService $automation, TicketSlaService $sla)
+    {
+        $this->crm = $crm;
+        $this->automation = $automation;
+        $this->sla = $sla;
+    }
 
     public function index(Request $request): View
     {
@@ -98,7 +106,8 @@ class TicketController extends Controller
             $contactDisplay = $contactDisplay ?: $clientNameParam;
         }
         $presetPolicy = $request->filled('policy') ? trim($request->get('policy')) : null;
-        $userRole = \Illuminate\Support\Facades\Auth::guard('vtiger')->user()?->primary_role?->rolename;
+        $authUser = \Illuminate\Support\Facades\Auth::guard('vtiger')->user();
+        $userRole = ($authUser && $authUser->primary_role) ? $authUser->primary_role->rolename : null;
 
         $products = Cache::remember('ticket_products', 300, fn () => $crm->getProducts(100));
         if ($products->isEmpty()) {
@@ -141,7 +150,8 @@ class TicketController extends Controller
         ]);
 
         if (($validated['status'] ?? '') === 'Closed') {
-            $userRole = \Illuminate\Support\Facades\Auth::guard('vtiger')->user()?->primary_role?->rolename;
+            $authUser = \Illuminate\Support\Facades\Auth::guard('vtiger')->user();
+            $userRole = ($authUser && $authUser->primary_role) ? $authUser->primary_role->rolename : null;
             if (!$this->sla->canUserCloseTickets($userRole)) {
                 return back()->withInput()->with('error', 'You do not have permission to create tickets with Closed status.');
             }
@@ -211,7 +221,8 @@ class TicketController extends Controller
         }
     }
 
-    public function show(int $id): View|RedirectResponse
+    /** @return View|RedirectResponse */
+    public function show(int $id)
     {
         $ticket = $this->crm->getTicket($id);
         if (!$ticket) {
@@ -220,7 +231,8 @@ class TicketController extends Controller
         return view('tickets.show', ['ticket' => $ticket]);
     }
 
-    public function edit(int $id): View|RedirectResponse
+    /** @return View|RedirectResponse */
+    public function edit(int $id)
     {
         $ticket = $this->crm->getTicket($id);
         if (!$ticket) {
@@ -239,7 +251,8 @@ class TicketController extends Controller
             }
             $contactDisplay = $client ? trim(($client->firstname ?? '') . ' ' . ($client->lastname ?? '')) : '';
         }
-        $userRole = \Illuminate\Support\Facades\Auth::guard('vtiger')->user()?->primary_role?->rolename;
+        $authUser = \Illuminate\Support\Facades\Auth::guard('vtiger')->user();
+        $userRole = ($authUser && $authUser->primary_role) ? $authUser->primary_role->rolename : null;
         $products = Cache::remember('ticket_products', 300, fn () => $crm->getProducts(100));
         if ($products->isEmpty()) {
             Cache::forget('ticket_products');
@@ -283,7 +296,8 @@ class TicketController extends Controller
 
         $newStatus = $validated['status'] ?? $ticket->status;
         if ($newStatus === 'Closed') {
-            $userRole = \Illuminate\Support\Facades\Auth::guard('vtiger')->user()?->primary_role?->rolename;
+            $authUser = \Illuminate\Support\Facades\Auth::guard('vtiger')->user();
+            $userRole = ($authUser && $authUser->primary_role) ? $authUser->primary_role->rolename : null;
             if (!$this->sla->canUserCloseTickets($userRole)) {
                 return back()->withInput()->with('error', 'You do not have permission to close tickets.');
             }

@@ -38,28 +38,28 @@
             <div class="row g-4">
                 <div class="col-md-6">
                     <label class="form-label fw-semibold">Template Name</label>
-                    <input type="text" name="template_name" class="form-control" value="{{ old('template_name', $template?->template_name ?? '') }}" required placeholder="e.g. Birthdays">
+                    <input type="text" name="template_name" class="form-control" value="{{ old('template_name', optional($template)->template_name ?? '') }}" required placeholder="e.g. Birthdays">
                 </div>
                 <div class="col-md-6">
                     <label class="form-label fw-semibold">Subject</label>
-                    <input type="text" name="subject" class="form-control" value="{{ old('subject', $template?->subject ?? '') }}" required placeholder="e.g. Happy Birthday">
+                    <input type="text" name="subject" class="form-control" value="{{ old('subject', optional($template)->subject ?? '') }}" required placeholder="e.g. Happy Birthday">
                 </div>
                 <div class="col-12">
                     <label class="form-label fw-semibold">Description</label>
-                    <input type="text" name="description" class="form-control" value="{{ old('description', $template?->description ?? '') }}" placeholder="e.g. Sending messages to customers on their birthday">
+                    <input type="text" name="description" class="form-control" value="{{ old('description', optional($template)->description ?? '') }}" placeholder="e.g. Sending messages to customers on their birthday">
                 </div>
                 <div class="col-md-6">
                     <label class="form-label fw-semibold">Module Name</label>
                     <select name="module_name" class="form-select">
                         <option value="">— Select module —</option>
                         @foreach ($modules ?? [] as $mod)
-                            <option value="{{ $mod }}" {{ old('module_name', $template?->module_name ?? '') == $mod ? 'selected' : '' }}>{{ $mod }}</option>
+                            <option value="{{ $mod }}" {{ old('module_name', optional($template)->module_name ?? '') == $mod ? 'selected' : '' }}>{{ $mod }}</option>
                         @endforeach
                     </select>
                 </div>
                 <div class="col-12">
                     <label class="form-label fw-semibold">Body</label>
-                    <textarea name="body" class="form-control font-monospace" rows="12" placeholder="Email content (HTML or plain text). Use placeholders like @{{firstname}}, @{{lastname}}...">{{ old('body', $template?->body ?? '') }}</textarea>
+                    <textarea name="body" class="form-control font-monospace" rows="12" placeholder="Email content (HTML or plain text). Use placeholders like @{{firstname}}, @{{lastname}}...">{{ old('body', optional($template)->body ?? '') }}</textarea>
                     <p class="small text-muted mt-1">Use placeholders for personalization: &#123;&#123;firstname&#125;&#125;, &#123;&#123;lastname&#125;&#125;, &#123;&#123;email&#125;&#125;, etc.</p>
                 </div>
             </div>

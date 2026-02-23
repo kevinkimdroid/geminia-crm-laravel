@@ -56,7 +56,7 @@
                 </div>
                 <div class="col-md-6">
                     <label class="form-label fw-semibold">Expected Close Date</label>
-                    <input type="date" name="expected_close_date" class="form-control" value="{{ old('expected_close_date', $campaign->expected_close_date?->format('Y-m-d')) }}">
+                    <input type="date" name="expected_close_date" class="form-control" value="{{ old('expected_close_date', $campaign->expected_close_date ? $campaign->expected_close_date->format('Y-m-d') : '') }}">
                 </div>
             </div>
         </div>

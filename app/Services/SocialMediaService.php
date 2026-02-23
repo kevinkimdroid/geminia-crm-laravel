@@ -22,14 +22,25 @@ class SocialMediaService
 
         foreach ($accounts as $account) {
             try {
-                $stats = match ($account->platform) {
-                    'twitter' => $this->getTwitterMetrics($account),
-                    'youtube' => $this->getYouTubeMetrics($account),
-                    'tiktok' => $this->getTikTokMetrics($account),
-                    'facebook' => $this->getFacebookMetrics($account),
-                    'instagram' => $this->getInstagramMetrics($account),
-                    default => null,
-                };
+                switch ($account->platform) {
+                    case 'twitter':
+                        $stats = $this->getTwitterMetrics($account);
+                        break;
+                    case 'youtube':
+                        $stats = $this->getYouTubeMetrics($account);
+                        break;
+                    case 'tiktok':
+                        $stats = $this->getTikTokMetrics($account);
+                        break;
+                    case 'facebook':
+                        $stats = $this->getFacebookMetrics($account);
+                        break;
+                    case 'instagram':
+                        $stats = $this->getInstagramMetrics($account);
+                        break;
+                    default:
+                        $stats = null;
+                }
 
                 if ($stats) {
                     $totalAudience += $stats['audience'] ?? 0;
@@ -60,14 +71,25 @@ class SocialMediaService
 
         foreach ($accounts as $account) {
             try {
-                $data = match ($account->platform) {
-                    'twitter' => $this->getTwitterMetrics($account),
-                    'youtube' => $this->getYouTubeMetrics($account),
-                    'tiktok' => $this->getTikTokMetrics($account),
-                    'facebook' => $this->getFacebookMetrics($account),
-                    'instagram' => $this->getInstagramMetrics($account),
-                    default => null,
-                };
+                switch ($account->platform) {
+                    case 'twitter':
+                        $data = $this->getTwitterMetrics($account);
+                        break;
+                    case 'youtube':
+                        $data = $this->getYouTubeMetrics($account);
+                        break;
+                    case 'tiktok':
+                        $data = $this->getTikTokMetrics($account);
+                        break;
+                    case 'facebook':
+                        $data = $this->getFacebookMetrics($account);
+                        break;
+                    case 'instagram':
+                        $data = $this->getInstagramMetrics($account);
+                        break;
+                    default:
+                        $data = null;
+                }
 
                 if ($data) {
                     $stats[] = [
@@ -99,12 +121,19 @@ class SocialMediaService
 
         foreach ($accounts as $account) {
             try {
-                $platformPosts = match ($account->platform) {
-                    'twitter' => $this->getTwitterPosts($account),
-                    'youtube' => $this->getYouTubePosts($account),
-                    'tiktok' => $this->getTikTokPosts($account),
-                    default => [],
-                };
+                switch ($account->platform) {
+                    case 'twitter':
+                        $platformPosts = $this->getTwitterPosts($account);
+                        break;
+                    case 'youtube':
+                        $platformPosts = $this->getYouTubePosts($account);
+                        break;
+                    case 'tiktok':
+                        $platformPosts = $this->getTikTokPosts($account);
+                        break;
+                    default:
+                        $platformPosts = [];
+                }
                 $posts = array_merge($posts, $platformPosts);
             } catch (\Throwable $e) {
                 Log::warning("Social media posts failed for {$account->platform}: {$e->getMessage()}");

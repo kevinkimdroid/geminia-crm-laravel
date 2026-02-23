@@ -15,22 +15,27 @@ class SocialAuthController extends Controller
         $platform = strtolower($platform);
         $this->validatePlatform($platform);
 
-        return match ($platform) {
-            'facebook' => Socialite::driver('facebook')
-                ->scopes(['pages_show_list', 'pages_read_engagement', 'pages_manage_posts'])
-                ->redirect(),
-            'instagram' => Socialite::driver('facebook')
-                ->scopes(['instagram_basic', 'instagram_manage_insights', 'pages_show_list'])
-                ->redirectUrl(config('services.instagram.redirect'))
-                ->redirect(),
-            'twitter' => Socialite::driver('twitter-oauth-2')
-                ->redirect(),
-            'youtube' => Socialite::driver('google')
-                ->scopes(['https://www.googleapis.com/auth/youtube.readonly', 'https://www.googleapis.com/auth/youtube.upload'])
-                ->redirect(),
-            'tiktok' => $this->redirectTikTok(),
-            default => abort(404),
-        };
+        switch ($platform) {
+            case 'facebook':
+                return Socialite::driver('facebook')
+                    ->scopes(['pages_show_list', 'pages_read_engagement', 'pages_manage_posts'])
+                    ->redirect();
+            case 'instagram':
+                return Socialite::driver('facebook')
+                    ->scopes(['instagram_basic', 'instagram_manage_insights', 'pages_show_list'])
+                    ->redirectUrl(config('services.instagram.redirect'))
+                    ->redirect();
+            case 'twitter':
+                return Socialite::driver('twitter-oauth-2')->redirect();
+            case 'youtube':
+                return Socialite::driver('google')
+                    ->scopes(['https://www.googleapis.com/auth/youtube.readonly', 'https://www.googleapis.com/auth/youtube.upload'])
+                    ->redirect();
+            case 'tiktok':
+                return $this->redirectTikTok();
+            default:
+                abort(404);
+        }
     }
 
     public function callback(Request $request, string $platform): RedirectResponse
@@ -39,14 +44,25 @@ class SocialAuthController extends Controller
         $this->validatePlatform($platform);
 
         try {
-            $account = match ($platform) {
-                'facebook' => $this->handleFacebookCallback(),
-                'instagram' => $this->handleInstagramCallback(),
-                'twitter' => $this->handleTwitterCallback(),
-                'youtube' => $this->handleYouTubeCallback(),
-                'tiktok' => $this->handleTikTokCallback($request),
-                default => null,
-            };
+            switch ($platform) {
+                case 'facebook':
+                    $account = $this->handleFacebookCallback();
+                    break;
+                case 'instagram':
+                    $account = $this->handleInstagramCallback();
+                    break;
+                case 'twitter':
+                    $account = $this->handleTwitterCallback();
+                    break;
+                case 'youtube':
+                    $account = $this->handleYouTubeCallback();
+                    break;
+                case 'tiktok':
+                    $account = $this->handleTikTokCallback($request);
+                    break;
+                default:
+                    $account = null;
+            }
 
             if ($account) {
                 return redirect()->route('marketing.social-media')

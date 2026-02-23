@@ -498,11 +498,11 @@
                                 <td>{{ $call->user_name ?? '—' }}</td>
                                 <td>
                                     @if(($call->from_vtiger ?? false) && !empty($call->id))
-                                    <button type="button" class="btn btn-sm btn-outline-primary pbx-play-btn" data-recording-url="{{ route('tools.pbx-manager.recording.vtiger', $call->id) }}" data-call-info="{{ $call->customer_number ?? '' }} — {{ $call->start_time?->format('d/m H:i') ?? '' }}">
+                                    <button type="button" class="btn btn-sm btn-outline-primary pbx-play-btn" data-recording-url="{{ route('tools.pbx-manager.recording.vtiger', $call->id) }}" data-call-info="{{ $call->customer_number ?? '' }} — {{ optional($call->start_time)->format('d/m H:i') ?: '' }}">
                                         <i class="bi bi-play-circle me-1"></i>Listen
                                     </button>
                                     @elseif(!empty($call->recording_url))
-                                    <button type="button" class="btn btn-sm btn-outline-primary pbx-play-btn" data-recording-url="{{ route('tools.pbx-manager.recording', $call->id) }}" data-call-info="{{ $call->customer_number ?? '' }} — {{ $call->start_time?->format('d/m H:i') ?? '' }}">
+                                    <button type="button" class="btn btn-sm btn-outline-primary pbx-play-btn" data-recording-url="{{ route('tools.pbx-manager.recording', $call->id) }}" data-call-info="{{ $call->customer_number ?? '' }} — {{ optional($call->start_time)->format('d/m H:i') ?: '' }}">
                                         <i class="bi bi-play-circle me-1"></i>Listen
                                     </button>
                                     @else
@@ -510,7 +510,7 @@
                                     @endif
                                 </td>
                                 <td>{{ $call->duration_sec ?? 0 }}s</td>
-                                <td class="text-nowrap">{{ $call->start_time?->format('d M Y H:i') ?? '—' }}</td>
+                                <td class="text-nowrap">{{ optional($call->start_time)->format('d M Y H:i') ?: '—' }}</td>
                             </tr>
                             @empty
                             <tr>
@@ -737,7 +737,7 @@
                         <tbody>
                             @forelse($smsLogs ?? [] as $log)
                             <tr>
-                                <td class="text-nowrap">{{ $log->sent_at?->format('d M Y H:i') ?? $log->created_at?->format('d M Y H:i') ?? '—' }}</td>
+                                <td class="text-nowrap">{{ optional($log->sent_at)->format('d M Y H:i') ?: optional($log->created_at)->format('d M Y H:i') ?: '—' }}</td>
                                 <td class="font-monospace">{{ $log->phone ?? '—' }}</td>
                                 <td><span class="text-muted">{{ Str::limit($log->message ?? '', 80) }}</span></td>
                                 <td>
@@ -811,7 +811,7 @@
                     @foreach($followups as $fu)
                     <li class="py-2 border-bottom">
                         <p class="mb-0 small">{{ Str::limit($fu->note, 100) }}</p>
-                        <small class="text-muted">{{ $fu->followup_date ? $fu->followup_date->format('d M Y') : $fu->created_at?->format('d M Y') }} · {{ $fu->status }}</small>
+                        <small class="text-muted">{{ $fu->followup_date ? $fu->followup_date->format('d M Y') : optional($fu->created_at)->format('d M Y') }} · {{ $fu->status }}</small>
                     </li>
                     @endforeach
                 </ul>

@@ -13,9 +13,13 @@ use Illuminate\View\View;
 
 class LeadController extends Controller
 {
-    public function __construct(
-        private CrmService $crm
-    ) {}
+    /** @var CrmService */
+    protected $crm;
+
+    public function __construct(CrmService $crm)
+    {
+        $this->crm = $crm;
+    }
 
     public function index(Request $request): View
     {
@@ -113,7 +117,8 @@ class LeadController extends Controller
         }
     }
 
-    public function show(int $id): View|RedirectResponse
+    /** @return View|RedirectResponse */
+    public function show(int $id)
     {
         $lead = $this->crm->getLead($id);
         if (!$lead) {
@@ -122,7 +127,8 @@ class LeadController extends Controller
         return view('leads.show', ['lead' => $lead]);
     }
 
-    public function edit(int $id): View|RedirectResponse
+    /** @return View|RedirectResponse */
+    public function edit(int $id)
     {
         $lead = $this->crm->getLead($id);
         if (!$lead) {
