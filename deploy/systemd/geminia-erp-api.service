@@ -1,0 +1,17 @@
+[Unit]
+Description=Geminia ERP Clients API (Python Flask)
+After=network.target
+
+[Service]
+Type=simple
+User=nginx
+Group=nginx
+WorkingDirectory=/var/www/geminia-crm-laravel/erp-clients-api
+Environment="PATH=/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin"
+# Ensure port 5000 is used; set FLASK_RUN_PORT in .env if needed
+ExecStart=/usr/bin/python3 app.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

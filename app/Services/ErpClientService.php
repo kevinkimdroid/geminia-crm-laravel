@@ -498,7 +498,7 @@ class ErpClientService
         }
         $source = config('erp.clients_view_source', 'crm');
         if ($source === 'erp_http') {
-            $result = $this->getClientsFromHttpApi(1, 0, null, $timeoutSeconds);
+            $result = $this->getClientsFromHttpApi(1, 0, null, $timeoutSeconds, true);
             return $result['error'] ? null : (int) $result['total'];
         }
         if ($source === 'erp_sync') {
@@ -595,7 +595,7 @@ class ErpClientService
      * Get clients from ERP HTTP API (ERP_CLIENTS_HTTP_URL).
      * Fast: no Oracle, no cache; direct API fetch. Supports limit, offset, search.
      */
-    public function getClientsFromHttpApi(int $limit, int $offset, ?string $search = null, ?int $timeoutSeconds = null): array
+    public function getClientsFromHttpApi(int $limit, int $offset, ?string $search = null, ?int $timeoutSeconds = null, bool $countOnly = false): array
     {
         try {
             $url = config('erp.clients_http_url');
@@ -604,6 +604,9 @@ class ErpClientService
             }
 
             $params = ['limit' => min($limit, 100), 'offset' => $offset];
+            if ($countOnly) {
+                $params['count_only'] = '1';
+            }
             if ($search && trim($search) !== '') {
                 $params['search'] = trim($search);
             }

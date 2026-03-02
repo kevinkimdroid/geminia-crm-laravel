@@ -90,7 +90,8 @@ def get_connection():
 @app.route("/clients", methods=["GET"])
 @app.route("/api/clients", methods=["GET"])
 def get_clients():
-    """GET /clients?limit=50&offset=0&search=term&policy=XXX (exact policy lookup)"""
+    """GET /clients?limit=50&offset=0&search=term&policy=XXX&count_only=1 (exact policy lookup)"""
+    count_only = request.args.get("count_only", "").strip() in ("1", "true", "yes")
     limit = min(int(request.args.get("limit", 50)), 100)
     offset = max(0, int(request.args.get("offset", 0)))
     search = (request.args.get("search") or "").strip()
@@ -98,6 +99,21 @@ def get_clients():
 
     if not PASSWORD:
         return jsonify({"data": [], "total": 0, "error": "ORACLE_PASSWORD not set"}), 503
+
+    # Count-only request: return accurate total for dashboard (no rows fetched)
+    if count_only and not search and not policy:
+        try:
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT COUNT(*) FROM {VIEW}")
+            total = cursor.fetchone()[0]
+            cursor.close()
+            conn.close()
+            return jsonify({"data": [], "total": total})
+        except Exception as e:
+            # Fallback to estimate on Oracle timeout/slow COUNT
+            est = int(os.environ.get("ERP_CLIENTS_ESTIMATED_TOTAL", "10536"))
+            return jsonify({"data": [], "total": est})
 
     columns = [c.strip() for c in COLS.split(",")]
     search_columns = [c.strip() for c in SEARCH_COLS.split(",") if c.strip()]

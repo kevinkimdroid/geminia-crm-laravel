@@ -1,0 +1,16 @@
+[Unit]
+Description=Geminia CRM Queue Worker
+After=network.target mysql.service
+
+[Service]
+Type=simple
+User=nginx
+Group=nginx
+WorkingDirectory=/var/www/geminia-crm-laravel
+# Use php from PATH, or set full path: /opt/remi/php81/root/usr/bin/php
+ExecStart=/usr/bin/php artisan queue:work database --tries=3 --sleep=3
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
