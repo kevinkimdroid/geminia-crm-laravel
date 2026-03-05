@@ -66,7 +66,7 @@ class TicketAutoCreateService
                     continue;
                 }
 
-                $clientName = trim($row->life_assur ?? '') ?: trim(($row->pol_prepared_by ?? '') . ' ' . ($row->intermediary ?? '')) ?: "Policy {$policy}";
+                $clientName = trim($row->life_assur ?? $row->life_assured ?? '') ?: trim(($row->pol_prepared_by ?? '') . ' ' . ($row->intermediary ?? '')) ?: "Policy {$policy}";
                 $title = "Maturity reminder: {$clientName} — Policy {$policy} maturing " . ($maturity ? \Carbon\Carbon::parse($maturity)->format('d M Y') : 'soon');
                 $description = "Policy {$policy} is maturing " . ($maturity ? "on {$maturity}" : "within {$daysBefore} days") . ".\n\nRelated policy: {$policy}";
 
@@ -191,8 +191,8 @@ class TicketAutoCreateService
         $erpClient = [
             'policy_no' => $policy,
             'policy_number' => $policy,
-            'name' => trim($row->life_assur ?? '') ?: trim(($row->pol_prepared_by ?? '') . ' ' . ($row->intermediary ?? '')) ?: "Policy {$policy}",
-            'client_name' => trim($row->life_assur ?? '') ?: trim(($row->pol_prepared_by ?? '') . ' ' . ($row->intermediary ?? '')),
+            'name' => trim($row->life_assur ?? $row->life_assured ?? '') ?: trim(($row->pol_prepared_by ?? '') . ' ' . ($row->intermediary ?? '')) ?: "Policy {$policy}",
+            'client_name' => trim($row->life_assur ?? $row->life_assured ?? '') ?: trim(($row->pol_prepared_by ?? '') . ' ' . ($row->intermediary ?? '')),
             'pol_prepared_by' => $row->pol_prepared_by ?? null,
             'intermediary' => $row->intermediary ?? null,
             'phone_no' => $row->phone_no ?? $row->mobile ?? null,

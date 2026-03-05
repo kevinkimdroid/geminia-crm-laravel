@@ -83,13 +83,14 @@ class SyncErpClientsCommand extends Command
                 $arr = (array) $row;
                 $toInsert[] = [
                     'policy_number' => $arr['POLICY_NUMBER'] ?? $arr['policy_number'] ?? null,
+                    'life_assured' => $arr['LIFE_ASSURED'] ?? $arr['life_assured'] ?? null,
                     'product' => $arr['PRODUCT'] ?? $arr['product'] ?? null,
                     'pol_prepared_by' => $arr['POL_PREPARED_BY'] ?? $arr['pol_prepared_by'] ?? null,
                     'intermediary' => $arr['INTERMEDIARY'] ?? $arr['intermediary'] ?? null,
                     'status' => $arr['STATUS'] ?? $arr['status'] ?? null,
                     'kra_pin' => $arr['KRA_PIN'] ?? $arr['kra_pin'] ?? null,
                     'prp_dob' => $this->parseDate($arr['PRP_DOB'] ?? $arr['prp_dob'] ?? null),
-                    'maturity' => $this->parseDate($arr['MATURITY'] ?? $arr['maturity'] ?? null),
+                    'maturity' => $this->parseDate($arr['MATURITY'] ?? $arr['MATURITY_DATE'] ?? $arr['maturity'] ?? null),
                     'paid_mat_amt' => isset($arr['PAID_MAT_AMT']) ? (float) $arr['PAID_MAT_AMT'] : null,
                     'checkoff' => $arr['CHECKOFF'] ?? $arr['checkoff'] ?? null,
                     'effective_date' => $this->parseDate($arr['EFFECTIVE_DATE'] ?? $arr['effective_date'] ?? null),
