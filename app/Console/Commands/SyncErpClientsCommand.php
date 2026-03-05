@@ -78,12 +78,12 @@ class SyncErpClientsCommand extends Command
                 break;
             }
 
+            $hasLifeAssured = \Illuminate\Support\Facades\Schema::hasColumn('erp_clients_cache', 'life_assured');
             $toInsert = [];
             foreach ($rows as $row) {
                 $arr = (array) $row;
-                $toInsert[] = [
+                $record = [
                     'policy_number' => $arr['POLICY_NUMBER'] ?? $arr['policy_number'] ?? null,
-                    'life_assured' => $arr['LIFE_ASSURED'] ?? $arr['life_assured'] ?? null,
                     'product' => $arr['PRODUCT'] ?? $arr['product'] ?? null,
                     'pol_prepared_by' => $arr['POL_PREPARED_BY'] ?? $arr['pol_prepared_by'] ?? null,
                     'intermediary' => $arr['INTERMEDIARY'] ?? $arr['intermediary'] ?? null,
@@ -98,6 +98,10 @@ class SyncErpClientsCommand extends Command
                     'created_at' => $syncedAt,
                     'updated_at' => $syncedAt,
                 ];
+                if ($hasLifeAssured) {
+                    $record['life_assured'] = $arr['LIFE_ASSURED'] ?? $arr['life_assured'] ?? null;
+                }
+                $toInsert[] = $record;
             }
 
             DB::table('erp_clients_cache')->insert($toInsert);
@@ -124,6 +128,17 @@ class SyncErpClientsCommand extends Command
         }
         if ($value instanceof \DateTimeInterface) {
             return $value->format('Y-m-d');
+        }
+        $str = trim((string) $value);
+        foreach (['Y-m-d', 'd/m/Y', 'm/d/Y', 'd-m-Y'] as $fmt) {
+            try {
+                $parsed = \Carbon\Carbon::createFromFormat($fmt, $str);
+                if ($parsed instanceof \DateTimeInterface) {
+                    return $parsed->format('Y-m-d');
+                }
+            } catch (\Throwable $e) {
+                continue;
+            }
         }
         try {
             return \Carbon\Carbon::parse($value)->format('Y-m-d');

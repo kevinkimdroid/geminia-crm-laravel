@@ -765,6 +765,132 @@ class ErpClientService
     }
 
     /**
+     * Fetch product names for maturities filter dropdown (from ERP API /clients?products=1).
+     */
+    public function getProductsForMaturitiesFilter(): array
+    {
+        $url = rtrim((string) config('erp.clients_http_url'), '/');
+        if ($url === '') {
+            return [];
+        }
+        try {
+            $sep = str_contains($url, '?') ? '&' : '?';
+            $response = Http::timeout(15)->get($url . $sep . 'products=1');
+            if (! $response->successful()) {
+                return [];
+            }
+            $body = $response->json();
+            $products = $body['products'] ?? [];
+            return is_array($products) ? $products : [];
+        } catch (\Throwable $e) {
+            return [];
+        }
+    }
+
+    /**
+     * Fetch maturing policies from ERP HTTP API /clients/maturities endpoint.
+     * Falls back to filtering /clients when maturities endpoint returns 404.
+     */
+    public function getMaturingPoliciesFromHttpApi(string $from, string $to, ?string $product = null): array
+    {
+        $baseUrl = rtrim(config('erp.clients_http_url', ''), '/');
+        $maturitiesUrl = config('erp.maturities_http_url', '');
+        if (empty($maturitiesUrl)) {
+            if (empty($baseUrl)) {
+                return ['data' => [], 'error' => 'ERP_CLIENTS_HTTP_URL not set.'];
+            }
+            $base = preg_replace('#/clients.*$#', '', $baseUrl);
+            $maturitiesUrl = rtrim($base ?: $baseUrl, '/') . '/maturities';
+        }
+        $params = ['from' => $from, 'to' => $to];
+        if (! empty(trim($product ?? ''))) {
+            $params['product'] = trim($product);
+        }
+        try {
+            $response = Http::timeout(30)->get($maturitiesUrl, $params);
+            if (! $response->successful()) {
+                if ($response->status() === 404) {
+                    return $this->getMaturingPoliciesFromClientsFallback($from, $to, $product);
+                }
+                $body = $response->json();
+                $err = $body['error'] ?? 'Maturities API error: ' . $response->status();
+                Log::warning('ERP maturities API failed', ['url' => $maturitiesUrl, 'error' => $err]);
+                return ['data' => [], 'error' => $err];
+            }
+            $body = $response->json();
+            $rows = $body['data'] ?? [];
+            if (! is_array($rows)) {
+                $rows = [];
+            }
+            $data = collect($rows)->map(function ($row) {
+                $r = is_array($row) ? $row : (array) $row;
+                return (object) [
+                    'policy_number' => $r['policy_number'] ?? $r['policy_no'] ?? null,
+                    'maturity' => $r['maturity'] ?? $r['maturity_date'] ?? null,
+                    'life_assured' => $r['life_assured'] ?? $r['life_assur'] ?? null,
+                    'life_assur' => $r['life_assur'] ?? $r['life_assured'] ?? null,
+                    'product' => $r['product'] ?? null,
+                    'pol_prepared_by' => $r['pol_prepared_by'] ?? null,
+                    'intermediary' => $r['intermediary'] ?? null,
+                    'phone_no' => $r['phone_no'] ?? $r['mobile'] ?? null,
+                    'email_adr' => $r['email_adr'] ?? $r['email'] ?? null,
+                    ];
+            })->all();
+            return ['data' => $data, 'error' => null];
+        } catch (\Throwable $e) {
+            Log::warning('ERP maturities API request failed', ['error' => $e->getMessage()]);
+            return $this->getMaturingPoliciesFromClientsFallback($from, $to, $product);
+        }
+    }
+
+    /**
+     * Fallback: fetch from /clients in batches and filter by maturity date.
+     */
+    protected function getMaturingPoliciesFromClientsFallback(string $from, string $to, ?string $product): array
+    {
+        $maturing = [];
+        $fetched = 0;
+        $maxBatches = 100;
+        for ($offset = 0; $offset < $maxBatches * 100; $offset += 100) {
+            $result = $this->getClientsFromHttpApi(100, $offset, null, 15, false, 'individual');
+            if (! empty($result['error']) || empty($result['data'])) {
+                break;
+            }
+            $data = $result['data'] instanceof \Illuminate\Support\Collection ? $result['data']->all() : (array) $result['data'];
+            foreach ($data as $client) {
+                $client = is_array($client) ? (object) $client : $client;
+                $m = $client->maturity ?? $client->maturity_date ?? null;
+                if (! $m) {
+                    continue;
+                }
+                $mStr = is_object($m) && method_exists($m, 'format') ? $m->format('Y-m-d') : substr((string) $m, 0, 10);
+                if ($mStr && $mStr >= $from && $mStr <= $to) {
+                    $prod = trim($client->product ?? '');
+                    if ($product && trim($product) !== '' && $prod !== trim($product)) {
+                        continue;
+                    }
+                    $maturing[] = (object) [
+                        'policy_number' => $client->policy_no ?? $client->policy_number ?? null,
+                        'maturity' => $mStr,
+                        'life_assured' => $client->life_assured ?? $client->life_assur ?? null,
+                        'life_assur' => $client->life_assur ?? $client->life_assured ?? null,
+                        'product' => $prod,
+                        'pol_prepared_by' => $client->pol_prepared_by ?? null,
+                        'intermediary' => $client->intermediary ?? null,
+                        'phone_no' => $client->phone_no ?? $client->mobile ?? null,
+                        'email_adr' => $client->email_adr ?? $client->email ?? null,
+                    ];
+                }
+            }
+            $fetched += count($data);
+            if (count($data) < 100) {
+                break;
+            }
+        }
+        return ['data' => $maturing, 'error' => null];
+    }
+
+    /**
      * Get clients from ERP HTTP API (ERP_CLIENTS_HTTP_URL).
      * Fast: no Oracle, no cache; direct API fetch. Supports limit, offset, search.
      */

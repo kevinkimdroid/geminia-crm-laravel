@@ -593,6 +593,50 @@ def _do_find_policy():
         return jsonify({"policy": policy, "error": str(e)}), 500
 
 
+@app.route("/maturities", methods=["GET"])
+@app.route("/clients/maturities", methods=["GET"])
+@app.route("/api/clients/maturities", methods=["GET"])
+def get_maturities():
+    """
+    Fetch policies maturing between two dates. Optimized for maturities page.
+    GET /clients/maturities?from=2026-03-05&to=2026-06-03&product=EDUCATION ENDOWMENT POLICY
+    """
+    if not PASSWORD:
+        return jsonify({"data": [], "error": "ORACLE_PASSWORD not set"}), 503
+    date_from = (request.args.get("from") or "").strip()
+    date_to = (request.args.get("to") or "").strip()
+    product_filter = (request.args.get("product") or "").strip()
+    if not date_from or not date_to:
+        return jsonify({"data": [], "error": "Missing from or to (YYYY-MM-DD)"}), 400
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cols = "POLICY_NUMBER,LIFE_ASSURED,PRODUCT,MATURITY_DATE"
+        where_clause = """
+            WHERE MATURITY_DATE IS NOT NULL
+            AND TRUNC(MATURITY_DATE) >= TO_DATE(:df, 'YYYY-MM-DD')
+            AND TRUNC(MATURITY_DATE) <= TO_DATE(:dt, 'YYYY-MM-DD')
+        """
+        bind = {"df": date_from, "dt": date_to}
+        if product_filter:
+            where_clause += " AND TRIM(PRODUCT) = :product"
+            bind["product"] = product_filter
+        sql = f"""
+            SELECT {cols} FROM {INDIVIDUAL_VIEW}
+            {where_clause}
+            ORDER BY MATURITY_DATE, POLICY_NUMBER
+        """
+        cursor.execute(sql, bind)
+        rows = cursor.fetchall()
+        col_names = [d[0] for d in cursor.description] if cursor.description else cols.split(",")
+        data = [row_to_client(r[: len(col_names)], col_names) for r in rows]
+        cursor.close()
+        conn.close()
+        return jsonify({"data": data, "total": len(data)})
+    except Exception as e:
+        return jsonify({"data": [], "error": str(e)}), 500
+
+
 @app.route("/clients", methods=["GET"])
 @app.route("/api/clients", methods=["GET"])
 def get_clients():

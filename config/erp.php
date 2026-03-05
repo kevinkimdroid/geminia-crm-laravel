@@ -140,6 +140,8 @@ return [
 
     'clients_http_url' => env('ERP_CLIENTS_HTTP_URL', ''),
 
+    'maturities_http_url' => env('ERP_MATURITIES_HTTP_URL', ''),
+
     /*
     |--------------------------------------------------------------------------
     | Column mapping (ERP -> API response)
