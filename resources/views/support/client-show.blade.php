@@ -3,23 +3,30 @@
 @section('title', ($client->life_assur ?? $client->client_name ?? $client->name ?? 'Client') . ' — Client')
 
 @section('content')
-@php $clientPhone = $client->phone_no ?? $client->phoneNo ?? $client->mobile ?? $client->phone ?? $client->PHONE_NO ?? null; @endphp
+@php
+$clientPhone = $client->phone_no ?? $client->phoneNo ?? $client->mobile ?? $client->phone ?? $client->client_contact ?? $client->PHONE_NO ?? null;
+$clientName = $client->life_assur ?? $client->client_name ?? $client->name ?? $client->member_name ?? $client->mem_surname ?? 'Client';
+$clientProduct = $client->product ?? $client->prod_desc ?? '—';
+$clientPolicy = $client->policy_no ?? $policy ?? '—';
+@endphp
 <nav class="breadcrumb-nav mb-3">
     @if($fromServeClient ?? false)
-    <a href="{{ route('support.serve-client', ['search' => $client->policy_no ?? $policy]) }}" class="text-muted small text-decoration-none">Serve Client</a>
+    <a href="{{ route('support.serve-client', ['search' => $clientPolicy]) }}" class="text-muted small text-decoration-none">Serve Client</a>
     @else
     <a href="{{ route('support.customers') }}" class="text-muted small text-decoration-none">Clients</a>
     @endif
     <span class="text-muted mx-2">/</span>
-    <span class="text-dark small fw-semibold">{{ $client->policy_no ?? $policy }}</span>
+    <span class="text-dark small fw-semibold">{{ $clientPolicy }}</span>
 </nav>
 
 <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
     <div>
-        <h1 class="app-page-title mb-2">{{ $client->life_assur ?? $client->client_name ?? $client->name ?? 'Client' }}</h1>
+        <h1 class="app-page-title mb-2">{{ $clientName }}</h1>
         <div class="d-flex flex-wrap align-items-center gap-2">
+            @php $lifeSystem = $client->life_system ?? app(\App\Services\ErpClientService::class)->getLifeSystemFromProduct($clientProduct); @endphp
+            <span class="clients-system-badge clients-system-{{ $lifeSystem }}">{{ $lifeSystem === 'group' ? 'Group Life' : 'Individual Life' }}</span>
             <span class="client-status-badge client-status-{{ ($client->status ?? '') === 'A' ? 'active' : (($client->status ?? '') === 'FL' ? 'lapsed' : 'other') }}">{{ $client->status ?? '—' }}</span>
-            <span class="text-muted small font-monospace">{{ $client->policy_no ?? $policy }}</span>
+            <span class="text-muted small font-monospace">{{ $clientPolicy }}</span>
         </div>
     </div>
     <div class="d-flex gap-2">
@@ -27,14 +34,17 @@
         <a href="tel:{{ tel_href($clientPhone) }}" class="btn btn-sm btn-success">
             <i class="bi bi-telephone me-1"></i> Call
         </a>
+        <a href="{{ route('support.sms-notifier', $contact ? ['contact_id' => $contact->contactid] : ['phone' => $clientPhone]) }}" class="btn btn-sm btn-outline-primary">
+            <i class="bi bi-chat-dots me-1"></i> Send Text
+        </a>
         @endif
-        <a href="{{ route('support.clients.create-ticket', ['policy' => $client->policy_no ?? $policy]) }}" class="btn btn-sm btn-success">
+        <a href="{{ route('support.clients.create-ticket', ['policy' => $clientPolicy]) }}" class="btn btn-sm btn-success">
             <i class="bi bi-ticket-perforated me-1"></i> Create Ticket
         </a>
-        <a href="{{ route('support.serve-client', ['search' => $client->policy_no ?? $policy]) }}" class="btn btn-sm app-btn-primary">
+        <a href="{{ route('support.serve-client', ['search' => $clientPolicy]) }}" class="btn btn-sm app-btn-primary">
             <i class="bi bi-person-plus me-1"></i> Serve Client
         </a>
-        <a href="{{ ($fromServeClient ?? false) ? route('support.serve-client', ['search' => $client->policy_no ?? $policy]) : route('support.customers') }}" class="btn btn-sm btn-outline-secondary">
+        <a href="{{ ($fromServeClient ?? false) ? route('support.serve-client', ['search' => $clientPolicy]) : route('support.customers') }}" class="btn btn-sm btn-outline-secondary">
             <i class="bi bi-arrow-left me-1"></i> Back
         </a>
     </div>
@@ -55,15 +65,17 @@
                 <div class="col-md-6">
                     <dl class="client-detail-dl mb-0">
                         <dt>Life Assured (Client)</dt>
-                        <dd>{{ $client->life_assur ?? $client->client_name ?? $client->name ?? '—' }}</dd>
+                        <dd>{{ $clientName }}</dd>
                         <dt>Policy Number</dt>
-                        <dd class="font-monospace">{{ $client->policy_no ?? $policy ?? '—' }}</dd>
+                        <dd class="font-monospace">{{ $clientPolicy }}</dd>
                         <dt>Who Prepared Policy</dt>
-                        <dd>{{ $client->pol_prepared_by ?? '—' }}</dd>
+                        <dd>{{ $client->pol_prepared_by ?? $client->bra_manager ?? '—' }}</dd>
                         <dt>Intermediary (Agent)</dt>
-                        <dd>{{ $client->intermediary ?? '—' }}</dd>
+                        <dd>{{ $client->intermediary ?? $client->agn_name ?? '—' }}</dd>
                         <dt>Product</dt>
-                        <dd>{{ $client->product ?? '—' }}</dd>
+                        <dd>{{ $clientProduct }}</dd>
+                        <dt>System</dt>
+                        <dd><span class="clients-system-badge clients-system-{{ $lifeSystem ?? ($client->life_system ?? 'individual') }}">{{ ($lifeSystem ?? $client->life_system ?? 'individual') === 'group' ? 'Group Life' : 'Individual Life' }}</span></dd>
                         <dt>Policy Status</dt>
                         <dd><span class="client-status-badge client-status-{{ ($client->status ?? '') === 'A' ? 'active' : (($client->status ?? '') === 'FL' ? 'lapsed' : 'other') }}">{{ $client->status ?? '—' }}</span></dd>
                     </dl>
@@ -72,8 +84,8 @@
                     <dl class="client-detail-dl mb-0">
                         <dt>Date of Birth</dt>
                         <dd>{{ $client->prp_dob ?? $client->prpDob ?? '—' }}</dd>
-                        <dt>Effective Date</dt>
-                        <dd>{{ $client->effective_date ?? $client->effectiveDate ?? '—' }}</dd>
+                        <dt>Date Authorized / Effective Date</dt>
+                        <dd>{{ $client->effective_date ?? $client->effectiveDate ?? $client->authorization_date ?? '—' }}</dd>
                         <dt>Maturity Date</dt>
                         <dd>{{ $client->maturity ?? $client->maturity_date ?? $client->maturityDate ?? '—' }}</dd>
                         <dt>KRA PIN</dt>
@@ -81,14 +93,14 @@
                         <dt>ID Number</dt>
                         <dd class="font-monospace">{{ $client->id_no ?? $client->idNo ?? $client->ID_NO ?? '—' }}</dd>
                         <dt>Phone Number</dt>
-                        <dd>{{ $client->phone_no ?? $client->phoneNo ?? $client->mobile ?? $client->phone ?? $client->PHONE_NO ?? '—' }}</dd>
+                        <dd>{{ $clientPhone ?? '—' }}</dd>
                         <dt>Total Paid Amount</dt>
-                        <dd>{{ $client->bal ?? $client->paid_mat_amt ?? $client->paidMatAmt ?? '—' }}</dd>
+                        <dd>{{ $client->paid_mat_amt ?? $client->bal ?? $client->production_amt ?? $client->paidMatAmt ?? '—' }}</dd>
                         <dt>Checkoff</dt>
                         <dd>{{ $client->checkoff ?? '—' }}</dd>
-                        @if($client->email_adr ?? null)
+                        @if($client->email_adr ?? $client->client_email ?? $client->email ?? null)
                         <dt>Email</dt>
-                        <dd><a href="mailto:{{ $client->email_adr }}">{{ $client->email_adr }}</a></dd>
+                        <dd><a href="mailto:{{ $client->email_adr ?? $client->client_email ?? $client->email }}">{{ $client->email_adr ?? $client->client_email ?? $client->email }}</a></dd>
                         @endif
                     </dl>
                 </div>
@@ -133,11 +145,14 @@
                 <a href="tel:{{ tel_href($clientPhone) }}" class="btn btn-outline-primary">
                     <i class="bi bi-telephone me-2"></i>Call
                 </a>
+                <a href="{{ route('support.sms-notifier', $contact ? ['contact_id' => $contact->contactid] : ['phone' => $clientPhone]) }}" class="btn btn-outline-primary">
+                    <i class="bi bi-chat-dots me-2"></i>Send Text
+                </a>
                 @endif
-                <a href="{{ route('support.clients.create-ticket', ['policy' => $client->policy_no ?? $policy]) }}" class="btn btn-outline-success">
+                <a href="{{ route('support.clients.create-ticket', ['policy' => $clientPolicy]) }}" class="btn btn-outline-success">
                     <i class="bi bi-ticket-perforated me-2"></i>Create Ticket
                 </a>
-                <a href="{{ route('support.serve-client', ['search' => $client->policy_no ?? $policy]) }}" class="btn btn-outline-primary">
+                <a href="{{ route('support.serve-client', ['search' => $clientPolicy]) }}" class="btn btn-outline-primary">
                     <i class="bi bi-person-plus me-2"></i>Serve Client
                 </a>
                 @if($contact ?? null)
@@ -155,6 +170,9 @@
 .client-detail-dl dt:first-child { margin-top: 0; }
 .client-detail-dl dd { margin: 0; font-size: 0.95rem; }
 .client-status-badge { font-size: 0.75rem; font-weight: 600; padding: 0.25rem 0.6rem; border-radius: 6px; display: inline-block; }
+.clients-system-badge { display: inline-block; padding: 0.2rem 0.55rem; border-radius: 6px; font-size: 0.7rem; font-weight: 600; }
+.clients-system-badge.clients-system-group { background: #ccfbf1; color: #0f766e; }
+.clients-system-badge.clients-system-individual { background: #e0e7ff; color: #4338ca; }
 .client-status-active { background: #dcfce7; color: #166534; }
 .client-status-lapsed { background: #fee2e2; color: #991b1b; }
 .client-status-other { background: #f1f5f9; color: #475569; }

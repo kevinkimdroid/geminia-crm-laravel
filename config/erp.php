@@ -53,8 +53,30 @@ return [
     |   'erp_sync' = local cache (erp_clients_cache, populated by sync script/API)
     |   'erp_http' = fetch directly from ERP_CLIENTS_HTTP_URL (fast, no Oracle/cache)
     |
+    | When filtering by life system, separate views are used:
+    |   system=group      → ERP_CLIENTS_GROUP_VIEW (LMS_GROUP_CRM_VIEW)
+    |   system=individual → ERP_CLIENTS_INDIVIDUAL_VIEW (LMS_INDIVIDUAL_CRM_VIEW)
+    |   no filter         → clients_list_table (default)
+    |
     */
     'clients_view_source' => env('CLIENTS_VIEW_SOURCE', 'crm'),
+
+    'clients_group_view' => env('ERP_CLIENTS_GROUP_VIEW', 'LMS_GROUP_CRM_VIEW'),
+    'clients_individual_view' => env('ERP_CLIENTS_INDIVIDUAL_VIEW', 'LMS_INDIVIDUAL_CRM_VIEW'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Group Life vs Individual Life - Product Keywords
+    |--------------------------------------------------------------------------
+    |
+    | Keywords (case-insensitive) in PRODUCT to classify clients:
+    | - group_life: product contains any of these → "Group Life System"
+    | - individual_life: product contains any of these → "Individual Life System"
+    | If both match, group takes precedence. If none match, defaults to individual.
+    |
+    */
+    'group_life_keywords' => array_map('trim', explode(',', env('ERP_GROUP_LIFE_KEYWORDS', 'GROUP,GL,CREDIT LIFE'))),
+    'individual_life_keywords' => array_map('trim', explode(',', env('ERP_INDIVIDUAL_LIFE_KEYWORDS', 'INDIVIDUAL,IL,LIFE'))),
     'clients_list_table' => env('ERP_CLIENTS_LIST_TABLE', env('ERP_CLIENTS_TABLE', 'CLIENTS')),
     'clients_list_columns' => env('ERP_CLIENTS_LIST_COLUMNS', 'POLICY_NUMBER,PRODUCT,POL_PREPARED_BY,INTERMEDIARY,STATUS,KRA_PIN'),
     'clients_list_order' => env('ERP_CLIENTS_LIST_ORDER', 'PRODUCT'),

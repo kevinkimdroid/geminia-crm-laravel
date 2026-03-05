@@ -10,6 +10,61 @@ use Illuminate\Support\Facades\Log;
 class ErpClientService
 {
     /**
+     * Determine life system (group|individual) from product name.
+     *
+     * @return 'group'|'individual'
+     */
+    public function getLifeSystemFromProduct(?string $product): string
+    {
+        $product = (string) ($product ?? '');
+        $productUpper = strtoupper($product);
+        $groupKeywords = array_filter(config('erp.group_life_keywords', []));
+        $indKeywords = array_filter(config('erp.individual_life_keywords', []));
+        foreach ($groupKeywords as $kw) {
+            if ($kw !== '' && str_contains($productUpper, strtoupper($kw))) {
+                return 'group';
+            }
+        }
+        foreach ($indKeywords as $kw) {
+            if ($kw !== '' && str_contains($productUpper, strtoupper($kw))) {
+                return 'individual';
+            }
+        }
+        return 'individual'; // default
+    }
+
+    /**
+     * Apply life system filter (group/individual) to query.
+     *
+     * @param  \Illuminate\Database\Query\Builder  $query
+     */
+    protected function applyLifeSystemFilter($query, string $system, string $productColumn = 'product'): void
+    {
+        if ($system === 'group') {
+            $keywords = array_filter(config('erp.group_life_keywords', []));
+            if (empty($keywords)) {
+                $query->whereRaw("UPPER({$productColumn}) LIKE '%GROUP%'");
+            } else {
+                $query->where(function ($q) use ($keywords, $productColumn) {
+                    foreach ($keywords as $kw) {
+                        $like = '%' . strtoupper($kw) . '%';
+                        $q->orWhereRaw("UPPER({$productColumn}) LIKE ?", [$like]);
+                    }
+                });
+            }
+        } elseif ($system === 'individual') {
+            $groupKw = array_filter(config('erp.group_life_keywords', []));
+            if (! empty($groupKw)) {
+                foreach ($groupKw as $kw) {
+                    $query->whereRaw("UPPER({$productColumn}) NOT LIKE ?", ['%' . strtoupper($kw) . '%']);
+                }
+            } else {
+                $query->whereRaw("(UPPER({$productColumn}) LIKE '%INDIVIDUAL%' OR UPPER({$productColumn}) NOT LIKE '%GROUP%')");
+            }
+        }
+    }
+
+    /**
      * Fetch all clients from the ERP system (Oracle/PL-SQL).
      *
      * @param  int|null  $limit  Max records to return (null = no limit)
@@ -193,12 +248,26 @@ class ErpClientService
             return ['data' => $data, 'total' => $result['total'], 'error' => $result['error']];
         }
 
-        // Use HTTP API when erp_http
+        // Use HTTP API when erp_http - search BOTH group and individual (Group Life uses different view)
         if ($viewSource === 'erp_http') {
-            $result = $this->getClientsFromHttpApi($limit, 0, $term);
-            $data = $result['data']->map(fn ($obj) => (array) $obj)->map(fn ($r) => $this->mapClientObjectToSearchResult($r))->values()->all();
+            $groupResult = $this->getClientsFromHttpApi((int) ceil($limit / 2), 0, $term, null, false, 'group');
+            $indResult = $this->getClientsFromHttpApi((int) ceil($limit / 2), 0, $term, null, false, 'individual');
+            $groupData = $groupResult['data']->map(fn ($obj) => (array) $obj)->map(fn ($r) => $this->mapClientObjectToSearchResult($r))->values()->all();
+            $indData = $indResult['data']->map(fn ($obj) => (array) $obj)->map(fn ($r) => $this->mapClientObjectToSearchResult($r))->values()->all();
+            $seen = [];
+            $data = [];
+            foreach (array_merge($groupData, $indData) as $r) {
+                $key = trim((string) ($r['policy_no'] ?? $r['policy_number'] ?? json_encode($r)));
+                if ($key !== '' && ! isset($seen[$key])) {
+                    $seen[$key] = true;
+                    $data[] = $r;
+                }
+            }
+            $data = array_slice($data, 0, $limit);
+            $error = $groupResult['error'] ?: $indResult['error'];
+            $total = min(($groupResult['total'] ?? 0) + ($indResult['total'] ?? 0), $limit * 2);
 
-            return ['data' => $data, 'total' => $result['total'], 'error' => $result['error']];
+            return ['data' => $data, 'total' => count($data) ?: $total, 'error' => $error];
         }
 
         try {
@@ -234,15 +303,32 @@ class ErpClientService
         }
     }
 
-    /** Map cached/HTTP client object to search result format (policy_no, name, maturity, etc.) */
+    /** Map cached/HTTP client object to search result format. Reject receipt format (1/HO/xxx); use policy (GEMPPP0070). */
     protected function mapClientObjectToSearchResult(array $row): array
     {
-        $get = fn (array $keys) => collect($keys)->map(fn ($k) => $row[$k] ?? null)->first(fn ($v) => $v !== null);
-        $policyNo = (string) ($get(['policy_no', 'policy_number', 'POLICY_NUMBER']) ?? '');
-        $lifeAssured = (string) ($get(['life_assur', 'life_assured', 'lifeAssur', 'lifeAssured']) ?? '');
+        $get = fn (array $keys) => collect($keys)->map(fn ($k) => $row[$k] ?? null)->first(fn ($v) => $v !== null && $v !== '');
+        $policyKeys = ['policy_no', 'policy_number', 'POLICY_NUMBER', 'ipol_policy_no', 'pol_policy_no', 'contract_no', 'scheme_no'];
+        $policyNo = '';
+        foreach ($policyKeys as $k) {
+            $v = $row[$k] ?? null;
+            $str = trim((string) ($v ?? ''));
+            if ($str !== '' && ! $this->isReceiptFormat($str) && ! $this->isPinFormat($str)) {
+                $policyNo = $str;
+                break;
+            }
+        }
+        if ($policyNo === '') {
+            $v = trim((string) ($get($policyKeys) ?? ''));
+            $policyNo = ($v !== '' && ! $this->isPinFormat($v)) ? $v : '';
+        }
+        $receipt = $get(['receipt_number', 'grct_receipt_no']);
+        if ($receipt && $policyNo === trim((string) $receipt)) {
+            $policyNo = '';
+        }
+        $lifeAssured = (string) ($get(['life_assur', 'life_assured', 'lifeAssur', 'lifeAssured', 'client_name', 'clientName', 'member_name', 'mem_surname']) ?? '');
         $name = trim($lifeAssured) ?: trim(($row['pol_prepared_by'] ?? '') . ' ' . ($row['intermediary'] ?? '')) ?: trim(($row['firstname'] ?? '') . ' ' . ($row['lastname'] ?? ''));
-        $email = $get(['email', 'email_adr', 'emailAdr']);
-        $mobile = $get(['mobile', 'phone', 'phone_no', 'phoneNo']);
+        $email = $get(['email', 'email_adr', 'emailAdr', 'client_email', 'mem_email']);
+        $mobile = $get(['mobile', 'phone', 'phone_no', 'phoneNo', 'client_contact', 'mem_teleph']);
 
         return [
             'policy_no' => $policyNo,
@@ -253,15 +339,16 @@ class ErpClientService
             'life_assured' => $lifeAssured,
             'pol_prepared_by' => $row['pol_prepared_by'] ?? '',
             'intermediary' => $row['intermediary'] ?? '',
-            'product' => $row['product'] ?? '',
+            'product' => $this->resolveProductExcludingAgent($row),
             'status' => $row['status'] ?? '',
             'kra_pin' => $get(['kra_pin', 'kraPin']) ?? '',
             'id_no' => $get(['id_no', 'idNo', 'ID_NO']),
             'phone_no' => $get(['phone_no', 'phoneNo', 'phone', 'mobile']),
             'prp_dob' => $get(['prp_dob', 'prpDob', 'PRP_DOB']),
+            'scheme_name' => $get(['scheme_name', 'schemeName', 'SCHEME_NAME']) ?? '',
             'maturity' => $get(['maturity', 'maturity_date', 'maturityDate', 'MATURITY_DATE']),
             'effective_date' => $get(['effective_date', 'effectiveDate', 'EFFECTIVE_DATE']),
-            'paid_mat_amt' => $get(['bal', 'BAL', 'paid_mat_amt', 'paidMatAmt', 'PAID_MAT_AMT']),
+            'paid_mat_amt' => $get(['bal', 'BAL', 'paid_mat_amt', 'paidMatAmt', 'PAID_MAT_AMT', 'production_amt']),
             'bal' => $get(['bal', 'BAL']),
             'checkoff' => $get(['checkoff', 'CHECKOFF']),
             'email_adr' => $email,
@@ -285,7 +372,8 @@ class ErpClientService
             return ['data' => [], 'total' => 0, 'error' => 'ERP integration is disabled (ERP_ENABLED=false).'];
         }
 
-        $policyNo = $contact->policy_number ?? $contact->cf_860 ?? $contact->cf_856 ?? $contact->cf_852 ?? $contact->cf_872 ?? null;
+        // cf_852 = KRA PIN; use only policy fields (cf_860, cf_856, cf_872)
+        $policyNo = $contact->policy_number ?? $contact->cf_860 ?? $contact->cf_856 ?? $contact->cf_872 ?? null;
         $name = trim(($contact->firstname ?? '') . ' ' . ($contact->lastname ?? ''));
 
         // Use cache when erp_sync – same clients used app-wide
@@ -413,38 +501,86 @@ class ErpClientService
                 }
                 $url = rtrim($url, '/');
                 $sep = (strpos($url, '?') !== false) ? '&' : '?';
-                $response = \Illuminate\Support\Facades\Http::timeout(10)->get($url . $sep . 'policy=' . urlencode($policyNumber) . '&limit=1');
-                if (! $response->successful()) {
+                $term = trim($policyNumber);
+                if ($term === '') {
                     return null;
                 }
-                $body = $response->json();
-                $rows = $body['data'] ?? $body['clients'] ?? [];
-                $row = is_array($rows) && isset($rows[0]) ? $rows[0] : null;
-                if (! $row) {
-                    return null;
-                }
-
-                $row = is_array($row) ? $row : (array) $row;
-                $mapped = $this->mapClientObjectToSearchResult($row);
-                $returned = trim((string) ($mapped['policy_no'] ?? $mapped['policy_number'] ?? ''));
-
-                // Reject wrong client - API may return first row when filter fails
-                if ($returned !== '' && $returned !== trim($policyNumber)) {
-                    return null;
-                }
-
-                // Merge: keep all API keys, overlay mapped values (never overwrite API data with null)
-                $merged = $row;
-                foreach ($mapped as $k => $v) {
-                    if ($v !== null && $v !== '') {
-                        $merged[$k] = $v;
+                $systemsToTry = ['group', 'individual', null];
+                // First try exact policy= match, then try search= (LIKE %term%) if no results
+                foreach (['policy', 'search'] as $matchMode) {
+                    foreach ($systemsToTry as $system) {
+                        $params = ($matchMode === 'policy' ? 'policy=' : 'search=') . urlencode($term) . '&limit=5';
+                        if ($system) {
+                            $params .= '&system=' . $system;
+                        }
+                        $response = \Illuminate\Support\Facades\Http::timeout(10)->get($url . $sep . $params);
+                        if (! $response->successful()) {
+                            continue;
+                        }
+                        $body = $response->json();
+                        $rows = $body['data'] ?? $body['clients'] ?? [];
+                        if (! is_array($rows) || empty($rows)) {
+                            continue;
+                        }
+                        // Find row where policy matches (or first row when we used search=)
+                        $row = null;
+                        foreach ($rows as $r) {
+                            $r = is_array($r) ? $r : (array) $r;
+                            $mapped = $this->mapClientObjectToSearchResult($r);
+                            $returnedPolicy = trim((string) ($mapped['policy_no'] ?? $mapped['policy_number'] ?? $r['ipol_policy_no'] ?? $r['pol_policy_no'] ?? $r['policy_number'] ?? ''));
+                            if ($returnedPolicy === $term || ($returnedPolicy === '' && $system === 'group' && $matchMode === 'policy')) {
+                                $row = $r;
+                                break;
+                            }
+                            if ($matchMode === 'search' && (str_contains($returnedPolicy, $term) || str_contains($term, $returnedPolicy))) {
+                                $row = $r;
+                                break;
+                            }
+                        }
+                        if (! $row && $matchMode === 'search' && ! empty($rows)) {
+                            $row = is_array($rows[0]) ? $rows[0] : (array) $rows[0];
+                        }
+                        if (! $row) {
+                            continue;
+                        }
+                        $row = is_array($row) ? $row : (array) $row;
+                        $mapped = $this->mapClientObjectToSearchResult($row);
+                        // Merge: keep all API keys, overlay mapped values. Build complete client object for details view.
+                        $merged = $row;
+                        $merged['life_system'] = $system ?: $this->getLifeSystemFromProduct($merged['product'] ?? null);
+                        foreach ($mapped as $k => $v) {
+                            if ($v !== null && $v !== '') {
+                                $merged[$k] = $v;
+                            }
+                        }
+                        $merged['policy_no'] = $term;
+                        $merged['policy_number'] = $term;
+                        if (empty($merged['maturity']) && ! empty($merged['maturity_date'])) {
+                            $merged['maturity'] = $merged['maturity_date'];
+                        }
+                        if (empty($merged['product']) && ! empty($merged['prod_desc'])) {
+                            $merged['product'] = $merged['prod_desc'];
+                        }
+                        if (! empty($merged['intermediary']) && ! empty($merged['product']) && trim((string) $merged['product']) === trim((string) $merged['intermediary'])) {
+                            $merged['product'] = $merged['prod_desc'] ?? '';
+                        }
+                        if (empty($merged['paid_mat_amt']) && ! empty($merged['production_amt'])) {
+                            $merged['paid_mat_amt'] = $merged['production_amt'];
+                        }
+                        if (empty($merged['email_adr']) && ! empty($merged['client_email'])) {
+                            $merged['email_adr'] = $merged['client_email'];
+                        }
+                        if (empty($merged['phone_no']) && ! empty($merged['client_contact'])) {
+                            $merged['phone_no'] = $merged['client_contact'];
+                            $merged['mobile'] = $merged['client_contact'];
+                        }
+                        if (empty($merged['life_assur']) && ! empty($merged['client_name'])) {
+                            $merged['life_assur'] = $merged['client_name'];
+                        }
+                        return $merged;
                     }
                 }
-                // Ensure maturity is set from maturity_date when API uses that key
-                if (empty($merged['maturity']) && ! empty($merged['maturity_date'])) {
-                    $merged['maturity'] = $merged['maturity_date'];
-                }
-                return $merged;
+                return null;
             }
 
             if (config('erp.clients_view_source') === 'erp_sync') {
@@ -452,8 +588,9 @@ class ErpClientService
                 if (!$row) {
                     return null;
                 }
-
-                return $this->mapClientObjectToSearchResult((array) $row);
+                $mapped = $this->mapClientObjectToSearchResult((array) $row);
+                $mapped['life_system'] = $this->getLifeSystemFromProduct($mapped['product'] ?? null);
+                return $mapped;
             }
 
             $source = config('erp.clients_source', 'table');
@@ -479,8 +616,9 @@ class ErpClientService
             if (!$row) {
                 return null;
             }
-
-            return $this->mapRow((array) $row);
+            $mapped = $this->mapRow((array) $row);
+            $mapped['life_system'] = $this->getLifeSystemFromProduct($mapped['product'] ?? ($row->PRODUCT ?? null));
+            return $mapped;
         } catch (\Throwable $e) {
             Log::error('ERP policy details failed', ['message' => $e->getMessage()]);
 
@@ -509,12 +647,29 @@ class ErpClientService
     }
 
     /**
+     * Resolve which table/view to use for clients list based on life system filter.
+     *
+     * @return string Schema-qualified table or view name
+     */
+    protected function resolveClientsListTable(?string $system): string
+    {
+        $default = config('erp.clients_list_table', config('erp.clients_table', 'CLIENTS'));
+        if ($system === 'group') {
+            return config('erp.clients_group_view', 'LMS_GROUP_CRM_VIEW');
+        }
+        if ($system === 'individual') {
+            return config('erp.clients_individual_view', 'LMS_INDIVIDUAL_CRM_VIEW');
+        }
+        return $default;
+    }
+
+    /**
      * Get clients for Support > Customers list.
      * Source: erp = live Oracle, erp_sync = cached table.
      *
      * @return array{data: \Illuminate\Support\Collection, total: int, error: string|null}
      */
-    public function getClientsForListView(int $limit, int $offset, ?string $search = null): array
+    public function getClientsForListView(int $limit, int $offset, ?string $search = null, ?string $system = null): array
     {
         if (! config('erp.enabled', true)) {
             return ['data' => collect(), 'total' => 0, 'error' => null];
@@ -522,10 +677,27 @@ class ErpClientService
 
         $source = config('erp.clients_view_source', 'crm');
         if ($source === 'erp_sync') {
-            return $this->getClientsFromCache($limit, $offset, $search);
+            return $this->getClientsFromCache($limit, $offset, $search, $system);
         }
         if ($source === 'erp_http') {
-            return $this->getClientsFromHttpApi($limit, $offset, $search);
+            $result = $this->getClientsFromHttpApi($limit, $offset, $search, null, false, $system);
+            // Group Life: when search returns 0, try Individual view (policy may be in either view)
+            if (
+                $system === 'group'
+                && $result['data']->isEmpty()
+                && $search && strlen(trim($search)) >= 2
+            ) {
+                $indResult = $this->getClientsFromHttpApi($limit, 0, $search, null, false, 'individual');
+                if ($indResult['data']->isNotEmpty()) {
+                    return [
+                        'data' => $indResult['data'],
+                        'total' => $indResult['total'],
+                        'error' => $indResult['error'] ?: null,
+                        '_fallback_individual' => true,
+                    ];
+                }
+            }
+            return $result;
         }
 
         $attempts = 0;
@@ -533,7 +705,7 @@ class ErpClientService
 
         while (true) {
             try {
-                $table = config('erp.clients_list_table', config('erp.clients_table', 'CLIENTS'));
+                $table = $this->resolveClientsListTable($system);
                 $columns = config('erp.clients_list_columns', 'POLICY_NUMBER,PRODUCT,POL_PREPARED_BY,INTERMEDIARY,STATUS,KRA_PIN,PRP_DOB,MATURITY');
                 $orderCol = config('erp.clients_list_order', 'PRODUCT');
                 $searchCols = array_filter(array_map('trim', explode(',', config('erp.clients_list_search_columns', 'POLICY_NUMBER,POL_PREPARED_BY,INTERMEDIARY,KRA_PIN'))));
@@ -555,6 +727,7 @@ class ErpClientService
                         }
                     });
                 }
+                // When system=group/individual we use dedicated views (LMS_GROUP_CRM_VIEW / LMS_INDIVIDUAL_CRM_VIEW) - no product filter needed
 
                 // Fetch only 100 rows - skip COUNT(*) which drops connection on large views
                 $fetchLimit = min($limit, 100);
@@ -595,7 +768,7 @@ class ErpClientService
      * Get clients from ERP HTTP API (ERP_CLIENTS_HTTP_URL).
      * Fast: no Oracle, no cache; direct API fetch. Supports limit, offset, search.
      */
-    public function getClientsFromHttpApi(int $limit, int $offset, ?string $search = null, ?int $timeoutSeconds = null, bool $countOnly = false): array
+    public function getClientsFromHttpApi(int $limit, int $offset, ?string $search = null, ?int $timeoutSeconds = null, bool $countOnly = false, ?string $system = null): array
     {
         try {
             $url = config('erp.clients_http_url');
@@ -607,8 +780,16 @@ class ErpClientService
             if ($countOnly) {
                 $params['count_only'] = '1';
             }
-            if ($search && trim($search) !== '') {
-                $params['search'] = trim($search);
+            $searchTrimmed = $search ? trim($search) : '';
+            if ($searchTrimmed !== '') {
+                $params['search'] = $searchTrimmed;
+                // Group Life: when search looks like a policy number, also pass policy= for targeted lookup
+                if ($system === 'group' && ! $this->isReceiptFormat($searchTrimmed) && preg_match('/^[A-Za-z0-9\-]+$/', $searchTrimmed)) {
+                    $params['policy'] = $searchTrimmed;
+                }
+            }
+            if ($system && in_array($system, ['group', 'individual'])) {
+                $params['system'] = $system;
             }
 
             $timeout = $timeoutSeconds ?? (($search && trim($search) !== '') ? 30 : 15);
@@ -628,7 +809,7 @@ class ErpClientService
             }
 
             $total = (int) ($body['total'] ?? $body['count'] ?? count($rows) + $offset);
-            $data = collect($rows)->map(fn ($row) => $this->mapHttpRowToClientObject(is_array($row) ? $row : (array) $row));
+            $data = collect($rows)->map(fn ($row) => $this->mapHttpRowToClientObject(is_array($row) ? $row : (array) $row, $system));
 
             return ['data' => $data, 'total' => $total, 'error' => null];
         } catch (\Throwable $e) {
@@ -639,29 +820,90 @@ class ErpClientService
     }
 
     /**
-     * Map HTTP API row to client object (supports snake_case or camelCase keys).
+     * Product from prod_desc/product. Never return agent/intermediary as product.
      */
-    protected function mapHttpRowToClientObject(array $row): object
+    /** Product from prod_desc (PROD_DESC column in view). */
+    protected function resolveProductExcludingAgent(array $row): string
     {
-        $get = fn ($keys) => $row[$keys[0]] ?? $row[$keys[1] ?? ''] ?? $row[$keys[2] ?? ''] ?? $row[$keys[3] ?? ''] ?? null;
-        $policyNo = trim((string) ($get(['policy_number', 'policyNumber', 'POLICY_NUMBER', 'policy_no']) ?? ''));
-        $lifeAssur = $get(['life_assur', 'life_assured', 'lifeAssur', 'lifeAssured']) ?? '';
-        $polPreparedBy = $get(['pol_prepared_by', 'polPreparedBy']) ?? '';
-        $product = $get(['product']) ?? null;
-        $intermediary = $get(['intermediary']) ?? '';
-        $status = $get(['status']) ?? null;
+        return trim((string) ($row['prod_desc'] ?? $row['product'] ?? $row['prod_sht_desc'] ?? $row['scheme_name'] ?? ''));
+    }
+
+    /**
+     * True if value looks like receipt (1/HO/100024), not policy (GEMPPP0070).
+     */
+    protected function isReceiptFormat(?string $val): bool
+    {
+        if ($val === null || $val === '') {
+            return false;
+        }
+        return (bool) preg_match('/^\d+\/[A-Za-z]+\/\d+$/', trim((string) $val));
+    }
+
+    /** KRA PIN format: letter + 9 digits + letter (e.g. A006533554X). Do not use as policy. */
+    protected function isPinFormat(?string $val): bool
+    {
+        if ($val === null || trim((string) $val) === '') {
+            return false;
+        }
+        return (bool) preg_match('/^[A-Z]\d{9}[A-Z]$/i', trim((string) $val));
+    }
+
+    /**
+     * Map HTTP API row to client object (supports snake_case or camelCase keys).
+     * When $system=group|individual, force life_system since we queried that view.
+     * For Group: policy = IPOL_POLICY_NO (reject receipt format); product = PROD_DESC only.
+     */
+    protected function mapHttpRowToClientObject(array $row, ?string $system = null): object
+    {
+        $get = fn ($keys) => collect($keys)->map(fn ($k) => $row[$k] ?? null)->first(fn ($v) => $v !== null && $v !== '');
+        $policyKeys = ['policy_number', 'policyNumber', 'POLICY_NUMBER', 'policy_no', 'ipol_policy_no', 'pol_policy_no', 'contract_no', 'scheme_no'];
+        $policyNo = '';
+        foreach ($policyKeys as $k) {
+            $v = $row[$k] ?? null;
+            $str = trim((string) ($v ?? ''));
+            if ($str !== '' && ! $this->isReceiptFormat($str) && ! $this->isPinFormat($str)) {
+                $policyNo = $str;
+                break;
+            }
+        }
+        if ($policyNo === '') {
+            foreach ($policyKeys as $k) {
+                $v = $row[$k] ?? null;
+                $str = trim((string) ($v ?? ''));
+                if ($str !== '' && ! $this->isPinFormat($str)) {
+                    $policyNo = $str;
+                    break;
+                }
+            }
+        }
+        $receipt = $get(['receipt_number', 'grct_receipt_no']);
+        if ($receipt && $policyNo === trim((string) $receipt)) {
+            $policyNo = '';
+        }
+        $lifeAssur = $get(['life_assur', 'life_assured', 'lifeAssur', 'lifeAssured', 'mem_surname', 'member_name', 'memberName', 'client_name', 'clientName']) ?? '';
+        $polPreparedBy = $get(['pol_prepared_by', 'polPreparedBy', 'bra_manager', 'unit_manar']) ?? '';
+        $intermediary = $get(['intermediary', 'intermediary_name', 'agency', 'agn_name', 'agnName']) ?? '';
+        $productKeys = $system === 'group'
+            ? ['prod_desc', 'product', 'prod_sht_desc', 'scheme_name', 'schemeName']
+            : ['product', 'prod_desc', 'scheme_name', 'schemeName', 'prod_sht_desc'];
+        $product = $get($productKeys) ?? null;
         $kraPin = $get(['kra_pin', 'kraPin']) ?? '';
         $prpDob = $get(['prp_dob', 'prpDob']) ?? null;
         $maturity = $get(['maturity', 'maturity_date', 'maturityDate']) ?? null;
-        $effectiveDate = $get(['effective_date', 'effectiveDate']) ?? null;
-        $paidMatAmt = $get(['bal', 'BAL', 'paid_mat_amt', 'paidMatAmt']) ?? null;
+        $effectiveDate = $get(['effective_date', 'effectiveDate', 'authorization_date']) ?? null;
+        $paidMatAmt = $get(['bal', 'BAL', 'paid_mat_amt', 'paidMatAmt', 'production_amt']) ?? null;
         $checkoff = $get(['checkoff']) ?? null;
-        $emailAdr = $get(['email_adr', 'emailAdr']) ?? null;
+        $emailAdr = $get(['email_adr', 'emailAdr', 'client_email', 'mem_email']) ?? null;
         $idNo = $get(['id_no', 'idNo', 'ID_NO']) ?? null;
-        $phoneNo = $get(['phone_no', 'phoneNo', 'phone', 'mobile']) ?? null;
+        $phoneNo = $get(['phone_no', 'phoneNo', 'phone', 'mobile', 'client_contact', 'mem_teleph']) ?? null;
+        $status = $get(['status', 'STATUS']) ?? '';
 
         $clientName = trim($lifeAssur) ?: trim("{$polPreparedBy} {$intermediary}");
         $parts = explode(' ', $clientName, 2);
+
+        $lifeSystem = $system === 'group' || $system === 'individual'
+            ? $system
+            : $this->getLifeSystemFromProduct($product);
 
         return (object) [
             'contactid' => $policyNo ?: ('erp-' . md5(json_encode($row))),
@@ -674,6 +916,7 @@ class ErpClientService
             'pol_prepared_by' => $polPreparedBy,
             'intermediary' => $intermediary,
             'product' => $product,
+            'life_system' => $lifeSystem,
             'status' => $status,
             'kra_pin' => $kraPin,
             'prp_dob' => $prpDob,
@@ -695,7 +938,7 @@ class ErpClientService
      * Get clients from local cache (erp_clients_cache).
      * Used when CLIENTS_VIEW_SOURCE=erp_sync to avoid direct Oracle connection.
      */
-    public function getClientsFromCache(int $limit, int $offset, ?string $search = null): array
+    public function getClientsFromCache(int $limit, int $offset, ?string $search = null, ?string $system = null): array
     {
         try {
             $query = DB::connection(config('database.default'))->table('erp_clients_cache');
@@ -708,6 +951,9 @@ class ErpClientService
                         $q->orWhere($col, 'like', $term);
                     }
                 });
+            }
+            if ($system === 'group' || $system === 'individual') {
+                $this->applyLifeSystemFilter($query, $system, 'product');
             }
 
             // Cache total count when not searching (avoids repeated COUNT on large table)
@@ -751,6 +997,7 @@ class ErpClientService
             'product' => $row['product'] ?? null,
             'pol_prepared_by' => $row['pol_prepared_by'] ?? null,
             'intermediary' => $row['intermediary'] ?? null,
+            'life_system' => $this->getLifeSystemFromProduct($row['product'] ?? null),
             'status' => $row['status'] ?? null,
             'kra_pin' => $row['kra_pin'] ?? null,
             'prp_dob' => $row['prp_dob'] ?? null,
@@ -791,6 +1038,7 @@ class ErpClientService
             'owner_username' => null,
             'policy_no' => $policyNo,
             'product' => $mapped['product'] ?? ($row['PRODUCT'] ?? null),
+            'life_system' => $this->getLifeSystemFromProduct($mapped['product'] ?? $row['PRODUCT'] ?? null),
             '_erp_source' => true,
         ];
     }

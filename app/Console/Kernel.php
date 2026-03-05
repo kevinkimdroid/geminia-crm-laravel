@@ -12,7 +12,11 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule): void
     {
-        // $schedule->command('inspire')->hourly();
+        $schedule->command('tickets:create-maturity-reminders')->dailyAt('08:00');
+
+        if (filter_var(env('MAIL_AUTO_FETCH_ENABLED', true), FILTER_VALIDATE_BOOLEAN)) {
+            $schedule->command('mail:fetch')->everyFiveMinutes();
+        }
     }
 
     /**

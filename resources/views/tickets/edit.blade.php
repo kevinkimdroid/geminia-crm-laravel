@@ -62,6 +62,7 @@
                         @if(($canCloseTickets ?? true) || ($ticket->status ?? '') === 'Closed')
                         <option value="Closed" {{ old('status', $ticket->status) == 'Closed' ? 'selected' : '' }}>Closed</option>
                         @endif
+                        <option value="Inactive" {{ old('status', $ticket->status) == 'Inactive' ? 'selected' : '' }}>Inactive</option>
                     </select>
                     @if(!($canCloseTickets ?? true) && ($ticket->status ?? '') === 'Closed')
                     <input type="hidden" name="status" value="Closed">
@@ -87,15 +88,6 @@
                         <option value="Low" {{ old('priority', $ticket->priority) == 'Low' ? 'selected' : '' }}>Low</option>
                         <option value="Normal" {{ old('priority', $ticket->priority) == 'Normal' ? 'selected' : '' }}>Normal</option>
                         <option value="High" {{ old('priority', $ticket->priority) == 'High' ? 'selected' : '' }}>High</option>
-                    </select>
-                </div>
-                <div class="col-md-6">
-                    <label class="form-label fw-semibold">Product Name</label>
-                    <select name="product_id" id="productSelect" class="form-select">
-                        <option value="">Type to search</option>
-                        @foreach ($products ?? [] as $p)
-                        <option value="{{ $p->productid }}" {{ old('product_id', $ticket->product_id) == $p->productid ? 'selected' : '' }}>{{ $p->productname ?? 'Product #' . $p->productid }}</option>
-                        @endforeach
                     </select>
                 </div>
                 <div class="col-md-6">
@@ -129,9 +121,22 @@
                 <div class="col-md-6">
                     <label class="form-label fw-semibold">Product Line / Account</label>
                     <select name="organization_id" id="organizationSelect" class="form-select">
-                        <option value="">Select an Option</option>
-                        @foreach ($accounts ?? [] as $a)
-                        <option value="{{ $a->accountid }}" {{ old('organization_id', $ticket->parent_id) == $a->accountid ? 'selected' : '' }}>{{ $a->accountname ?? 'Account #' . $a->accountid }}</option>
+                        <option value="">— Select Product Line —</option>
+                        @php
+                            $productLines = collect($accounts ?? []);
+                            if ($productLines->isEmpty()) {
+                                $productLines = collect([
+                                    (object)['accountid' => 'line:Individual Life', 'accountname' => 'Individual Life'],
+                                    (object)['accountid' => 'line:Group Life', 'accountname' => 'Group Life'],
+                                    (object)['accountid' => 'line:Credit Life', 'accountname' => 'Credit Life'],
+                                    (object)['accountid' => 'line:Mortgage', 'accountname' => 'Mortgage'],
+                                    (object)['accountid' => 'line:Group Last Expense', 'accountname' => 'Group Last Expense'],
+                                ]);
+                            }
+                            $selectedOrg = old('organization_id', $presetOrganizationId ?? $ticket->parent_id ?? null);
+                        @endphp
+                        @foreach ($productLines as $a)
+                        <option value="{{ $a->accountid ?? $a['accountid'] ?? '' }}" {{ $selectedOrg == ($a->accountid ?? $a['accountid'] ?? '') ? 'selected' : '' }}>{{ $a->accountname ?? $a['accountname'] ?? 'Option' }}</option>
                         @endforeach
                     </select>
                 </div>
@@ -219,34 +224,23 @@
 <script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
 <script>
 (function() {
-    const productEl = document.getElementById('productSelect');
     const orgEl = document.getElementById('organizationSelect');
     if (typeof TomSelect === 'undefined') return;
 
-    if (productEl) {
-        new TomSelect(productEl, {
-            create: false,
-            sortField: { field: 'text', direction: 'asc' },
-            placeholder: 'Type to search',
-            maxOptions: 100,
-            load: function(q, callback) {
-                const url = '{{ route("api.tickets.products") }}?q=' + encodeURIComponent(q) + '&limit=50';
-                fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' }, credentials: 'same-origin' })
-                    .then(r => r.json())
-                    .then(function(data) {
-                        callback(data || []);
-                    })
-                    .catch(function() { callback([]); });
-            },
-            preload: 'focus'
-        });
-    }
     if (orgEl) {
         new TomSelect(orgEl, {
             create: false,
             sortField: { field: 'text', direction: 'asc' },
             placeholder: 'Select an Option',
-            maxOptions: null
+            maxOptions: 100,
+            load: function(q, callback) {
+                const url = '{{ route("api.tickets.accounts") }}?q=' + encodeURIComponent(q) + '&limit=50';
+                fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' }, credentials: 'same-origin' })
+                    .then(r => r.json())
+                    .then(function(data) { callback(data || []); })
+                    .catch(function() { callback([]); });
+            },
+            preload: 'focus'
         });
     }
 })();

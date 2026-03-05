@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class TicketAutomationService
@@ -14,11 +15,13 @@ class TicketAutomationService
         $text = $title . ' ' . ($description ?? '');
         $text = strtolower($text);
 
-        $rules = DB::connection('vtiger')
-            ->table('ticket_automation_rules')
-            ->where('is_active', 1)
-            ->orderByDesc('priority')
-            ->get();
+        $rules = Cache::remember('ticket_automation_rules', 120, function () {
+            return DB::connection('vtiger')
+                ->table('ticket_automation_rules')
+                ->where('is_active', 1)
+                ->orderByDesc('priority')
+                ->get(['keywords', 'assign_to_user_id']);
+        });
 
         foreach ($rules as $rule) {
             $keywords = $this->parseKeywords($rule->keywords);
@@ -51,6 +54,7 @@ class TicketAutomationService
 
     public function createRule(array $data): int
     {
+        Cache::forget('ticket_automation_rules');
         return DB::connection('vtiger')->table('ticket_automation_rules')->insertGetId([
             'name' => $data['name'],
             'keywords' => $data['keywords'],
@@ -64,6 +68,7 @@ class TicketAutomationService
 
     public function updateRule(int $id, array $data): bool
     {
+        Cache::forget('ticket_automation_rules');
         return DB::connection('vtiger')
             ->table('ticket_automation_rules')
             ->where('id', $id)
@@ -79,6 +84,7 @@ class TicketAutomationService
 
     public function deleteRule(int $id): bool
     {
+        Cache::forget('ticket_automation_rules');
         return DB::connection('vtiger')
             ->table('ticket_automation_rules')
             ->where('id', $id)

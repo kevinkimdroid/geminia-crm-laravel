@@ -15,5 +15,8 @@
 </div>
 @endforeach
 @if(empty($items))
-<div class="text-muted small py-3">No CRM contacts found.</div>
+<div class="serve-client-empty-detail py-4">
+    <p class="mb-2 text-muted small"><i class="bi bi-person me-1"></i> No CRM contacts found{{ !empty($searchTerm ?? '') ? ' for "' . e($searchTerm ?? '') . '"' : '' }}.</p>
+    <p class="mb-0 small text-muted">Try a different name, phone, or email. You can still create a ticket from an ERP client above.</p>
+</div>
 @endif

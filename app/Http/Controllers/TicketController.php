@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Ticket;
 use App\Services\CrmService;
+use App\Services\ErpClientService;
 use App\Services\TicketAutomationService;
 use App\Services\TicketSlaService;
 use Illuminate\Http\RedirectResponse;
@@ -18,14 +19,17 @@ class TicketController extends Controller
 {
     /** @var CrmService */
     protected $crm;
+    /** @var ErpClientService|null */
+    protected $erp;
     /** @var TicketAutomationService */
     protected $automation;
     /** @var TicketSlaService */
     protected $sla;
 
-    public function __construct(CrmService $crm, TicketAutomationService $automation, TicketSlaService $sla)
+    public function __construct(CrmService $crm, TicketAutomationService $automation, TicketSlaService $sla, ?ErpClientService $erp = null)
     {
         $this->crm = $crm;
+        $this->erp = $erp ?? app()->has(ErpClientService::class) ? app(ErpClientService::class) : null;
         $this->automation = $automation;
         $this->sla = $sla;
     }
@@ -35,7 +39,7 @@ class TicketController extends Controller
         $status = $request->get('list');
         $search = $request->get('search');
         $page = max(1, (int) $request->get('page', 1));
-        $perPage = 25;
+        $perPage = max(10, min(100, (int) ($request->get('per_page') ?: 25)));
         $offset = ($page - 1) * $perPage;
 
         $isDefaultView = (!$status || trim((string) $status) === '') && (!$search || trim((string) $search) === '') && $page === 1;
@@ -44,7 +48,7 @@ class TicketController extends Controller
         $cacheKey = $isDefaultView ? 'tickets_list_default' : ($isStatusPage1 ? 'tickets_list_' . $statusSlug : null);
 
         if ($cacheKey) {
-            $ttl = $isDefaultView ? 45 : 30;
+            $ttl = $isDefaultView ? 60 : 45;
             $cached = Cache::remember($cacheKey, $ttl, function () use ($perPage, $status, $search) {
                 $items = $this->crm->getTickets($perPage, 0, $status, $search);
                 $count = $this->crm->getTicketsCount($status, $search);
@@ -78,15 +82,20 @@ class TicketController extends Controller
 
     public function create(Request $request): View
     {
+        if ($request->get('refresh')) {
+            Cache::forget('ticket_accounts');
+            Cache::forget('ticket_create_clients');
+        }
         $crm = app(CrmService::class);
         $contactId = $request->filled('contact_id') ? (int) $request->get('contact_id') : null;
         $fromServeClient = $request->get('from') === 'serve-client';
+        $fromMailManager = $request->get('from') === 'mail-manager';
         $clientNameParam = $request->filled('client_name') ? trim($request->get('client_name')) : null;
 
         if ($fromServeClient && $contactId) {
             $clients = collect([$crm->getContactById($contactId)])->filter();
         } else {
-            $clients = Cache::remember('ticket_create_clients', 90, fn () => $crm->getCustomers(50, 0));
+            $clients = Cache::remember('ticket_create_clients', 120, fn () => $crm->getCustomers(30, 0));
         }
         $contactDisplay = '';
 
@@ -109,22 +118,33 @@ class TicketController extends Controller
         $authUser = \Illuminate\Support\Facades\Auth::guard('vtiger')->user();
         $userRole = ($authUser && $authUser->primary_role) ? $authUser->primary_role->rolename : null;
 
-        $products = Cache::remember('ticket_products', 300, fn () => $crm->getProducts(100));
-        if ($products->isEmpty()) {
-            Cache::forget('ticket_products');
+        try {
+            $accounts = $this->sortAccountsForTickets(Cache::remember('ticket_accounts', 300, fn () => $crm->getAccounts(100)));
+            if ($accounts->isEmpty()) {
+                Cache::forget('ticket_accounts');
+                $accounts = $this->getFallbackProductLines();
+            } else {
+                $accounts = $this->mergeFallbackProductLines($accounts);
+            }
+        } catch (\Throwable $e) {
+            $accounts = $this->getFallbackProductLines();
         }
-        $accounts = $this->sortAccountsForTickets(Cache::remember('ticket_accounts', 300, fn () => $crm->getAccounts(100)));
         $users = Cache::remember('ticket_assign_users', 300, fn () => $crm->getActiveUsers());
 
         return view('tickets.create', [
             'clients' => $clients,
-            'products' => $products,
             'accounts' => $accounts,
             'users' => $users,
             'presetContactId' => $contactId,
             'presetContactDisplay' => $contactDisplay ?: $clientNameParam,
             'presetPolicy' => $presetPolicy,
+            'presetOrganizationId' => $request->get('organization_id'),
+            'presetTitle' => $request->filled('title') ? $request->get('title') : null,
+            'presetDescription' => $request->filled('description') ? $request->get('description') : null,
             'fromServeClient' => $fromServeClient,
+            'fromMailManager' => $fromMailManager,
+            'returnToMailManager' => $request->filled('email_id'),
+            'emailId' => $request->filled('email_id') ? (int) $request->get('email_id') : null,
             'canCloseTickets' => $this->sla->canUserCloseTickets($userRole),
         ]);
     }
@@ -140,13 +160,15 @@ class TicketController extends Controller
             'severity' => 'nullable|string|max:50',
             'category' => 'nullable|string|max:100',
             'contact_id' => 'required|integer',
-            'product_id' => 'nullable|integer',
-            'organization_id' => 'nullable|integer',
+            'product_id' => 'nullable', // integer for vtiger, or "erp:Product Name" from ERP fallback
+            'organization_id' => 'nullable',
             'hours' => 'nullable|string|max:20',
             'days' => 'nullable|string|max:20',
             'ticket_source' => 'nullable|string|max:50',
             'assigned_to' => 'nullable|integer',
             'policy_number' => 'nullable|string|max:100',
+            'return_to_mail_manager' => 'nullable',
+            'email_id' => 'nullable|integer',
         ]);
 
         if (($validated['status'] ?? '') === 'Closed') {
@@ -168,33 +190,44 @@ class TicketController extends Controller
             if (! empty($validated['policy_number'] ?? '')) {
                 $description = trim($description) . "\n\nRelated policy: " . trim($validated['policy_number']);
             }
+            $orgId = $validated['organization_id'] ?? null;
+            if (is_string($orgId) && str_starts_with($orgId, 'line:')) {
+                $lineName = substr($orgId, 5);
+                if ($lineName !== '' && ! str_contains($description, 'Product Line: ' . $lineName)) {
+                    $description = trim($description) . "\n\nProduct Line: " . $lineName;
+                }
+            }
+            $productId = null;
+            $productIdRaw = $validated['product_id'] ?? null;
+            if ($productIdRaw !== null && $productIdRaw !== '') {
+                if (is_string($productIdRaw) && str_starts_with((string) $productIdRaw, 'erp:')) {
+                    $erpProductName = substr((string) $productIdRaw, 4);
+                    if ($erpProductName !== '') {
+                        $description = trim($description) . "\n\nProduct: " . $erpProductName;
+                    }
+                } else {
+                    $productId = (int) $productIdRaw;
+                }
+            }
 
-            $id = \DB::connection('vtiger')->table('vtiger_troubletickets')->insertGetId([
-                'title' => $validated['title'],
-                'description' => $description,
-                'solution' => $validated['solution'] ?? '',
-                'status' => $validated['status'] ?? 'Open',
-                'priority' => $validated['priority'] ?? 'Normal',
-                'severity' => $validated['severity'] ?? null,
-                'category' => $validated['category'] ?? null,
-                'contact_id' => $validated['contact_id'],
-                'product_id' => $validated['product_id'] ?? null,
-                'parent_id' => $validated['organization_id'] ?? null,
-                'hours' => $validated['hours'] ?? null,
-                'days' => $validated['days'] ?? null,
-            ]);
+            $solutionText = trim((string) ($validated['solution'] ?? ''));
+            $fullDescription = $solutionText !== '' ? trim($description . "\n\n--- Resolution ---\n" . $solutionText) : $description;
 
-            $existing = \DB::connection('vtiger')->table('vtiger_crmentity')->where('crmid', $id)->exists();
-            if (!$existing) {
+            // Vtiger requires crmentity first (central entity table); ticketid = crmid
+            $id = (int) \DB::connection('vtiger')->table('vtiger_crmentity')->max('crmid') + 1;
+            $now = now()->format('Y-m-d H:i:s');
+            $parentId = $this->resolveOrganizationId($validated['organization_id'] ?? null);
+
+            \DB::connection('vtiger')->transaction(function () use ($validated, $userId, $ownerId, $fullDescription, $id, $now, $productId, $parentId) {
                 \DB::connection('vtiger')->table('vtiger_crmentity')->insert([
                     'crmid' => $id,
                     'smcreatorid' => $userId,
                     'smownerid' => $ownerId,
                     'modifiedby' => $userId,
                     'setype' => 'HelpDesk',
-                    'description' => $description,
-                    'createdtime' => now()->format('Y-m-d H:i:s'),
-                    'modifiedtime' => now()->format('Y-m-d H:i:s'),
+                    'description' => $fullDescription,
+                    'createdtime' => $now,
+                    'modifiedtime' => $now,
                     'viewedtime' => null,
                     'status' => 1,
                     'version' => 0,
@@ -204,10 +237,30 @@ class TicketController extends Controller
                     'source' => $validated['ticket_source'] ?? 'CRM',
                     'label' => $validated['title'],
                 ]);
-            }
+
+                \DB::connection('vtiger')->table('vtiger_troubletickets')->insert([
+                    'ticketid' => $id,
+                    'ticket_no' => 'TT' . $id,
+                    'title' => $validated['title'],
+                    'status' => $validated['status'] ?? 'Open',
+                    'priority' => $validated['priority'] ?? 'Normal',
+                    'severity' => $validated['severity'] ?? null,
+                    'category' => ! empty($validated['category'] ?? '') ? $validated['category'] : 'Other',
+                    'contact_id' => $validated['contact_id'],
+                    'product_id' => $productId,
+                    'parent_id' => $parentId,
+                    'hours' => $validated['hours'] ?? null,
+                    'days' => $validated['days'] ?? null,
+                ]);
+            });
 
             $this->forgetTicketListCaches();
             \App\Events\DashboardStatsUpdated::dispatch();
+
+            if ($request->filled('return_to_mail_manager') && $request->filled('email_id')) {
+                \DB::connection('vtiger')->table('mail_manager_emails')->where('id', (int) $request->get('email_id'))->update(['ticket_id' => $id]);
+                return redirect()->route('tools.mail-manager', ['selected' => $request->get('email_id')])->with('success', 'Ticket created and linked to this email.');
+            }
             if ($request->filled('return_to_serve_client')) {
                 return redirect()->route('support.serve-client')->with('success', 'Ticket created. You can create another or search for a different client.');
             }
@@ -232,14 +285,18 @@ class TicketController extends Controller
     }
 
     /** @return View|RedirectResponse */
-    public function edit(int $id)
+    public function edit(Request $request, int $id)
     {
         $ticket = $this->crm->getTicket($id);
         if (!$ticket) {
             return redirect()->route('tickets.index')->with('error', 'Ticket not found.');
         }
+        if ($request->get('refresh')) {
+            Cache::forget('ticket_accounts');
+            Cache::forget('ticket_create_clients');
+        }
         $crm = app(CrmService::class);
-        $clients = Cache::remember('ticket_create_clients', 90, fn () => $crm->getCustomers(50, 0));
+        $clients = Cache::remember('ticket_create_clients', 120, fn () => $crm->getCustomers(30, 0));
         $contactDisplay = '';
         if ($ticket->contact_id ?? null) {
             $client = $clients->firstWhere('contactid', $ticket->contact_id);
@@ -253,21 +310,84 @@ class TicketController extends Controller
         }
         $authUser = \Illuminate\Support\Facades\Auth::guard('vtiger')->user();
         $userRole = ($authUser && $authUser->primary_role) ? $authUser->primary_role->rolename : null;
-        $products = Cache::remember('ticket_products', 300, fn () => $crm->getProducts(100));
-        if ($products->isEmpty()) {
-            Cache::forget('ticket_products');
+        try {
+            $accounts = $this->sortAccountsForTickets(Cache::remember('ticket_accounts', 300, fn () => $crm->getAccounts(100)));
+            if ($accounts->isEmpty()) {
+                Cache::forget('ticket_accounts');
+                $accounts = $this->getFallbackProductLines();
+            } else {
+                $accounts = $this->mergeFallbackProductLines($accounts);
+            }
+        } catch (\Throwable $e) {
+            $accounts = $this->getFallbackProductLines();
         }
-        $accounts = $this->sortAccountsForTickets(Cache::remember('ticket_accounts', 300, fn () => $crm->getAccounts(100)));
         $users = Cache::remember('ticket_assign_users', 300, fn () => $crm->getActiveUsers());
+        $effectiveOrgId = $ticket->parent_id;
+        if (! $effectiveOrgId && preg_match('/Product Line:\s*(.+?)(?:\n|$)/', (string) ($ticket->description ?? ''), $m)) {
+            $lineName = trim($m[1]);
+            $fallback = $this->getFallbackProductLines()->firstWhere('accountname', $lineName);
+            $effectiveOrgId = $fallback ? (string) $fallback->accountid : 'line:' . $lineName;
+        }
         return view('tickets.edit', [
             'ticket' => $ticket,
             'clients' => $clients,
             'contactDisplay' => $contactDisplay,
-            'products' => $products,
             'accounts' => $accounts,
             'users' => $users,
+            'presetOrganizationId' => $effectiveOrgId,
             'canCloseTickets' => $this->sla->canUserCloseTickets($userRole),
         ]);
+    }
+
+    /**
+     * Show minimal quick-close form (solution only).
+     */
+    public function showCloseForm(int $ticket): View|RedirectResponse
+    {
+        $ticketObj = $this->crm->getTicket($ticket);
+        if (! $ticketObj) {
+            return redirect()->route('tickets.index')->with('error', 'Ticket not found.');
+        }
+        if (($ticketObj->status ?? '') === 'Closed') {
+            return redirect()->route('tickets.show', $ticket)->with('info', 'Ticket is already closed.');
+        }
+        $authUser = \Illuminate\Support\Facades\Auth::guard('vtiger')->user();
+        $userRole = ($authUser && $authUser->primary_role) ? $authUser->primary_role->rolename : null;
+        if (! $this->sla->canUserCloseTickets($userRole)) {
+            return redirect()->route('tickets.show', $ticket)->with('error', 'You do not have permission to close tickets.');
+        }
+        return view('tickets.close', ['ticket' => $ticketObj]);
+    }
+
+    /**
+     * Quick close a ticket — minimal form: just solution. Fast way to resolve.
+     */
+    public function quickClose(Request $request, int $ticket): RedirectResponse
+    {
+        $ticketObj = $this->crm->getTicket($ticket);
+        if (! $ticketObj) {
+            return redirect()->route('tickets.index')->with('error', 'Ticket not found.');
+        }
+        $authUser = \Illuminate\Support\Facades\Auth::guard('vtiger')->user();
+        $userRole = ($authUser && $authUser->primary_role) ? $authUser->primary_role->rolename : null;
+        if (! $this->sla->canUserCloseTickets($userRole)) {
+            return redirect()->route('tickets.show', $ticket)->with('error', 'You do not have permission to close tickets.');
+        }
+        $solution = trim((string) $request->get('solution', ''));
+        if ($solution === '') {
+            $solution = 'Closed';
+        }
+        try {
+            \DB::connection('vtiger')->table('vtiger_troubletickets')->where('ticketid', $ticket)->update(['status' => 'Closed']);
+            $existingDesc = \DB::connection('vtiger')->table('vtiger_crmentity')->where('crmid', $ticket)->value('description') ?? '';
+            $fullDesc = trim($existingDesc . "\n\n--- Resolution ---\n" . $solution);
+            \DB::connection('vtiger')->table('vtiger_crmentity')->where('crmid', $ticket)->update(['description' => $fullDesc, 'modifiedtime' => now()->format('Y-m-d H:i:s')]);
+            $this->forgetTicketListCaches();
+            \App\Events\DashboardStatsUpdated::dispatch();
+            return redirect()->route('tickets.show', $ticket)->with('success', 'Ticket closed.');
+        } catch (\Throwable $e) {
+            return redirect()->route('tickets.show', $ticket)->with('error', 'Failed to close: ' . $e->getMessage());
+        }
     }
 
     public function update(Request $request, int $id): RedirectResponse
@@ -286,8 +406,8 @@ class TicketController extends Controller
             'severity' => 'nullable|string|max:50',
             'category' => 'nullable|string|max:100',
             'contact_id' => 'required|integer',
-            'product_id' => 'nullable|integer',
-            'organization_id' => 'nullable|integer',
+            'product_id' => 'nullable', // integer for vtiger, or "erp:Product Name" from ERP fallback
+            'organization_id' => 'nullable',
             'ticket_source' => 'nullable|string|max:50',
             'assigned_to' => 'nullable|integer',
             'hours' => 'nullable|string|max:20',
@@ -308,30 +428,53 @@ class TicketController extends Controller
         }
 
         try {
-            Ticket::on('vtiger')->where('ticketid', $id)->update([
+            $description = $validated['description'] ?? $ticket->description ?? '';
+            $orgId = $validated['organization_id'] ?? null;
+            if (is_string($orgId) && str_starts_with($orgId, 'line:')) {
+                $lineName = substr($orgId, 5);
+                if ($lineName !== '' && ! str_contains($description, 'Product Line: ' . $lineName)) {
+                    $description = trim($description) . "\n\nProduct Line: " . $lineName;
+                }
+            }
+            $productId = $ticket->product_id;
+            $productIdRaw = $validated['product_id'] ?? null;
+            if ($productIdRaw !== null && $productIdRaw !== '') {
+                if (is_string($productIdRaw) && str_starts_with((string) $productIdRaw, 'erp:')) {
+                    $erpProductName = substr((string) $productIdRaw, 4);
+                    $productId = null;
+                    if ($erpProductName !== '' && ! str_contains($description, 'Product: ' . $erpProductName)) {
+                        $description = trim($description) . "\n\nProduct: " . $erpProductName;
+                    }
+                } else {
+                    $productId = (int) $productIdRaw;
+                }
+            } elseif (! $request->filled('product_id')) {
+                $productId = null;
+            }
+
+            $solutionText = trim((string) ($validated['solution'] ?? $ticket->solution ?? ''));
+            $fullDescription = $solutionText !== '' ? trim($description . "\n\n--- Resolution ---\n" . $solutionText) : $description;
+
+            \DB::connection('vtiger')->table('vtiger_troubletickets')->where('ticketid', $id)->update([
                 'title' => $validated['title'],
-                'description' => $validated['description'] ?? '',
-                'solution' => $validated['solution'] ?? $ticket->solution ?? '',
                 'status' => $validated['status'] ?? $ticket->status,
                 'priority' => $validated['priority'] ?? $ticket->priority,
                 'severity' => $validated['severity'] ?? $ticket->severity,
                 'category' => $validated['category'] ?? $ticket->category,
                 'contact_id' => $validated['contact_id'],
-                'product_id' => $request->filled('product_id') ? (int) $validated['product_id'] : null,
-                'parent_id' => $request->filled('organization_id') ? (int) $validated['organization_id'] : null,
+                'product_id' => $productId,
+                'parent_id' => $this->resolveOrganizationId($validated['organization_id'] ?? null),
                 'hours' => $validated['hours'] ?? $ticket->hours,
                 'days' => $validated['days'] ?? $ticket->days,
             ]);
-            $crmentityUpdates = [];
+            $crmentityUpdates = ['description' => $fullDescription, 'modifiedtime' => now()->format('Y-m-d H:i:s')];
             if (!empty($validated['ticket_source'] ?? '')) {
                 $crmentityUpdates['source'] = $validated['ticket_source'];
             }
             if (!empty($validated['assigned_to'] ?? '')) {
                 $crmentityUpdates['smownerid'] = (int) $validated['assigned_to'];
             }
-            if (!empty($crmentityUpdates)) {
-                \DB::connection('vtiger')->table('vtiger_crmentity')->where('crmid', $id)->update($crmentityUpdates);
-            }
+            \DB::connection('vtiger')->table('vtiger_crmentity')->where('crmid', $id)->update($crmentityUpdates);
             $this->forgetTicketListCaches();
             \App\Events\DashboardStatsUpdated::dispatch();
             return redirect()->route('tickets.show', $id)->with('success', 'Ticket updated.');
@@ -341,10 +484,89 @@ class TicketController extends Controller
     }
 
     /**
+     * Resolve organization_id to vtiger parent_id. Returns null for "line:X" (Product Line fallback).
+     */
+    private function resolveOrganizationId($value): ?int
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (is_string($value) && str_starts_with($value, 'line:')) {
+            return null;
+        }
+        return (int) $value;
+    }
+
+    /**
+     * Fetch ERP products for ticket dropdown when vtiger has none.
+     * Uses ERP_CLIENTS_HTTP_URL when set (regardless of CLIENTS_VIEW_SOURCE).
+     */
+    private function fetchErpProductsForTickets(): Collection
+    {
+        $url = rtrim((string) config('erp.clients_http_url'), '/');
+        if ($url === '') {
+            return collect();
+        }
+        try {
+            $sep = strpos($url, '?') !== false ? '&' : '?';
+            $response = \Illuminate\Support\Facades\Http::timeout(10)->get($url . $sep . 'products=1');
+            if (! $response->successful()) {
+                $response = \Illuminate\Support\Facades\Http::timeout(10)->get($url . '/products');
+            }
+            if (! $response->successful()) {
+                return collect();
+            }
+            $body = $response->json();
+            $names = $body['products'] ?? [];
+            if (! is_array($names) || empty($names)) {
+                return collect();
+            }
+            return collect($names)->map(fn ($n) => (object) ['productid' => 'erp:' . $n, 'productname' => $n]);
+        } catch (\Throwable $e) {
+            return collect();
+        }
+    }
+
+    /**
+     * Merge fallback product lines (Group Life, Individual Life, etc.) into accounts when vtiger has accounts.
+     */
+    private function mergeFallbackProductLines(Collection $accounts): Collection
+    {
+        $existingIds = $accounts->pluck('accountid')->map(fn ($v) => (string) $v)->toArray();
+        foreach ($this->getFallbackProductLines() as $line) {
+            $id = (string) $line->accountid;
+            if (! in_array($id, $existingIds, true)) {
+                $accounts = $accounts->push($line);
+                $existingIds[] = $id;
+            }
+        }
+        return $accounts;
+    }
+
+    /**
+     * Fallback Product Line options when vtiger has no accounts (e.g. Credit Life, Group Life).
+     */
+    private function getFallbackProductLines(): Collection
+    {
+        $lines = config('tickets.organization_sort', []);
+        if (empty($lines)) {
+            $lines = ['Individual Life', 'Group Life', 'Credit Life', 'Mortgage', 'Group Last Expense'];
+        }
+        return collect($lines)->map(fn ($n, $i) => (object) ['accountid' => 'line:' . $n, 'accountname' => $n]);
+    }
+
+    /**
      * Sort accounts for Product Line dropdown: preferred order first, then alphabetical.
      */
     private function sortAccountsForTickets(Collection $accounts): Collection
     {
+        if ($accounts->isEmpty()) {
+            return $accounts;
+        }
+        $first = $accounts->first();
+        if (is_string($first->accountid ?? null) && str_starts_with((string) $first->accountid, 'line:')) {
+            return $accounts;
+        }
         $order = config('tickets.organization_sort', []);
         if (empty($order)) {
             return $accounts->sortBy('accountname', SORT_NATURAL | SORT_FLAG_CASE)->values();
@@ -374,17 +596,61 @@ class TicketController extends Controller
         }
         $cacheKey = 'ticket_search_contacts:' . md5($q . ':' . $limit);
         $data = Cache::remember($cacheKey, 30, function () use ($q, $limit) {
-            $customers = $this->crm->getCustomers($limit, 0, $q);
-            return $customers->map(fn ($c) => [
-                'id' => $c->contactid,
-                'name' => trim(($c->firstname ?? '') . ' ' . ($c->lastname ?? '')) ?: 'Contact #' . $c->contactid,
-            ])->values()->all();
+            $seen = [];
+            $results = [];
+
+            // CRM contacts
+            $customers = $this->crm->getCustomers((int) ceil($limit / 2), 0, $q);
+            foreach ($customers as $c) {
+                $id = (int) $c->contactid;
+                if (! isset($seen[$id])) {
+                    $seen[$id] = true;
+                    $results[] = [
+                        'id' => $id,
+                        'name' => trim(($c->firstname ?? '') . ' ' . ($c->lastname ?? '')) ?: 'Contact #' . $id,
+                    ];
+                }
+            }
+
+            // ERP clients (Group Life + Individual) when configured
+            $source = config('erp.clients_view_source', 'crm');
+            $erpConfigured = $source === 'erp_http' ? ! empty(config('erp.clients_http_url')) : ($source === 'erp_sync');
+            if ($this->erp && $erpConfigured) {
+                try {
+                    $erpResult = $this->erp->searchClients($q, (int) ceil($limit / 2));
+                    $erpData = $erpResult['data'] ?? [];
+                    foreach (is_iterable($erpData) ? $erpData : [] as $r) {
+                        $row = is_array($r) ? $r : (array) $r;
+                        $policy = trim((string) ($row['policy_no'] ?? $row['policy_number'] ?? ''));
+                        if (! $policy) {
+                            continue;
+                        }
+                        $contact = $this->crm->findContactByPolicyNumber($policy);
+                        $contactId = $contact ? (int) $contact->contactid : $this->crm->createContactFromErpClient($row);
+                        if ($contactId && ! isset($seen[$contactId])) {
+                            $seen[$contactId] = true;
+                            $name = trim((string) ($row['life_assur'] ?? $row['client_name'] ?? $row['life_assured'] ?? ''));
+                            $label = $name ? "{$name} ({$policy})" : $policy;
+                            $lifeSystem = $row['life_system'] ?? ($this->erp ? $this->erp->getLifeSystemFromProduct($row['product'] ?? null) : null);
+                            if ($lifeSystem === 'group') {
+                                $label .= ' — Group Life';
+                            }
+                            $results[] = ['id' => $contactId, 'name' => $label];
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    // Continue with CRM-only results
+                }
+            }
+
+            return array_slice(array_values($results), 0, $limit);
         });
         return response()->json($data);
     }
 
     /**
      * AJAX product search for ticket create/edit (Product Name dropdown).
+     * Uses vtiger products first; falls back to ERP products (PROD_DESC) when vtiger is empty.
      */
     public function searchProducts(Request $request): JsonResponse
     {
@@ -395,18 +661,77 @@ class TicketController extends Controller
             'value' => (string) $p->productid,
             'text' => $p->productname ?? 'Product #' . $p->productid,
         ])->values()->all();
+
+        // Fallback to ERP products when vtiger has none (use ERP when URL is configured)
+        if (empty($data) && config('erp.clients_http_url')) {
+            try {
+                $url = rtrim(config('erp.clients_http_url'), '/');
+                $sep = strpos($url, '?') !== false ? '&' : '?';
+                $response = \Illuminate\Support\Facades\Http::timeout(10)->get($url . $sep . 'products=1');
+                if (! $response->successful()) {
+                    $response = \Illuminate\Support\Facades\Http::timeout(10)->get($url . '/products');
+                }
+                if ($response->successful()) {
+                    $body = $response->json();
+                    $names = $body['products'] ?? [];
+                    if (is_array($names) && ! empty($names)) {
+                        $term = $q ? strtoupper($q) : '';
+                        $filtered = $term ? array_filter($names, fn ($n) => str_contains(strtoupper((string) $n), $term)) : $names;
+                        $filtered = array_slice(array_values($filtered), 0, $limit);
+                        $data = array_map(fn ($n) => ['value' => 'erp:' . $n, 'text' => $n], $filtered);
+                    }
+                }
+            } catch (\Throwable $e) {
+                // ignore; return empty
+            }
+        }
         return response()->json($data);
     }
 
-    public function destroy(int $id): RedirectResponse
+    /**
+     * AJAX account/search for Product Line dropdown.
+     */
+    public function searchAccounts(Request $request): JsonResponse
     {
+        $q = trim((string) $request->get('q', ''));
+        $limit = min(100, max(10, (int) $request->get('limit', 50)));
+        $accounts = $this->sortAccountsForTickets(
+            $this->crm->getAccounts($limit)
+        );
+        if (! $accounts->isEmpty()) {
+            $accounts = $this->mergeFallbackProductLines($accounts);
+        } else {
+            $accounts = $this->getFallbackProductLines();
+        }
+        $data = $accounts->map(fn ($a) => [
+            'value' => (string) $a->accountid,
+            'text' => $a->accountname ?? 'Account #' . $a->accountid,
+        ])->values()->all();
+
+        $term = $q ? strtoupper($q) : '';
+        if ($term) {
+            $data = array_values(array_filter($data, fn ($d) => str_contains(strtoupper((string) ($d['text'] ?? '')), $term)));
+        }
+        return response()->json($data);
+    }
+
+    public function inactivate(int $id): RedirectResponse
+    {
+        $ticket = $this->crm->getTicket($id);
+        if (! $ticket) {
+            return redirect()->route('tickets.index')->with('error', 'Ticket not found.');
+        }
+        $inactiveStatus = config('tickets.inactive_status', 'Inactive');
+        if (($ticket->status ?? '') === $inactiveStatus) {
+            return back()->with('info', 'Ticket is already inactive.');
+        }
         try {
-            \DB::connection('vtiger')->table('vtiger_crmentity')->where('crmid', $id)->update(['deleted' => 1]);
+            \DB::connection('vtiger')->table('vtiger_troubletickets')->where('ticketid', $id)->update(['status' => $inactiveStatus]);
             $this->forgetTicketListCaches();
             \App\Events\DashboardStatsUpdated::dispatch();
-            return redirect()->route('tickets.index')->with('success', 'Ticket deleted.');
+            return redirect()->route('tickets.index')->with('success', 'Ticket inactivated.');
         } catch (\Throwable $e) {
-            return back()->with('error', 'Failed to delete: ' . $e->getMessage());
+            return back()->with('error', 'Failed to inactivate: ' . $e->getMessage());
         }
     }
 
@@ -415,7 +740,7 @@ class TicketController extends Controller
         Cache::forget('geminia_ticket_counts_by_status');
         Cache::forget('geminia_tickets_count');
         Cache::forget('tickets_list_default');
-        foreach (['Open', 'In_Progress', 'Wait_For_Response', 'Closed', 'Unassigned'] as $slug) {
+        foreach (['Open', 'In_Progress', 'Wait_For_Response', 'Closed', 'Inactive', 'Unassigned'] as $slug) {
             Cache::forget('tickets_list_' . $slug);
         }
         Cache::forget('geminia_dashboard_stats');

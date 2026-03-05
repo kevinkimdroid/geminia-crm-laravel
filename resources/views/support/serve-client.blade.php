@@ -60,7 +60,7 @@
                     </h6>
                     <div id="erpResults" class="serve-client-list">
                         @if(($initialSearch ?? '') && strlen($initialSearch ?? '') >= 2)
-                            @include('support.serve-client-erp-results', ['items' => $initialErp ?? []])
+                            @include('support.serve-client-erp-results', ['items' => $initialErp ?? [], 'searchTerm' => $initialSearch ?? ''])
                         @endif
                     </div>
                 </div>
@@ -70,7 +70,7 @@
                     </h6>
                     <div id="crmResults" class="serve-client-list">
                         @if(($initialSearch ?? '') && strlen($initialSearch ?? '') >= 2)
-                            @include('support.serve-client-crm-results', ['items' => $initialCrm ?? []])
+                            @include('support.serve-client-crm-results', ['items' => $initialCrm ?? [], 'searchTerm' => $initialSearch ?? ''])
                         @endif
                     </div>
                 </div>
@@ -183,6 +183,8 @@
     border: 2px solid #047857;
 }
 .serve-client-cta-success:hover { background: #047857; color: #fff !important; }
+.serve-client-empty-detail { color: var(--geminia-text-muted); }
+.serve-client-detail-value.font-monospace { font-family: ui-monospace, monospace; font-size: 0.85em; }
 </style>
 
 <script>
@@ -259,8 +261,8 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .then(function(data) {
             try {
-                renderErp(data.erp || []);
-                renderCrm(data.crm || []);
+                renderErp(data.erp || [], q);
+                renderCrm(data.crm || [], q);
                 if (data.error) {
                     showError(data.error + ' (Ensure ERP API is running if using erp_http)');
                 } else if ((!data.erp || data.erp.length === 0) && (!data.crm || data.crm.length === 0)) {
@@ -286,10 +288,16 @@ document.addEventListener('DOMContentLoaded', function() {
         initial.forEach(function(item, idx) { erpDataStore['erp_' + idx] = item; });
     })();
     @endif
-    function renderErp(items) {
+    function renderErp(items, searchTerm) {
         erpDataStore = {};
         if (!items || items.length === 0) {
-            erpResults.innerHTML = '<div class="text-muted small py-3">No ERP clients found. Try a different search term.</div>';
+            var msg = '<div class="serve-client-empty-detail py-4">';
+            msg += '<p class="mb-2 text-muted small"><i class="bi bi-database me-1"></i> No ERP clients found';
+            if (searchTerm) msg += ' for "<strong>' + esc(searchTerm) + '</strong>"';
+            msg += '.</p>';
+            msg += '<p class="mb-0 small text-muted">Try searching by: <span class="text-dark">exact policy number</span> (e.g. GEMPPP0334), <span class="text-dark">client name</span>, or <span class="text-dark">phone number</span>. Ensure the ERP API is running (erp-clients-api).</p>';
+            msg += '</div>';
+            erpResults.innerHTML = msg;
             return;
         }
         const detailUrl = '{{ url("/support/clients/show") }}';
@@ -307,15 +315,23 @@ document.addEventListener('DOMContentLoaded', function() {
             const effectiveDate = item.effective_date || '';
             const intermediary = item.intermediary || '';
             const checkoff = item.checkoff || '';
+            const kraPin = item.kra_pin || '';
+            const idNo = item.id_no || '';
+            const prpDob = item.prp_dob || '';
+            const schemeName = item.scheme_name || '';
             const statusClass = status === 'A' ? 'status-active' : (status === 'FL' ? 'status-lapsed' : '');
             var detailsHtml = '';
-            if (product || status || (paidAmt != null && paidAmt !== '') || maturity || effectiveDate || intermediary) {
+            if (product || status || (paidAmt != null && paidAmt !== '') || maturity || effectiveDate || intermediary || kraPin || idNo || prpDob || schemeName || checkoff) {
                 detailsHtml = '<div class="serve-client-item-details">' +
                     (product ? '<div class="serve-client-detail-row"><span class="serve-client-detail-label">Product</span><span class="serve-client-detail-value">' + esc(product) + '</span></div>' : '') +
+                    (schemeName ? '<div class="serve-client-detail-row"><span class="serve-client-detail-label">Scheme</span><span class="serve-client-detail-value">' + esc(schemeName) + '</span></div>' : '') +
                     (status ? '<div class="serve-client-detail-row"><span class="serve-client-detail-label">Status</span><span class="serve-client-detail-value ' + statusClass + '">' + esc(status) + '</span></div>' : '') +
                     (paidAmt != null && paidAmt !== '' ? '<div class="serve-client-detail-row"><span class="serve-client-detail-label">Total Paid Amount</span><span class="serve-client-detail-value amount">' + esc(formatAmount(paidAmt)) + '</span></div>' : '') +
-                    (maturity ? '<div class="serve-client-detail-row"><span class="serve-client-detail-label">Maturity</span><span class="serve-client-detail-value">' + esc(maturity) + '</span></div>' : '') +
                     (effectiveDate ? '<div class="serve-client-detail-row"><span class="serve-client-detail-label">Effective</span><span class="serve-client-detail-value">' + esc(effectiveDate) + '</span></div>' : '') +
+                    (maturity ? '<div class="serve-client-detail-row"><span class="serve-client-detail-label">Maturity</span><span class="serve-client-detail-value">' + esc(maturity) + '</span></div>' : '') +
+                    (prpDob ? '<div class="serve-client-detail-row"><span class="serve-client-detail-label">Date of Birth</span><span class="serve-client-detail-value">' + esc(prpDob) + '</span></div>' : '') +
+                    (kraPin ? '<div class="serve-client-detail-row"><span class="serve-client-detail-label">KRA PIN</span><span class="serve-client-detail-value font-monospace">' + esc(kraPin) + '</span></div>' : '') +
+                    (idNo ? '<div class="serve-client-detail-row"><span class="serve-client-detail-label">ID Number</span><span class="serve-client-detail-value font-monospace">' + esc(idNo) + '</span></div>' : '') +
                     (intermediary ? '<div class="serve-client-detail-row"><span class="serve-client-detail-label">Agent</span><span class="serve-client-detail-value">' + esc(intermediary) + '</span></div>' : '') +
                     (checkoff ? '<div class="serve-client-detail-row"><span class="serve-client-detail-label">Checkoff</span><span class="serve-client-detail-value">' + esc(checkoff) + '</span></div>' : '') +
                     '</div>';
@@ -336,9 +352,15 @@ document.addEventListener('DOMContentLoaded', function() {
         }).join('');
     }
 
-    function renderCrm(items) {
+    function renderCrm(items, searchTerm) {
         if (!items || items.length === 0) {
-            crmResults.innerHTML = '<div class="text-muted small py-3">No CRM contacts found.</div>';
+            var msg = '<div class="serve-client-empty-detail py-4">';
+            msg += '<p class="mb-2 text-muted small"><i class="bi bi-person me-1"></i> No CRM contacts found';
+            if (searchTerm) msg += ' for "<strong>' + esc(searchTerm) + '</strong>"';
+            msg += '.</p>';
+            msg += '<p class="mb-0 small text-muted">Try a different name, phone, or email. You can still create a ticket from an ERP client above.</p>';
+            msg += '</div>';
+            crmResults.innerHTML = msg;
             return;
         }
         const contactUrl = '{{ url("/contacts") }}';

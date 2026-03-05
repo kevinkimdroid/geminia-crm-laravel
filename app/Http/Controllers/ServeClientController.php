@@ -157,8 +157,33 @@ class ServeClientController extends Controller
 
         $clientData = $this->erp->getPolicyDetails($policy);
         if (!$clientData) {
+            $contact = $this->crm->findContactByPolicyNumber($policy);
+            if ($contact) {
+                return redirect()->route('tickets.create', [
+                    'contact_id' => $contact->contactid,
+                    'policy' => $policy,
+                    'organization_id' => 'line:Group Life',
+                    'from' => 'serve-client',
+                ])->with('info', "Policy \"{$policy}\" could not be retrieved from ERP. Using existing CRM contact.");
+            }
+            $minimalClient = [
+                'policy_no' => $policy,
+                'policy_number' => $policy,
+                'name' => 'Policy ' . $policy,
+                'first_name' => 'Policy',
+                'last_name' => $policy,
+            ];
+            $contactId = $this->crm->createContactFromErpClient($minimalClient);
+            if ($contactId) {
+                return redirect()->route('tickets.create', [
+                    'contact_id' => $contactId,
+                    'policy' => $policy,
+                    'organization_id' => 'line:Group Life',
+                    'from' => 'serve-client',
+                ])->with('info', "Policy \"{$policy}\" could not be retrieved from ERP. A placeholder contact was created — update client details in Contacts when you have them.");
+            }
             return redirect()->route('support.serve-client', ['search' => $policy])
-                ->with('error', 'Client not found. Try searching in Serve Client.');
+                ->with('error', "Client not found for policy \"{$policy}\". Ensure the ERP API is running. Try searching by name or phone, or create a contact first.");
         }
 
         $erpClient = is_array($clientData) ? $clientData : (array) $clientData;
@@ -185,13 +210,20 @@ class ServeClientController extends Controller
         }
 
         $clientName = trim($erpClient['name'] ?? $erpClient['client_name'] ?? $erpClient['life_assur'] ?? $erpClient['life_assured'] ?? '');
+        $isGroupLife = ($erpClient['life_system'] ?? '') === 'group'
+            || stripos((string) ($erpClient['product'] ?? $erpClient['prod_desc'] ?? ''), 'group') !== false
+            || preg_match('/^GEMPPP?/', (string) $policyNumber) === 1;
 
-        return redirect()->route('tickets.create', [
+        $params = [
             'contact_id' => $contactId,
             'policy' => $policyNumber,
             'client_name' => $clientName,
             'from' => 'serve-client',
-        ])->with('success', 'Client selected. Complete the ticket details below.');
+        ];
+        if ($isGroupLife) {
+            $params['organization_id'] = 'line:Group Life';
+        }
+        return redirect()->route('tickets.create', $params)->with('success', 'Client selected. Complete the ticket details below.');
     }
 
     /**
@@ -252,6 +284,13 @@ class ServeClientController extends Controller
             : null;
         if ($clientName) {
             $params['client_name'] = $clientName;
+        }
+        $isGroupLife = $validated['source'] === 'erp' && (
+            ($erpClient['life_system'] ?? '') === 'group'
+            || stripos((string) ($erpClient['product'] ?? $erpClient['prod_desc'] ?? ''), 'group') !== false
+        );
+        if ($isGroupLife) {
+            $params['organization_id'] = 'line:Group Life';
         }
 
         return redirect()->route('tickets.create', $params)

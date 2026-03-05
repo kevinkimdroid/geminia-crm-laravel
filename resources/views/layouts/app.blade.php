@@ -317,6 +317,9 @@
                 @if($can('tickets') || $can('support'))
                 <div class="app-nav-group">
                     <div class="app-nav-label">Support</div>
+                    <a href="{{ route('support') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('support') ? 'active' : '' }}">
+                        <i class="bi bi-headset"></i><span>Support</span>
+                    </a>
                     @if($can('support.serve-client') || $can('tickets'))
                     <a href="{{ route('support.serve-client') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('support.serve-client') ? 'active' : '' }}">
                         <i class="bi bi-person-plus-fill"></i><span>Serve Client</span>
@@ -332,6 +335,9 @@
                     @endif
                     @if($can('support.customers'))
                     <a href="{{ route('support.customers') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('support.customers') || request()->routeIs('support.clients.*') ? 'active' : '' }}"><i class="bi bi-people"></i><span>Clients</span></a>
+                    @endif
+                    @if($can('tickets'))
+                    <a href="{{ route('support.maturities') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('support.maturities') ? 'active' : '' }}"><i class="bi bi-calendar-event"></i><span>Maturities</span></a>
                     @endif
                 </div>
                 @endif

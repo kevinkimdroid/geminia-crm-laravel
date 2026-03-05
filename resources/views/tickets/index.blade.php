@@ -30,7 +30,7 @@
     {{-- Status pills --}}
     <div class="tickets-status-pills mb-4">
         <a href="{{ route('tickets.index') }}" class="tickets-pill {{ !($currentList ?? '') ? 'active' : '' }}">
-            All <span class="tickets-pill-count">{{ number_format(($ticketCounts['Open'] ?? 0) + ($ticketCounts['In Progress'] ?? 0) + ($ticketCounts['Closed'] ?? 0) + ($ticketCounts['Wait For Response'] ?? 0) + ($ticketCounts['Unassigned'] ?? 0)) }}</span>
+            All <span class="tickets-pill-count">{{ number_format(($ticketCounts['Open'] ?? 0) + ($ticketCounts['In Progress'] ?? 0) + ($ticketCounts['Closed'] ?? 0) + ($ticketCounts['Wait For Response'] ?? 0) + ($ticketCounts['Inactive'] ?? 0) + ($ticketCounts['Unassigned'] ?? 0)) }}</span>
         </a>
         <a href="{{ route('tickets.index', ['list' => 'Open']) }}" class="tickets-pill tickets-pill-open {{ ($currentList ?? '') === 'Open' ? 'active' : '' }}">
             Open <span class="tickets-pill-count">{{ number_format($ticketCounts['Open'] ?? 0) }}</span>
@@ -43,6 +43,9 @@
         </a>
         <a href="{{ route('tickets.index', ['list' => 'Closed']) }}" class="tickets-pill tickets-pill-closed {{ ($currentList ?? '') === 'Closed' ? 'active' : '' }}">
             Closed <span class="tickets-pill-count">{{ number_format($ticketCounts['Closed'] ?? 0) }}</span>
+        </a>
+        <a href="{{ route('tickets.index', ['list' => 'Inactive']) }}" class="tickets-pill tickets-pill-inactive {{ ($currentList ?? '') === 'Inactive' ? 'active' : '' }}">
+            Inactive <span class="tickets-pill-count">{{ number_format($ticketCounts['Inactive'] ?? 0) }}</span>
         </a>
         @if(($ticketCounts['Unassigned'] ?? 0) > 0)
         <a href="{{ route('tickets.index', ['list' => 'Unassigned']) }}" class="tickets-pill tickets-pill-unassigned {{ ($currentList ?? '') === 'Unassigned' ? 'active' : '' }}">
@@ -121,6 +124,9 @@
                             <td><span class="text-muted small">{{ $ownerName }}</span></td>
                             <td><span class="text-muted small">{{ $ticket->createdtime ? date('d M Y', strtotime($ticket->createdtime)) : '—' }}</span></td>
                             <td class="text-end">
+                                @if(($ticket->status ?? '') !== 'Closed')
+                                <a href="{{ route('tickets.close.form', $ticket->ticketid) }}" class="btn btn-sm btn-link text-success p-1" title="Close"><i class="bi bi-check-circle"></i></a>
+                                @endif
                                 <a href="{{ $detailUrl }}" class="btn btn-sm btn-link text-muted p-1" title="View"><i class="bi bi-eye"></i></a>
                             </td>
                         </tr>
@@ -170,6 +176,8 @@
 .tickets-pill-wait.active { background: #0ea5e9; border-color: #0ea5e9; }
 .tickets-pill-closed { border-color: rgba(5, 150, 105, 0.4); }
 .tickets-pill-closed.active { background: #059669; border-color: #059669; }
+.tickets-pill-inactive { border-color: rgba(107, 114, 128, 0.4); }
+.tickets-pill-inactive.active { background: #6b7280; border-color: #6b7280; }
 .tickets-pill-unassigned { border-color: rgba(220, 38, 38, 0.4); }
 .tickets-pill-unassigned.active { background: #dc2626; border-color: #dc2626; }
 
@@ -207,6 +215,7 @@
 .tickets-status-In-Progress { background: rgba(217, 119, 6, 0.15); color: #b45309; }
 .tickets-status-wait-for-response, .tickets-status-Wait-For-Response { background: rgba(14, 165, 233, 0.15); color: #0284c7; }
 .tickets-status-closed { background: rgba(5, 150, 105, 0.15); color: #059669; }
+.tickets-status-inactive { background: rgba(107, 114, 128, 0.15); color: #6b7280; }
 .tickets-status-unassigned { background: rgba(220, 38, 38, 0.1); color: #dc2626; }
 
 .tickets-empty-icon {

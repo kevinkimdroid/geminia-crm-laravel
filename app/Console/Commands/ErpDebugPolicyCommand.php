@@ -23,28 +23,45 @@ class ErpDebugPolicyCommand extends Command
 
         $url = rtrim($url, '/');
         $sep = (strpos($url, '?') !== false) ? '&' : '?';
-        $fullUrl = $url . $sep . 'policy=' . urlencode($policy) . '&limit=1';
 
-        $this->info("Fetching: {$fullUrl}");
+        // Try group, individual, then no filter (matches getPolicyDetails)
+        $systemsToTry = ['group', 'individual', ''];
+        $row = null;
+
+        foreach ($systemsToTry as $system) {
+            $params = 'policy=' . urlencode($policy) . '&limit=1';
+            if ($system !== '') {
+                $params .= '&system=' . $system;
+            }
+            $fullUrl = $url . $sep . $params;
+
+            $this->info('Trying: ' . $fullUrl);
+            $response = Http::timeout(15)->get($fullUrl);
+
+            if (! $response->successful()) {
+                $this->error('  API request failed: ' . $response->status());
+                $this->line('  ' . $response->body());
+                continue;
+            }
+
+            $body = $response->json();
+            $rows = $body['data'] ?? $body['clients'] ?? [];
+            $row = $rows[0] ?? null;
+            if ($row) {
+                $this->info('  → Found in ' . ($system ?: 'default') . ' view');
+                break;
+            } else {
+                $this->line('  → No rows');
+            }
+        }
         $this->newLine();
 
-        $response = Http::timeout(15)->get($fullUrl);
-
-        if (! $response->successful()) {
-            $this->error('API request failed: ' . $response->status());
-            $this->line($response->body());
-            return 1;
-        }
-
-        $body = $response->json();
-        $rows = $body['data'] ?? $body['clients'] ?? [];
-        $row = $rows[0] ?? null;
-
         if (! $row) {
-            $this->warn('No data returned for policy ' . $policy);
-            if (! empty($body['error'])) {
-                $this->error('API error: ' . $body['error']);
-            }
+            $this->warn('No data returned for policy ' . $policy . ' from any view (group, individual, default).');
+            $this->line('');
+            $this->line('Ensure: 1) ERP API is running (cd erp-clients-api && python app.py)');
+            $this->line('        2) ERP_CLIENTS_HTTP_URL is reachable from this machine (localhost:5000 or server IP)');
+            $this->line('        3) Policy exists in Oracle (LMS_GROUP_CRM_VIEW has POL_POLICY_NO, LMS_INDIVIDUAL_CRM_VIEW has POLICY_NUMBER)');
             return 1;
         }
 

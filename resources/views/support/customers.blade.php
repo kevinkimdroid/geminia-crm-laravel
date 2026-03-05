@@ -35,13 +35,23 @@
 </div>
 @endif
 
+@if(in_array($clientsSource ?? 'crm', ['erp_sync', 'erp_http']))
+{{-- Life System filter pills --}}
+<div class="clients-system-pills mb-3">
+    <a href="{{ route($listRoute ?? 'support.customers', collect(request()->query())->except('system')->all()) }}" class="clients-system-pill {{ !($system ?? '') ? 'active' : '' }}">All</a>
+    <a href="{{ route($listRoute ?? 'support.customers', array_merge(request()->query(), ['system' => 'group'])) }}" class="clients-system-pill clients-system-group {{ ($system ?? '') === 'group' ? 'active' : '' }}"><i class="bi bi-people-fill me-1"></i>Group Life</a>
+    <a href="{{ route($listRoute ?? 'support.customers', array_merge(request()->query(), ['system' => 'individual'])) }}" class="clients-system-pill clients-system-individual {{ ($system ?? '') === 'individual' ? 'active' : '' }}"><i class="bi bi-person-fill me-1"></i>Individual Life</a>
+</div>
+@endif
+
 {{-- Search & Stats --}}
 <div class="row g-4 mb-4">
     <div class="col-lg-8">
         <form method="GET" action="{{ route($listRoute ?? 'support.customers') }}" class="clients-search-form" id="customersSearchForm">
+            @if($system ?? '')<input type="hidden" name="system" value="{{ $system }}">@endif
             <div class="input-group clients-search-input-group">
                 <span class="input-group-text"><i class="bi bi-search text-muted"></i></span>
-                <input type="text" name="search" id="customersSearchInput" class="form-control" placeholder="{{ in_array($clientsSource ?? 'crm', ['erp_sync', 'erp_http']) ? 'Search by policy number, ID number, phone, life assured, intermediary...' : 'Search by name, email, or mobile...' }}" value="{{ $search ?? '' }}" autocomplete="off">
+                <input type="text" name="search" id="customersSearchInput" class="form-control" placeholder="{{ ($system ?? '') === 'group' && in_array($clientsSource ?? 'crm', ['erp_sync', 'erp_http']) ? 'Search by policy number (e.g. GEMPPP0334)...' : (in_array($clientsSource ?? 'crm', ['erp_sync', 'erp_http']) ? 'Search by policy number, ID number, phone, life assured...' : 'Search by name, email, or mobile...') }}" value="{{ $search ?? '' }}" autocomplete="off">
                 <button type="submit" class="btn btn-primary-custom">Search</button>
             </div>
         </form>
@@ -66,6 +76,7 @@
                     <th>Intermediary (Agent)</th>
                     <th>Life Assured (Client)</th>
                     <th>Product</th>
+                    <th>System</th>
                     <th>Policy Status</th>
                     <th class="text-end">Actions</th>
                     @else
@@ -83,7 +94,7 @@
             <tbody id="clientsTableBody">
                 @if($clientsLazyLoad ?? false)
                 <tr id="clientsLoadingRow">
-                    <td colspan="7" class="text-center py-5">
+                    <td colspan="{{ in_array($clientsSource ?? 'crm', ['erp_sync', 'erp_http']) ? 8 : 7 }}" class="text-center py-5">
                         <div class="clients-empty">
                             <div class="spinner-border text-primary mb-2" role="status"></div>
                             <p class="text-muted mb-0">Loading clients...</p>
@@ -93,12 +104,13 @@
                 @else
                 @forelse ($customers as $customer)
                     @php
-                        $rowPolicy = $customer->policy_no ?? $customer->policy_number ?? (is_array($customer) ? ($customer['policy_no'] ?? $customer['policy_number'] ?? '') : '');
+                        $rowPolicy = $customer->policy_no ?? $customer->policy_number ?? $customer->ipol_policy_no ?? $customer->pol_policy_no ?? (is_array($customer) ? ($customer['policy_no'] ?? $customer['policy_number'] ?? $customer['ipol_policy_no'] ?? $customer['pol_policy_no'] ?? '') : '');
+                        $rowIdentifier = trim((string) $rowPolicy);
                     @endphp
                     <tr>
                         @if(($customer->_erp_source ?? false) && in_array($clientsSource ?? 'crm', ['erp_sync', 'erp_http']))
                         <td>
-                            <a href="{{ route('support.serve-client', ['search' => $rowPolicy]) }}" class="clients-policy-link">
+                            <a href="{{ route('support.serve-client', ['search' => $rowIdentifier]) }}" class="clients-policy-link">
                                 {{ $rowPolicy ?: '—' }}
                             </a>
                         </td>
@@ -109,6 +121,10 @@
                         </td>
                         <td class="clients-product">{{ Str::limit($customer->product ?? '—', 40) }}</td>
                         <td>
+                            @php $ls = $customer->life_system ?? app(\App\Services\ErpClientService::class)->getLifeSystemFromProduct($customer->product ?? null); @endphp
+                            <span class="clients-system-badge clients-system-{{ $ls }}">{{ $ls === 'group' ? 'Group Life' : 'Individual Life' }}</span>
+                        </td>
+                        <td>
                             @php $st = $customer->status ?? ''; @endphp
                             <span class="clients-status-badge clients-status-{{ $st === 'A' ? 'active' : ($st === 'FL' ? 'lapsed' : 'other') }}">
                                 {{ $st ?: '—' }}
@@ -116,18 +132,19 @@
                         </td>
                         <td class="text-end">
                             <div class="clients-actions">
-                                <a href="{{ route('support.clients.create-ticket', ['policy' => $rowPolicy]) }}" class="btn btn-sm btn-success" title="Create ticket">
+                                @if($rowIdentifier)
+                                <a href="{{ route('support.clients.create-ticket', ['policy' => $rowIdentifier]) }}" class="btn btn-sm btn-success" title="Create ticket">
                                     <i class="bi bi-ticket-perforated"></i> Ticket
                                 </a>
-                                <form method="GET" action="{{ route('support.clients.show') }}" class="d-inline" style="display:inline!important">
-                                    <input type="hidden" name="policy" value="{{ $rowPolicy }}">
-                                    <button type="submit" class="btn btn-sm clients-btn-view" title="View full details">
-                                        <i class="bi bi-eye"></i> View
-                                    </button>
-                                </form>
-                                <a href="{{ route('support.serve-client', ['search' => $rowPolicy]) }}" class="btn btn-sm clients-btn-serve" title="Serve client">
+                                <a href="{{ route('support.clients.show', array_filter(['policy' => $rowIdentifier, 'system' => $system ?? null])) }}" class="btn btn-sm clients-btn-view" title="View full details">
+                                    <i class="bi bi-eye"></i> View
+                                </a>
+                                <a href="{{ route('support.serve-client', ['search' => $rowIdentifier]) }}" class="btn btn-sm clients-btn-serve" title="Serve client">
                                     <i class="bi bi-person-plus"></i> Serve
                                 </a>
+                                @else
+                                <span class="text-muted small">—</span>
+                                @endif
                             </div>
                         </td>
                         @else
@@ -170,13 +187,16 @@
                     </tr>
                 @empty
                     <tr>
-                        <td colspan="{{ in_array($clientsSource ?? 'crm', ['erp_sync', 'erp_http']) ? 7 : (in_array($clientsSource ?? 'crm', ['erp']) ? 6 : 5) }}" class="text-center py-5">
+                        <td colspan="{{ in_array($clientsSource ?? 'crm', ['erp_sync', 'erp_http']) ? 8 : (in_array($clientsSource ?? 'crm', ['erp']) ? 6 : 5) }}" class="text-center py-5">
                             <div class="clients-empty">
                                 <div class="clients-empty-icon"><i class="bi bi-people"></i></div>
                                 <h6 class="mt-3 mb-2">No {{ ($listRoute ?? 'support.customers') === 'contacts.index' ? 'contacts' : 'clients' }} found</h6>
                                 <p class="text-muted mb-3">
                                     @if($search ?? '')
                                     Try a different search or <a href="{{ route($listRoute ?? 'support.customers') }}">view all</a>.
+                                    @if(($system ?? '') === 'group' && in_array($clientsSource ?? 'crm', ['erp_http', 'erp_sync']))
+                                    <br><a href="{{ route('support.clients.debug-api', ['policy' => $search, 'search' => $search, 'system' => 'group', 'debug' => '1']) }}" target="_blank" class="small">Debug API response</a>
+                                    @endif
                                     @else
                                     Get started by adding your first {{ ($listRoute ?? 'support.customers') === 'contacts.index' ? 'contact' : 'client' }}.
                                     @endif
@@ -252,6 +272,21 @@
 .clients-status-lapsed { background: #fee2e2; color: #991b1b; }
 .clients-status-other { background: #f1f5f9; color: #475569; }
 
+.clients-system-pills { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.clients-system-pill {
+    padding: 0.4rem 1rem; border-radius: 20px; font-size: 0.85rem; font-weight: 500; text-decoration: none; color: var(--geminia-text-muted);
+    border: 1px solid var(--geminia-border); background: #fff; transition: all 0.15s;
+}
+.clients-system-pill:hover { border-color: var(--geminia-primary); color: var(--geminia-primary); background: var(--geminia-primary-muted); }
+.clients-system-pill.active { background: var(--geminia-primary); border-color: var(--geminia-primary); color: #fff; }
+.clients-system-group.active { background: #0d9488; border-color: #0d9488; }
+.clients-system-individual.active { background: #6366f1; border-color: #6366f1; }
+.clients-system-badge {
+    display: inline-block; padding: 0.2rem 0.55rem; border-radius: 6px; font-size: 0.7rem; font-weight: 600;
+}
+.clients-system-badge.clients-system-group { background: #ccfbf1; color: #0f766e; }
+.clients-system-badge.clients-system-individual { background: #e0e7ff; color: #4338ca; }
+
 .clients-actions { display: flex; gap: 0.35rem; justify-content: flex-end; flex-wrap: wrap; }
 .clients-btn-view { background: var(--geminia-primary-muted); color: var(--geminia-primary) !important; border: none; padding: 0.35rem 0.65rem; border-radius: 8px; font-size: 0.8rem; text-decoration: none; display: inline-flex; align-items: center; }
 .clients-btn-view:hover { background: var(--geminia-primary-light); color: var(--geminia-primary-dark) !important; }
@@ -324,13 +359,14 @@
     var showUrl = '{{ route("support.clients.show") }}';
     var ticketUrl = '{{ route("support.clients.create-ticket") }}';
     var search = @json($search ?? '');
+    var system = @json($system ?? '');
     var initialPage = {{ (int) ($page ?? 1) }};
     var listRoute = '{{ $listRoute ?? "support.customers" }}';
 
     function esc(s) { var d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
     function loadClients(page) {
         page = page || 1;
-        var url = apiUrl + '?page=' + page + (search ? '&search=' + encodeURIComponent(search) : '');
+        var url = apiUrl + '?page=' + page + (search ? '&search=' + encodeURIComponent(search) : '') + (system ? '&system=' + encodeURIComponent(system) : '');
         fetch(url, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
             .then(function(r) { return r.json(); })
             .then(function(d) {
@@ -345,29 +381,31 @@
                 if (totalEl) totalEl.textContent = (d.total || 0).toLocaleString();
 
                 var rows = (d.customers || []).map(function(c) {
-                    var policy = c.policy || '';
+                    var policy = (c.policy_no || c.policy_number || c.policy || c.pol_policy_no || '').toString().trim();
+                    var identifier = policy;
                     var statusClass = (c.status === 'A') ? 'active' : ((c.status === 'FL') ? 'lapsed' : 'other');
-                    return '<tr><td><a href="' + serveUrl + '?search=' + encodeURIComponent(policy) + '" class="clients-policy-link">' + esc(policy || '—') + '</a></td>' +
+                    var ls = c.life_system || 'individual';
+                    var systemLabel = ls === 'group' ? 'Group Life' : 'Individual Life';
+                    return '<tr><td><a href="' + serveUrl + '?search=' + encodeURIComponent(identifier) + '" class="clients-policy-link">' + esc(policy || '—') + '</a></td>' +
                         '<td>' + esc(c.pol_prepared_by || '—') + '</td>' +
                         '<td>' + esc((c.intermediary || '—').substring(0, 25)) + '</td>' +
                         '<td><span class="clients-name">' + esc(c.life_assur || '—') + '</span></td>' +
                         '<td class="clients-product">' + esc((c.product || '—').substring(0, 40)) + '</td>' +
+                        '<td><span class="clients-system-badge clients-system-' + ls + '">' + esc(systemLabel) + '</span></td>' +
                         '<td><span class="clients-status-badge clients-status-' + statusClass + '">' + esc(c.status || '—') + '</span></td>' +
                         '<td class="text-end"><div class="clients-actions">' +
-                        '<a href="' + ticketUrl + '?policy=' + encodeURIComponent(policy) + '" class="btn btn-sm btn-success" title="Create ticket"><i class="bi bi-ticket-perforated"></i> Ticket</a> ' +
-                        '<form method="GET" action="' + showUrl + '" class="d-inline" style="display:inline!important">' +
-                        '<input type="hidden" name="policy" value="' + esc(policy) + '">' +
-                        '<button type="submit" class="btn btn-sm clients-btn-view" title="View full details"><i class="bi bi-eye"></i> View</button></form> ' +
-                        '<a href="' + serveUrl + '?search=' + encodeURIComponent(policy) + '" class="btn btn-sm clients-btn-serve" title="Serve client"><i class="bi bi-person-plus"></i> Serve</a>' +
+                        (identifier ? ('<a href="' + ticketUrl + '?policy=' + encodeURIComponent(identifier) + '" class="btn btn-sm btn-success" title="Create ticket"><i class="bi bi-ticket-perforated"></i> Ticket</a> ' +
+                        '<a href="' + showUrl + '?policy=' + encodeURIComponent(identifier) + (system ? '&system=' + encodeURIComponent(system) : '') + '" class="btn btn-sm clients-btn-view" title="View full details"><i class="bi bi-eye"></i> View</a> ' +
+                        '<a href="' + serveUrl + '?search=' + encodeURIComponent(identifier) + '" class="btn btn-sm clients-btn-serve" title="Serve client"><i class="bi bi-person-plus"></i> Serve</a>') : '<span class="text-muted small">—</span>') +
                         '</div></td></tr>';
                 }).join('');
 
                 if (rows) {
                     tbody.insertAdjacentHTML('beforeend', rows);
                 } else if (d.error) {
-                    tbody.insertAdjacentHTML('beforeend', '<tr><td colspan="7" class="text-center py-4 text-warning">' + esc(d.error) + '</td></tr>');
+                    tbody.insertAdjacentHTML('beforeend', '<tr><td colspan="8" class="text-center py-4 text-warning">' + esc(d.error) + '</td></tr>');
                 } else {
-                    tbody.insertAdjacentHTML('beforeend', '<tr><td colspan="7" class="text-center py-5"><div class="clients-empty"><div class="clients-empty-icon"><i class="bi bi-people"></i></div><h6 class="mt-3 mb-2">No clients found</h6></div></td></tr>');
+                    tbody.insertAdjacentHTML('beforeend', '<tr><td colspan="8" class="text-center py-5"><div class="clients-empty"><div class="clients-empty-icon"><i class="bi bi-people"></i></div><h6 class="mt-3 mb-2">No clients found</h6></div></td></tr>');
                 }
 
                 var perPage = d.per_page || 25;
@@ -381,7 +419,7 @@
                 var pg = d.page || 1;
                 var pagHtml = '';
                 if (lastPage > 1) {
-                    var base = '{{ route("support.customers") }}' + (search ? '?search=' + encodeURIComponent(search) + '&' : '?');
+                    var base = '{{ route("support.customers") }}?' + (search ? 'search=' + encodeURIComponent(search) + '&' : '') + (system ? 'system=' + encodeURIComponent(system) + '&' : '');
                     if (pg > 1) pagHtml += '<a href="' + base + 'page=' + (pg-1) + '" class="page-link clients-ajax-page" data-page="' + (pg-1) + '">Previous</a> ';
                     pagHtml += '<span class="mx-2">Page ' + pg + ' of ' + lastPage + '</span> ';
                     if (pg < lastPage) pagHtml += '<a href="' + base + 'page=' + (pg+1) + '" class="page-link clients-ajax-page" data-page="' + (pg+1) + '">Next</a>';
@@ -400,7 +438,7 @@
                 var loadingRow = document.getElementById('clientsLoadingRow');
                 var tbody = document.getElementById('clientsTableBody');
                 if (loadingRow) loadingRow.remove();
-                if (tbody) tbody.insertAdjacentHTML('beforeend', '<tr><td colspan="7" class="text-center py-4 text-danger">Failed to load clients. <a href="">Refresh</a></td></tr>');
+                if (tbody) tbody.insertAdjacentHTML('beforeend', '<tr><td colspan="8" class="text-center py-4 text-danger">Failed to load clients. <a href="">Refresh</a></td></tr>');
             });
     }
     loadClients(initialPage);

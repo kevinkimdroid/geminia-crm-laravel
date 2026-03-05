@@ -15,6 +15,10 @@ class SmsNotifierController extends Controller
     {
         $contactId = $request->filled('contact_id') ? (int) $request->get('contact_id') : null;
         $ticketId = $request->filled('ticket_id') ? (int) $request->get('ticket_id') : null;
+        $presetPhone = $request->filled('phone') ? preg_replace('/\D/', '', trim($request->get('phone'))) : null;
+        if ($presetPhone !== null && strlen($presetPhone) < 9) {
+            $presetPhone = null;
+        }
 
         $presetContact = null;
         if ($contactId) {
@@ -31,6 +35,8 @@ class SmsNotifierController extends Controller
             'customers' => $customers,
             'smsConfigured' => $sms->isConfigured(),
             'presetContact' => $presetContact,
+            'presetPhone' => $presetPhone,
+            'presetPhoneDisplay' => $request->filled('phone') ? trim($request->get('phone')) : null,
         ]);
     }
 

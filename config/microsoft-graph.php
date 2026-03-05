@@ -6,7 +6,9 @@ return [
     | Microsoft Graph API (Office 365)
     |--------------------------------------------------------------------------
     | Best option for Office 365 - no IMAP quirks, OAuth2, works with MFA.
-    | Requires Azure AD app registration with Mail.Read application permission.
+    | Requires Azure AD app registration:
+    |   - Mail.Read: fetch inbox
+    |   - Mail.Send: send auto-reply emails (add for ticket confirmation)
     */
     'enabled' => filter_var(env('MSGRAPH_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
 

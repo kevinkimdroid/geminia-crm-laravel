@@ -97,6 +97,30 @@
             </div>
         </a>
     </div>
+    <div class="col-md-6 col-lg-4">
+        <a href="{{ route('support.maturities') }}" class="card support-quick-card text-decoration-none h-100" style="border-color:var(--geminia-primary);">
+            <div class="card-body d-flex align-items-center gap-3">
+                <div class="support-quick-icon" style="background:rgba(14,67,133,0.15)"><i class="bi bi-calendar-event-fill"></i></div>
+                <div>
+                    <h6 class="mb-1 fw-semibold">Maturities</h6>
+                    <p class="text-muted small mb-0">Policies maturing soon → Create tickets</p>
+                </div>
+                <i class="bi bi-chevron-right ms-auto text-primary"></i>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-6 col-lg-4">
+        <a href="{{ route('tickets.create', ['organization_id' => 'line:Group Life', 'from' => 'serve-client']) }}" class="card support-quick-card text-decoration-none h-100" style="border-color:var(--geminia-primary);">
+            <div class="card-body d-flex align-items-center gap-3">
+                <div class="support-quick-icon" style="background:rgba(14,67,133,0.15)"><i class="bi bi-people-fill"></i></div>
+                <div>
+                    <h6 class="mb-1 fw-semibold">Group Life — New Ticket</h6>
+                    <p class="text-muted small mb-0">Quick create ticket for Group Life issues</p>
+                </div>
+                <i class="bi bi-ticket-perforated text-primary ms-auto"></i>
+            </div>
+        </a>
+    </div>
 </div>
 
 <style>

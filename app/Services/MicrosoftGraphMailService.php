@@ -62,7 +62,8 @@ class MicrosoftGraphMailService
                 $ccList = $msg['ccRecipients'] ?? [];
                 $body = $msg['body'] ?? [];
 
-                DB::connection('vtiger')->table('mail_manager_emails')->insert([
+                try {
+                    $emailId = DB::connection('vtiger')->table('mail_manager_emails')->insertGetId([
                     'message_uid' => $uid,
                     'folder' => $folder,
                     'from_address' => $from['address'] ?? '',
@@ -77,8 +78,16 @@ class MicrosoftGraphMailService
                     'created_at' => now(),
                     'updated_at' => now(),
                 ]);
+                } catch (\Illuminate\Database\QueryException $e) {
+                    $errMsg = $e->getMessage();
+                    if (str_contains($errMsg, 'Duplicate entry') || str_contains($errMsg, '1062')) {
+                        continue;
+                    }
+                    throw $e;
+                }
 
                 $results['stored']++;
+                $this->processAutoTicket($emailId);
             } catch (\Throwable $e) {
                 $results['errors'][] = $e->getMessage();
                 Log::warning('MicrosoftGraphMailService message error: ' . $e->getMessage());
@@ -163,5 +172,63 @@ class MicrosoftGraphMailService
         $text = strip_tags($html);
         $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         return trim(preg_replace('/\s+/', ' ', $text));
+    }
+
+    protected function processAutoTicket(int $emailId): void
+    {
+        try {
+            app(AutoTicketFromEmailService::class)->processNewInboundEmail($emailId);
+        } catch (\Throwable $e) {
+            Log::warning('MicrosoftGraphMailService auto-ticket: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Send email via Microsoft Graph (same mailbox used for fetch).
+     * Requires Mail.Send application permission in Azure AD.
+     */
+    public function sendMail(string $toAddress, ?string $toName, string $subject, string $body, bool $bodyIsHtml = false): bool
+    {
+        if (! $this->isConfigured()) {
+            return false;
+        }
+
+        $token = $this->getAccessToken();
+        if (! $token) {
+            return false;
+        }
+
+        $mailbox = config('microsoft-graph.mailbox');
+        $mailboxEncoded = rawurlencode($mailbox);
+        $url = self::GRAPH_BASE . "/users/{$mailboxEncoded}/sendMail";
+
+        $payload = [
+            'message' => [
+                'subject' => $subject,
+                'body' => [
+                    'contentType' => $bodyIsHtml ? 'HTML' : 'Text',
+                    'content' => $body,
+                ],
+                'toRecipients' => [
+                    [
+                        'emailAddress' => [
+                            'address' => $toAddress,
+                            'name' => $toName ?: null,
+                        ],
+                    ],
+                ],
+            ],
+        ];
+
+        $response = Http::withToken($token)
+            ->timeout(15)
+            ->post($url, $payload);
+
+        if (! $response->successful()) {
+            Log::warning('MicrosoftGraphMailService sendMail failed: ' . $response->status() . ' ' . $response->body());
+            return false;
+        }
+
+        return true;
     }
 }

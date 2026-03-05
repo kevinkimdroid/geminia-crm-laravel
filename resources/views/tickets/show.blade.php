@@ -33,18 +33,19 @@
         </a>
         @endif
         @if(($ticket->status ?? '') !== 'Closed')
-        <a href="{{ route('tickets.edit', $ticket->ticketid) }}" class="btn btn-sm btn-success">
+        <a href="{{ route('tickets.close.form', $ticket->ticketid) }}" class="btn btn-sm btn-success">
             <i class="bi bi-check-circle me-1"></i> Close Ticket
         </a>
+        @endif
+        @if(($ticket->status ?? '') !== 'Inactive')
+        <form action="{{ route('tickets.inactivate', $ticket->ticketid) }}" method="POST" onsubmit="return confirm('Inactivate this ticket? It will no longer appear in active lists.');" class="d-inline">
+            @csrf
+            <button type="submit" class="btn btn-sm btn-outline-secondary" title="Inactivate ticket"><i class="bi bi-pause-circle me-1"></i> Inactivate</button>
+        </form>
         @endif
         <a href="{{ route('tickets.edit', $ticket->ticketid) }}" class="btn btn-sm app-btn-primary">
             <i class="bi bi-pencil me-1"></i> Edit
         </a>
-        <form action="{{ route('tickets.destroy', $ticket->ticketid) }}" method="POST" onsubmit="return confirm('Delete this ticket?');" class="d-inline">
-            @csrf
-            @method('DELETE')
-            <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
-        </form>
     </div>
 </div>
 
@@ -59,17 +60,17 @@
     <div class="col-lg-8">
         <div class="app-card p-4">
             <h6 class="text-uppercase small fw-bold mb-4" style="color:var(--geminia-primary);letter-spacing:0.08em">Description Details</h6>
-            <div class="ticket-description">{{ $ticket->description ? nl2br(e($ticket->description)) : 'No description.' }}</div>
+            <div class="ticket-description">{{ $ticket->description ? nl2br(e(preg_replace("/\n{2,}/", "\n", $ticket->description))) : 'No description.' }}</div>
         </div>
         @if($ticket->solution ?? null)
         <div class="app-card p-4 mt-4">
             <h6 class="text-uppercase small fw-bold mb-4" style="color:var(--geminia-primary);letter-spacing:0.08em">Ticket Resolution</h6>
-            <div class="ticket-description">{{ nl2br(e($ticket->solution)) }}</div>
+            <div class="ticket-description">{{ nl2br(e(preg_replace("/\n{2,}/", "\n", $ticket->solution ?? ''))) }}</div>
         </div>
         @elseif(($ticket->status ?? '') !== 'Closed')
         <div class="app-card p-4 mt-4 border border-success">
             <p class="text-muted small mb-2"><i class="bi bi-info-circle me-1"></i>Add a solution and change status to Closed to resolve this ticket.</p>
-            <a href="{{ route('tickets.edit', $ticket->ticketid) }}" class="btn btn-sm btn-success"><i class="bi bi-check-circle me-1"></i> Close Ticket</a>
+            <a href="{{ route('tickets.close.form', $ticket->ticketid) }}" class="btn btn-sm btn-success"><i class="bi bi-check-circle me-1"></i> Close Ticket</a>
         </div>
         @endif
     </div>
@@ -84,6 +85,10 @@
                 <div class="d-flex justify-content-between py-2 border-bottom" style="border-color:var(--geminia-border)!important">
                     <dt class="text-muted small mb-0">Priority</dt>
                     <dd class="mb-0">{{ $ticket->priority ?? '—' }}</dd>
+                </div>
+                <div class="d-flex justify-content-between py-2 border-bottom" style="border-color:var(--geminia-border)!important">
+                    <dt class="text-muted small mb-0">Assigned To</dt>
+                    <dd class="mb-0">{{ $ticket->assigned_to_name ?? '—' }}</dd>
                 </div>
                 @if($ticket->category ?? null)
                 <div class="d-flex justify-content-between py-2 border-bottom" style="border-color:var(--geminia-border)!important">
@@ -114,6 +119,7 @@
 .ticket-status-in-progress, .ticket-status-In-Progress { background: rgba(217, 119, 6, 0.15); color: #b45309; }
 .ticket-status-wait-for-response, .ticket-status-Wait-For-Response { background: rgba(14, 165, 233, 0.15); color: #0284c7; }
 .ticket-status-closed { background: rgba(5, 150, 105, 0.15); color: #059669; }
+.ticket-status-inactive { background: rgba(107, 114, 128, 0.15); color: #6b7280; }
 .ticket-description { line-height: 1.65; color: var(--geminia-text); }
 .btn-outline-danger { border-color: #fecaca; color: #dc2626; }
 .btn-outline-danger:hover { background: #fef2f2; border-color: #dc2626; color: #dc2626; }

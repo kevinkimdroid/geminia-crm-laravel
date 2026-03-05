@@ -575,14 +575,19 @@
         <div class="card contact-detail-card">
             <div class="card-body p-0">
                 <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 p-3 border-bottom bg-light">
-                    <h6 class="text-uppercase small fw-bold text-muted mb-0">Emails sent to client <small class="text-muted">(from {{ config('email-service.sender', 'life@geminialife.co.ke') }})</small></h6>
-                    <a href="{{ route('tools.mail-manager') }}" class="btn btn-outline-primary btn-sm">
-                        <i class="bi bi-inbox me-1"></i>Mail Manager
-                    </a>
+                    <h6 class="text-uppercase small fw-bold text-muted mb-0">Emails <small class="text-muted">(to/from {{ config('email-service.sender', 'life@geminialife.co.ke') }})</small></h6>
+                    <div class="d-flex gap-2">
+                        <a href="{{ route('tools.mail-manager.create', ['from_address' => $contact->email ?? $contact->secondaryemail ?? $contact->otheremail ?? '', 'from_name' => trim(($contact->firstname ?? '') . ' ' . ($contact->lastname ?? ''))]) }}" class="btn btn-outline-primary btn-sm">
+                            <i class="bi bi-plus-lg me-1"></i>Create Email
+                        </a>
+                        <a href="{{ route('tools.mail-manager') }}" class="btn btn-outline-secondary btn-sm">
+                            <i class="bi bi-inbox me-1"></i>Mail Manager
+                        </a>
+                    </div>
                 </div>
                 @if(!($contact->email ?? $contact->secondaryemail ?? $contact->otheremail))
                 <div class="p-4">
-                    <p class="text-muted mb-0">No email address on file for this client. Add a primary, secondary, or other email in contact details to match sent emails.</p>
+                    <p class="text-muted mb-0">No email address on file for this client. Add a primary, secondary, or other email in contact details to match emails, or <a href="{{ route('tools.mail-manager.create') }}">create an email record</a> manually.</p>
                 </div>
                 @else
                 <div class="table-responsive">
@@ -618,8 +623,8 @@
                             <tr>
                                 <td colspan="4" class="text-center py-5 text-muted">
                                     <i class="bi bi-envelope display-6 d-block mb-2 opacity-50"></i>
-                                    <p class="mb-2">No emails sent to this client yet.</p>
-                                    <p class="small mb-0">Emails are fetched from the Mail Manager (life@geminialife.co.ke). <a href="{{ route('tools.mail-manager') }}">Fetch emails</a> to populate this list. Note: Sent emails require fetching from the Sent folder.</p>
+                                    <p class="mb-2">No emails for this client yet.</p>
+                                    <p class="small mb-0"><a href="{{ route('tools.mail-manager.create', ['from_address' => $contact->email ?? $contact->secondaryemail ?? '', 'from_name' => trim(($contact->firstname ?? '') . ' ' . ($contact->lastname ?? ''))]) }}">Create Email</a> to log one, or <a href="{{ route('tools.mail-manager') }}">Fetch emails</a> from life@geminialife.co.ke.</p>
                                 </td>
                             </tr>
                             @endforelse

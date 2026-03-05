@@ -16,25 +16,39 @@
     <div class="row g-3 mb-4">
         @if($clientsCountDeferred ?? false)
         <div class="col-sm-6 col-xl-3" id="clientsStatCard">
-            <a href="{{ route('support.customers') }}" class="dashboard-stat dashboard-stat-primary">
+            <div class="dashboard-stat dashboard-stat-primary dashboard-stat-clients">
                 <div class="dashboard-stat-icon"><i class="bi bi-people-fill"></i></div>
                 <div class="dashboard-stat-body">
-                    <span class="dashboard-stat-label">Clients</span>
-                    <span class="dashboard-stat-value" id="clientsCountValue"><span class="spinner-border spinner-border-sm align-middle" role="status"></span></span>
-                    <span class="dashboard-stat-cta">View all <i class="bi bi-arrow-right"></i></span>
+                    <a href="{{ route('support.customers') }}" class="dashboard-stat-main-link">
+                        <span class="dashboard-stat-label">Clients</span>
+                        <span class="dashboard-stat-value" id="clientsCountValue"><span class="spinner-border spinner-border-sm align-middle" role="status"></span></span>
+                        <span class="dashboard-stat-cta">View all <i class="bi bi-arrow-right"></i></span>
+                    </a>
+                    <div class="dashboard-stat-links mt-2">
+                        <a href="{{ route('support.customers', ['system' => 'group']) }}" class="dashboard-stat-link dashboard-stat-link-group"><i class="bi bi-people-fill me-1"></i>Group Life</a>
+                        <a href="{{ route('support.customers', ['system' => 'individual']) }}" class="dashboard-stat-link dashboard-stat-link-individual"><i class="bi bi-person-fill me-1"></i>Individual</a>
+                    </div>
                 </div>
-            </a>
+            </div>
         </div>
         @elseif(isset($clientsCount) && $clientsCount !== null)
         <div class="col-sm-6 col-xl-3">
-            <a href="{{ route('support.customers') }}" class="dashboard-stat dashboard-stat-primary">
+            <div class="dashboard-stat dashboard-stat-primary dashboard-stat-clients">
                 <div class="dashboard-stat-icon"><i class="bi bi-people-fill"></i></div>
                 <div class="dashboard-stat-body">
-                    <span class="dashboard-stat-label">Clients</span>
-                    <span class="dashboard-stat-value">{{ number_format($clientsCount) }}</span>
-                    <span class="dashboard-stat-cta">View all <i class="bi bi-arrow-right"></i></span>
+                    <a href="{{ route('support.customers') }}" class="dashboard-stat-main-link">
+                        <span class="dashboard-stat-label">Clients</span>
+                        <span class="dashboard-stat-value">{{ number_format($clientsCount) }}</span>
+                        <span class="dashboard-stat-cta">View all <i class="bi bi-arrow-right"></i></span>
+                    </a>
+                    @if(in_array(config('erp.clients_view_source', 'crm'), ['erp_http', 'erp_sync']))
+                    <div class="dashboard-stat-links mt-2">
+                        <a href="{{ route('support.customers', ['system' => 'group']) }}" class="dashboard-stat-link dashboard-stat-link-group"><i class="bi bi-people-fill me-1"></i>Group Life</a>
+                        <a href="{{ route('support.customers', ['system' => 'individual']) }}" class="dashboard-stat-link dashboard-stat-link-individual"><i class="bi bi-person-fill me-1"></i>Individual</a>
+                    </div>
+                    @endif
                 </div>
-            </a>
+            </div>
         </div>
         @endif
         <div class="col-sm-6 col-xl-3" id="contactsStatCard">
@@ -213,9 +227,13 @@
 
     {{-- Quick actions --}}
     <div class="dashboard-quick-actions mt-4">
-        @if(isset($clientsCount) && $clientsCount !== null)
+        @if(isset($clientsCount) && $clientsCount !== null || ($clientsCountDeferred ?? false))
         <a href="{{ route('support.customers') }}" class="dashboard-quick-action"><i class="bi bi-people"></i> Clients</a>
         <a href="{{ route('support.serve-client') }}" class="dashboard-quick-action"><i class="bi bi-person-plus"></i> Serve Client</a>
+        @if(in_array(config('erp.clients_view_source', 'crm'), ['erp_http', 'erp_sync']))
+        <a href="{{ route('support.customers', ['system' => 'group']) }}" class="dashboard-quick-action dashboard-quick-action-group"><i class="bi bi-people-fill"></i> Group Life</a>
+        <a href="{{ route('support.customers', ['system' => 'individual']) }}" class="dashboard-quick-action dashboard-quick-action-individual"><i class="bi bi-person-fill"></i> Individual Life</a>
+        @endif
         @endif
         @if($pbxCanCall ?? false)
         <a href="{{ route('tools.pbx-manager') }}" class="dashboard-quick-action"><i class="bi bi-telephone"></i> Make Call</a>
@@ -277,6 +295,18 @@
 .dashboard-stat:hover .dashboard-stat-cta { color: var(--geminia-primary); }
 .dashboard-stat-primary .dashboard-stat-cta { color: rgba(255,255,255,0.9); }
 .dashboard-stat-meta { color: #059669; }
+.dashboard-stat-links { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.dashboard-stat-link {
+    font-size: 0.7rem; font-weight: 600; padding: 0.25rem 0.5rem;
+    border-radius: 6px; text-decoration: none; opacity: 0.9;
+}
+.dashboard-stat-link:hover { opacity: 1; text-decoration: underline; }
+.dashboard-stat-link-group { background: rgba(255,255,255,0.25); color: #fff; }
+.dashboard-stat-link-individual { background: rgba(255,255,255,0.2); color: rgba(255,255,255,0.95); }
+.dashboard-stat-clients { cursor: default; }
+.dashboard-stat-clients:hover { border-color: var(--geminia-primary); box-shadow: 0 8px 24px rgba(26, 85, 158, 0.12); transform: translateY(-2px); }
+.dashboard-stat-main-link { display: block; text-decoration: none; color: inherit; }
+.dashboard-stat-main-link:hover { color: inherit; }
 
 .dashboard-card { padding: 1.5rem; }
 .dashboard-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; }
@@ -386,6 +416,8 @@
     color: var(--geminia-primary);
 }
 .dashboard-quick-action i { font-size: 1.1rem; }
+.dashboard-quick-action-group:hover { border-color: #0d9488; background: #ccfbf1; color: #0f766e; }
+.dashboard-quick-action-individual:hover { border-color: #6366f1; background: #e0e7ff; color: #4338ca; }
 </style>
 
 @push('scripts')

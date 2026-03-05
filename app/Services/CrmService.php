@@ -179,20 +179,25 @@ class CrmService
 
     public function getAccounts(int $limit = 200): \Illuminate\Support\Collection
     {
-        try {
-            return DB::connection('vtiger')
-                ->table('vtiger_account as a')
-                ->join('vtiger_crmentity as e', 'a.accountid', '=', 'e.crmid')
-                ->where('e.deleted', 0)
-                ->whereIn('e.setype', ['Accounts', 'Account'])
-                ->select('a.accountid', 'a.accountname')
-                ->orderBy('a.accountname')
-                ->limit($limit)
-                ->get();
-        } catch (\Throwable $e) {
-            Log::warning('CrmService::getAccounts: ' . $e->getMessage());
-            return collect();
+        foreach (['vtiger_account', 'vtiger_accounts'] as $table) {
+            try {
+                $rows = DB::connection('vtiger')
+                    ->table($table . ' as a')
+                    ->join('vtiger_crmentity as e', 'a.accountid', '=', 'e.crmid')
+                    ->where('e.deleted', 0)
+                    ->whereIn('e.setype', ['Accounts', 'Account'])
+                    ->select('a.accountid', 'a.accountname')
+                    ->orderBy('a.accountname')
+                    ->limit($limit)
+                    ->get();
+                if ($rows->isNotEmpty()) {
+                    return $rows;
+                }
+            } catch (\Throwable $e) {
+                Log::debug('CrmService::getAccounts ' . $table . ': ' . $e->getMessage());
+            }
         }
+        return collect();
     }
 
     public function getProducts(int $limit = 200, ?string $search = null): \Illuminate\Support\Collection
@@ -637,25 +642,31 @@ class CrmService
     public function getTickets(int $limit = 50, int $offset = 0, ?string $status = null, ?string $search = null)
     {
         try {
+            $driver = DB::connection('vtiger')->getDriverName();
+            $descExpr = in_array($driver, ['mysql', 'mariadb'], true)
+                ? 'LEFT(e.description, 500)'
+                : 'SUBSTR(COALESCE(e.description, \'\'), 1, 500)';
+
             $query = DB::connection('vtiger')
                 ->table('vtiger_troubletickets as t')
                 ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
                 ->leftJoin('vtiger_contactdetails as c', 't.contact_id', '=', 'c.contactid')
-                ->leftJoin('vtiger_contactscf as cf', 'c.contactid', '=', 'cf.contactid')
                 ->leftJoin('vtiger_users as u', 'e.smownerid', '=', 'u.id')
                 ->where('e.deleted', 0)
                 ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
                 ->select(
-                    't.*',
+                    't.ticketid',
+                    't.ticket_no',
+                    't.title',
+                    't.status',
+                    't.priority',
+                    't.contact_id',
                     'e.createdtime',
                     'e.modifiedtime',
                     'e.smownerid',
                     'c.firstname as contact_first',
                     'c.lastname as contact_last',
-                    'cf.cf_860',
-                    'cf.cf_856',
-                    'cf.cf_852',
-                    'cf.cf_872',
+                    DB::raw("{$descExpr} as description"),
                     'u.first_name as owner_first',
                     'u.last_name as owner_last',
                     'u.user_name as owner_username'
@@ -803,7 +814,7 @@ class CrmService
                 $query->where(function ($q) use ($term) {
                     $q->where('t.title', 'like', $term)
                         ->orWhere('t.ticket_no', 'like', $term)
-                        ->orWhere('t.description', 'like', $term);
+                        ->orWhere('e.description', 'like', $term);
                 });
             }
 
@@ -839,7 +850,7 @@ class CrmService
                 $query->where(function ($q) use ($term) {
                     $q->where('t.title', 'like', $term)
                         ->orWhere('t.ticket_no', 'like', $term)
-                        ->orWhere('t.description', 'like', $term);
+                        ->orWhere('e.description', 'like', $term);
                 });
             }
 
@@ -922,7 +933,12 @@ class CrmService
             $contact = new Contact((array) $row);
             $contact->contactid = $row->contactid;
             $contact->idNumber = $row->idNumber ?? null;
-            $contact->policy_number = $row->cf_860 ?? $row->cf_856 ?? $row->cf_852 ?? $row->cf_872 ?? null;
+            // cf_852 = KRA PIN; cf_860, cf_856, cf_872 = policy fields. Exclude cf_852 and reject any value that looks like PIN (e.g. A006533554X)
+            $contact->policy_number = $this->pickPolicyExcludingPin(
+                $row->cf_860 ?? null,
+                $row->cf_856 ?? null,
+                $row->cf_872 ?? null
+            );
             $contact->pin = $row->cf_852 ?? null;
             $contact->assigned_to_name = trim($row->assigned_to_name ?? '') ?: null;
             $contact->source = $row->source ?? null;
@@ -1536,6 +1552,25 @@ class CrmService
             Log::warning('CrmService::getCallsSummaryReport: ' . $e->getMessage());
             return ['by_status' => [], 'by_user' => [], 'total_calls' => 0, 'total_duration_sec' => 0];
         }
+    }
+
+    /**
+     * Pick first non-empty policy value, excluding any that look like KRA PIN (e.g. A006533554X).
+     * PIN pattern: letter + 9 digits + letter.
+     */
+    protected function pickPolicyExcludingPin(?string ...$candidates): ?string
+    {
+        foreach ($candidates as $v) {
+            $v = trim((string) ($v ?? ''));
+            if ($v === '') {
+                continue;
+            }
+            if (preg_match('/^[A-Z]\d{9}[A-Z]$/i', $v)) {
+                continue;
+            }
+            return $v;
+        }
+        return null;
     }
 
     /**

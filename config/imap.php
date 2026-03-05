@@ -7,7 +7,7 @@ return array_merge($vendorConfig, [
 
     'accounts' => array_merge($vendorConfig['accounts'] ?? [], [
         'geminia' => [
-            'host' => env('IMAP_HOST', 'mail.geminialife.co.ke'),
+            'host' => env('IMAP_HOST', 'smtp.office365.com'),
             'port' => (int) env('IMAP_PORT', 993),
             'protocol' => 'imap',
             'encryption' => env('IMAP_ENCRYPTION', 'ssl'),

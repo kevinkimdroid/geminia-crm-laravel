@@ -77,6 +77,17 @@ ADVANTA_SHORTCODE=your_shortcode</pre>
                             <i class="bi bi-exclamation-triangle me-2"></i>This client has no phone number. <a href="{{ route('contacts.edit', $presetContact->contactid ?? 0) }}">Add one</a> or <a href="{{ route('support.sms-notifier') }}">choose another recipient</a>.
                         </div>
                         @endif
+                        @elseif($presetPhoneDisplay ?? null)
+                        <div class="d-flex align-items-center gap-2 p-3 rounded-2 bg-light border" style="border-color: var(--card-border)!important">
+                            <i class="bi bi-telephone-fill text-primary"></i>
+                            <div>
+                                <span class="fw-semibold">Client</span>
+                                <span class="text-muted ms-2 font-monospace">{{ $presetPhoneDisplay }}</span>
+                            </div>
+                            <input type="hidden" name="recipients[]" value="{{ $presetPhoneDisplay }}">
+                            <a href="{{ route('support.sms-notifier') }}" class="btn btn-sm btn-outline-secondary ms-auto">Change recipient</a>
+                        </div>
+                        <p class="small text-muted mt-1 mb-0">Sending to this number only.</p>
                         @else
                         <div class="position-relative mb-3">
                             <div class="input-group">
@@ -118,7 +129,9 @@ ADVANTA_SHORTCODE=your_shortcode</pre>
                         </div>
                     </div>
                     @php
-                        $canSend = ($smsConfigured ?? false) && (!($presetContact ?? null) || trim($presetContact->mobile ?? $presetContact->phone ?? '') !== '');
+                        $hasPresetRecipient = ($presetContact ?? null) && trim($presetContact->mobile ?? $presetContact->phone ?? '') !== '';
+                        $hasPresetPhone = ! empty($presetPhoneDisplay ?? '');
+                        $canSend = ($smsConfigured ?? false) && ($hasPresetRecipient || $hasPresetPhone || (!$presetContact && !$presetPhoneDisplay));
                     @endphp
                     <button type="submit" class="btn btn-primary-custom btn-lg px-4" {{ !$canSend ? 'disabled' : '' }}>
                         <i class="bi bi-send-fill me-2"></i>Send SMS

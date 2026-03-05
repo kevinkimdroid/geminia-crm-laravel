@@ -89,8 +89,7 @@ class MailService
         foreach ($getEndpoints as $url) {
             try {
                 $response = Http::withBasicAuth($username, $password)
-                    ->timeout(10)
-                    ->connectTimeout(5)
+                    ->timeout(8)
                     ->get($url);
 
                 if ($response->successful()) {
@@ -109,10 +108,9 @@ class MailService
         if (empty($emails)) {
             foreach ($postEndpoints as $url) {
                 try {
-                    $response = Http::withBasicAuth($username, $password)
-                        ->timeout(10)
-                        ->connectTimeout(5)
-                        ->post($url, [
+                        $response = Http::withBasicAuth($username, $password)
+                            ->timeout(8)
+                            ->post($url, [
                             'username' => $username,
                             'password' => $password,
                             'folder' => $folder,
@@ -352,7 +350,7 @@ class MailService
                         ? $message->getCc()->map(fn ($a) => $a->mail)->implode(', ')
                         : null;
 
-                    DB::connection('vtiger')->table('mail_manager_emails')->insert([
+                    $emailId = DB::connection('vtiger')->table('mail_manager_emails')->insertGetId([
                         'message_uid' => $uid,
                         'folder' => $targetFolder->path,
                         'from_address' => ($from ? $from->mail : null) ?? '',
@@ -369,6 +367,7 @@ class MailService
                     ]);
 
                     $results['stored']++;
+                    $this->processAutoTicketFromEmail($emailId);
                 } catch (\Throwable $e) {
                     $results['errors'][] = $e->getMessage();
                     Log::warning('MailService::fetchAndStoreEmails message error: ' . $e->getMessage());
@@ -398,6 +397,15 @@ class MailService
         return $results;
     }
 
+    protected function processAutoTicketFromEmail(int $emailId): void
+    {
+        try {
+            app(AutoTicketFromEmailService::class)->processNewInboundEmail($emailId);
+        } catch (\Throwable $e) {
+            Log::warning('MailService auto-ticket: ' . $e->getMessage());
+        }
+    }
+
     /**
      * Get paginated emails for list view. Selects only list columns (excludes body_text/body_html for speed).
      */
@@ -405,7 +413,7 @@ class MailService
     {
         $query = DB::connection('vtiger')
             ->table('mail_manager_emails')
-            ->select('id', 'from_address', 'from_name', 'subject', 'date', 'has_attachments')
+            ->select('id', 'from_address', 'from_name', 'subject', 'date', 'has_attachments', 'ticket_id')
             ->orderByDesc('date');
 
         if ($search) {
@@ -455,44 +463,58 @@ class MailService
     }
 
     /**
-     * Get emails sent to a contact (from life@geminialife.co.ke or configured sender).
-     * Matches to_addresses/cc_addresses containing the contact's email(s).
+     * Get emails for a contact: outbound (life@ → client) and inbound (client → life@geminialife.co.ke).
      */
     public function getEmailsForContact(object $contact, int $perPage = 20, int $offset = 0): array
     {
-        $emails = $this->getContactEmailAddresses($contact);
-        if (empty($emails)) {
-            return [];
-        }
-
+        $contactEmails = $this->getContactEmailAddresses($contact);
         $sender = config('email-service.sender', config('mail.from.address', 'life@geminialife.co.ke'));
 
         $query = DB::connection('vtiger')
             ->table('mail_manager_emails')
-            ->select('id', 'from_address', 'from_name', 'subject', 'date', 'has_attachments')
-            ->where('from_address', 'like', '%' . $sender . '%')
-            ->where(function ($q) use ($emails) {
-                foreach ($emails as $addr) {
+            ->select('id', 'from_address', 'from_name', 'to_addresses', 'subject', 'date', 'has_attachments');
+
+        $query->where(function ($q) use ($contactEmails, $sender) {
+            $q->where(function ($sub) use ($contactEmails, $sender) {
+                foreach ($contactEmails as $addr) {
                     if (trim($addr) !== '') {
-                        $q->orWhere('to_addresses', 'like', '%' . $addr . '%')
-                            ->orWhere('cc_addresses', 'like', '%' . $addr . '%');
+                        $sub->orWhere(function ($inner) use ($addr, $sender) {
+                            $inner->where('from_address', 'like', '%' . $sender . '%')
+                                ->where(function ($to) use ($addr) {
+                                    $to->where('to_addresses', 'like', '%' . $addr . '%')
+                                        ->orWhere('cc_addresses', 'like', '%' . $addr . '%');
+                                });
+                        });
                     }
                 }
-            })
-            ->orderByDesc('date')
-            ->offset($offset)
-            ->limit($perPage);
+            });
+            if (! empty($contactEmails)) {
+                $q->orWhere(function ($sub) use ($contactEmails, $sender) {
+                    foreach ($contactEmails as $addr) {
+                        if (trim($addr) !== '') {
+                            $sub->orWhere(function ($inner) use ($addr, $sender) {
+                                $inner->where('from_address', 'like', '%' . $addr . '%')
+                                    ->where(function ($to) use ($sender) {
+                                        $to->where('to_addresses', 'like', '%' . $sender . '%')
+                                            ->orWhere('cc_addresses', 'like', '%' . $sender . '%');
+                                    });
+                            });
+                        }
+                    }
+                });
+            }
+        });
 
-        return $query->get()->all();
+        return $query->orderByDesc('date')->offset($offset)->limit($perPage)->get()->all();
     }
 
     /**
-     * Count emails sent to a contact.
+     * Count emails for a contact (outbound + inbound).
      */
     public function getEmailsForContactCount(object $contact): int
     {
-        $emails = $this->getContactEmailAddresses($contact);
-        if (empty($emails)) {
+        $contactEmails = $this->getContactEmailAddresses($contact);
+        if (empty($contactEmails)) {
             return 0;
         }
 
@@ -500,17 +522,65 @@ class MailService
 
         $query = DB::connection('vtiger')
             ->table('mail_manager_emails')
-            ->where('from_address', 'like', '%' . $sender . '%')
-            ->where(function ($q) use ($emails) {
-                foreach ($emails as $addr) {
-                    if (trim($addr) !== '') {
-                        $q->orWhere('to_addresses', 'like', '%' . $addr . '%')
-                            ->orWhere('cc_addresses', 'like', '%' . $addr . '%');
+            ->where(function ($q) use ($contactEmails, $sender) {
+                $q->where(function ($sub) use ($contactEmails, $sender) {
+                    foreach ($contactEmails as $addr) {
+                        if (trim($addr) !== '') {
+                            $sub->orWhere(function ($inner) use ($addr, $sender) {
+                                $inner->where('from_address', 'like', '%' . $sender . '%')
+                                    ->where(function ($to) use ($addr) {
+                                        $to->where('to_addresses', 'like', '%' . $addr . '%')
+                                            ->orWhere('cc_addresses', 'like', '%' . $addr . '%');
+                                    });
+                            });
+                        }
                     }
-                }
+                });
+                $q->orWhere(function ($sub) use ($contactEmails, $sender) {
+                    foreach ($contactEmails as $addr) {
+                        if (trim($addr) !== '') {
+                            $sub->orWhere(function ($inner) use ($addr, $sender) {
+                                $inner->where('from_address', 'like', '%' . $addr . '%')
+                                    ->where(function ($to) use ($sender) {
+                                        $to->where('to_addresses', 'like', '%' . $sender . '%')
+                                            ->orWhere('cc_addresses', 'like', '%' . $sender . '%');
+                                    });
+                            });
+                        }
+                    }
+                });
             });
 
         return $query->count();
+    }
+
+    /**
+     * Manually create an email record (e.g. client sent to life@geminialife.co.ke).
+     */
+    public function createEmail(array $data): int
+    {
+        $uid = 'manual-' . uniqid('', true) . '-' . random_int(1000, 9999);
+        $sender = config('email-service.sender', config('mail.from.address', 'life@geminialife.co.ke'));
+
+        $row = [
+            'message_uid' => $uid,
+            'folder' => 'INBOX',
+            'from_address' => $data['from_address'] ?? '',
+            'from_name' => $data['from_name'] ?? null,
+            'to_addresses' => $data['to_addresses'] ?? $sender,
+            'cc_addresses' => $data['cc_addresses'] ?? null,
+            'subject' => $data['subject'] ?? '(No subject)',
+            'body_text' => $data['body_text'] ?? $data['body'] ?? null,
+            'body_html' => $data['body_html'] ?? null,
+            'date' => $data['date'] ?? now(),
+            'has_attachments' => false,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ];
+
+        $id = DB::connection('vtiger')->table('mail_manager_emails')->insertGetId($row);
+        Cache::forget('geminia_emails_count');
+        return (int) $id;
     }
 
     protected function getContactEmailAddresses(object $contact): array
