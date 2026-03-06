@@ -92,4 +92,29 @@ return [
         'auto_reply_body' => env('TICKET_AUTO_REPLY_BODY', ''),
     ],
 
+    'notify_on_creation' => [
+        'enabled' => filter_var(env('TICKET_NOTIFY_ON_CREATION_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
+        'notify_assigned_user' => filter_var(env('TICKET_NOTIFY_ASSIGNED_USER', true), FILTER_VALIDATE_BOOLEAN),
+        'notify_contact' => filter_var(env('TICKET_NOTIFY_CONTACT', true), FILTER_VALIDATE_BOOLEAN),
+    ],
+
+    'sla_violation_reminders' => [
+        'enabled' => filter_var(env('TICKET_SLA_REMINDERS_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
+        'cc_emails' => array_filter(array_map('trim', explode(',', env('TICKET_SLA_REMINDERS_CC', '')))),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Feedback Request on Ticket Close
+    |--------------------------------------------------------------------------
+    | When a ticket is closed, send an email to the contact asking them to rate
+    | the service (Were you happy? Yes/No). TICKET_FEEDBACK_REQUEST_ENABLED=true
+    |
+    | When feedback is submitted, optionally email it to life@geminialife.co.ke
+    | (or TICKET_FEEDBACK_NOTIFY_EMAIL) so the team is notified.
+    */
+    'feedback_request' => [
+        'enabled' => filter_var(env('TICKET_FEEDBACK_REQUEST_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
+        'notify_email' => env('TICKET_FEEDBACK_NOTIFY_EMAIL', 'life@geminialife.co.ke'),
+    ],
 ];

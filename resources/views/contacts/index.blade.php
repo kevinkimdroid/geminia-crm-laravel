@@ -36,7 +36,7 @@
                 @forelse ($contacts as $contact)
                     <tr>
                         <td><a href="{{ route('contacts.show', $contact->contactid) }}" class="text-decoration-none fw-semibold">{{ $contact->full_name }}</a></td>
-                        <td>{{ $contact->email }}</td>
+                        <td>{{ personal_email_only($contact->email ?? null) ?? '—' }}</td>
                         <td>{{ $contact->phone }}</td>
                         <td>{{ $contact->mobile }}</td>
                         <td>

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class ErpClientsImportController extends Controller
 {
@@ -24,6 +25,7 @@ class ErpClientsImportController extends Controller
             'clients' => 'required|array',
             'clients.*' => 'array',
             'clients.*.policy_number' => 'nullable|string|max:64',
+            'clients.*.email_adr' => 'nullable|string|max:255',
             'clients.*.product' => 'nullable|string|max:255',
             'clients.*.pol_prepared_by' => 'nullable|string|max:255',
             'clients.*.intermediary' => 'nullable|string|max:255',
@@ -47,12 +49,13 @@ class ErpClientsImportController extends Controller
 
         $inserted = 0;
         $updated = 0;
+        $hasEmailColumn = Schema::hasColumn('erp_clients_cache', 'email_adr');
 
         if ($replace) {
             // Bulk insert: 10–50x faster than row-by-row
             $toInsert = [];
             foreach ($clients as $row) {
-                $toInsert[] = [
+                $record = [
                     'policy_number' => $row['policy_number'] ?? null,
                     'product' => $row['product'] ?? null,
                     'pol_prepared_by' => $row['pol_prepared_by'] ?? null,
@@ -68,6 +71,10 @@ class ErpClientsImportController extends Controller
                     'created_at' => $syncedAt,
                     'updated_at' => $syncedAt,
                 ];
+                if ($hasEmailColumn) {
+                    $record['email_adr'] = ! empty($row['email_adr']) ? (string) $row['email_adr'] : null;
+                }
+                $toInsert[] = $record;
             }
             foreach (array_chunk($toInsert, 500) as $chunk) {
                 DB::table('erp_clients_cache')->insert($chunk);
@@ -91,6 +98,9 @@ class ErpClientsImportController extends Controller
                     'synced_at' => $syncedAt,
                     'updated_at' => $syncedAt,
                 ];
+                if ($hasEmailColumn) {
+                    $record['email_adr'] = ! empty($row['email_adr']) ? (string) $row['email_adr'] : null;
+                }
                 $existing = $policyNumber
                     ? DB::table('erp_clients_cache')->where('policy_number', $policyNumber)->first()
                     : null;

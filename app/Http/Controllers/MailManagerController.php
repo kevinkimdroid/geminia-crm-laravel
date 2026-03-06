@@ -139,7 +139,7 @@ class MailManagerController extends Controller
             'title' => $email->subject ?? '(No subject)',
             'description' => \Illuminate\Support\Str::limit($email->body_text ?? '', 5000),
         ];
-        if ($policyNumber !== null && $policyNumber !== '') {
+        if ($policyNumber !== null && $policyNumber !== '' && ! looks_like_kra_pin($policyNumber)) {
             $params['policy'] = $policyNumber;
         }
 
@@ -157,13 +157,13 @@ class MailManagerController extends Controller
         return redirect()->route('tools.mail-manager', ['selected' => $id]);
     }
 
-    /** Get policy number from ERP search by email; returns null if only PIN found. */
+    /** Get policy_number from ERP/client search by email. Uses policy_number column only. */
     private function getPolicyFromErpSearch(string $email): ?string
     {
         $erpResult = app(\App\Services\ErpClientService::class)->searchClients($email, 5);
         foreach ($erpResult['data'] ?? [] as $row) {
-            $v = trim((string) ($row['policy_no'] ?? $row['policy_number'] ?? ''));
-            if ($v !== '' && ! preg_match('/^[A-Z]\d{9}[A-Z]$/i', $v)) {
+            $v = trim((string) ($row['policy_number'] ?? ''));
+            if ($v !== '' && ! looks_like_kra_pin($v)) {
                 return $v;
             }
         }

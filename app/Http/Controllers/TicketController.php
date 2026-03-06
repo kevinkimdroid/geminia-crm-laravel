@@ -187,8 +187,10 @@ class TicketController extends Controller
 
         try {
             $description = $validated['description'] ?? '';
-            if (! empty($validated['policy_number'] ?? '')) {
-                $description = trim($description) . "\n\nRelated policy: " . trim($validated['policy_number']);
+            $policyNumber = trim($validated['policy_number'] ?? '');
+            $contactId = (int) ($validated['contact_id'] ?? 0);
+            if ($policyNumber !== '' && $policyNumber !== (string) $contactId && ! looks_like_kra_pin($policyNumber) && ! looks_like_client_id($policyNumber)) {
+                $description = trim($description) . "\n\nRelated policy: " . $policyNumber;
             }
             $orgId = $validated['organization_id'] ?? null;
             if (is_string($orgId) && str_starts_with($orgId, 'line:')) {
@@ -257,6 +259,21 @@ class TicketController extends Controller
             $this->forgetTicketListCaches();
             \App\Events\DashboardStatsUpdated::dispatch();
 
+            try {
+                $notifyPolicy = trim($validated['policy_number'] ?? '');
+                $notifyPolicy = ($notifyPolicy !== '' && ! looks_like_kra_pin($notifyPolicy)) ? $notifyPolicy : null;
+                app(\App\Services\TicketNotificationService::class)->sendTicketCreatedNotification(
+                    $id,
+                    'TT' . $id,
+                    $validated['title'],
+                    $ownerId,
+                    (int) $validated['contact_id'],
+                    $notifyPolicy
+                );
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('Ticket creation notification failed', ['error' => $e->getMessage()]);
+            }
+
             if ($request->filled('return_to_mail_manager') && $request->filled('email_id')) {
                 \DB::connection('vtiger')->table('mail_manager_emails')->where('id', (int) $request->get('email_id'))->update(['ticket_id' => $id]);
                 return redirect()->route('tools.mail-manager', ['selected' => $request->get('email_id')])->with('success', 'Ticket created and linked to this email.');
@@ -281,7 +298,15 @@ class TicketController extends Controller
         if (!$ticket) {
             return redirect()->route('tickets.index')->with('error', 'Ticket not found.');
         }
-        return view('tickets.show', ['ticket' => $ticket]);
+        $feedback = null;
+        if (class_exists(\App\Models\TicketFeedback::class)) {
+            try {
+                $feedback = \App\Models\TicketFeedback::where('ticket_id', $id)->first();
+            } catch (\Throwable $e) {
+                // Table may not exist yet
+            }
+        }
+        return view('tickets.show', ['ticket' => $ticket, 'feedback' => $feedback]);
     }
 
     /** @return View|RedirectResponse */
@@ -384,6 +409,17 @@ class TicketController extends Controller
             \DB::connection('vtiger')->table('vtiger_crmentity')->where('crmid', $ticket)->update(['description' => $fullDesc, 'modifiedtime' => now()->format('Y-m-d H:i:s')]);
             $this->forgetTicketListCaches();
             \App\Events\DashboardStatsUpdated::dispatch();
+
+            $contactId = (int) ($ticketObj->contact_id ?? 0);
+            if ($contactId) {
+                try {
+                    $ticketNo = $ticketObj->ticket_no ?? 'TT' . $ticket;
+                    app(\App\Services\TicketNotificationService::class)->sendFeedbackRequestEmail($ticket, $ticketNo, $contactId);
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning('Feedback request email failed', ['error' => $e->getMessage(), 'ticket' => $ticket]);
+                }
+            }
+
             return redirect()->route('tickets.show', $ticket)->with('success', 'Ticket closed.');
         } catch (\Throwable $e) {
             return redirect()->route('tickets.show', $ticket)->with('error', 'Failed to close: ' . $e->getMessage());
@@ -477,6 +513,19 @@ class TicketController extends Controller
             \DB::connection('vtiger')->table('vtiger_crmentity')->where('crmid', $id)->update($crmentityUpdates);
             $this->forgetTicketListCaches();
             \App\Events\DashboardStatsUpdated::dispatch();
+
+            if ($newStatus === 'Closed') {
+                $contactId = (int) ($validated['contact_id'] ?? $ticket->contact_id ?? 0);
+                if ($contactId) {
+                    try {
+                        $ticketNo = $ticket->ticket_no ?? 'TT' . $id;
+                        app(\App\Services\TicketNotificationService::class)->sendFeedbackRequestEmail($id, $ticketNo, $contactId);
+                    } catch (\Throwable $e) {
+                        \Illuminate\Support\Facades\Log::warning('Feedback request email failed', ['error' => $e->getMessage(), 'ticket' => $id]);
+                    }
+                }
+            }
+
             return redirect()->route('tickets.show', $id)->with('success', 'Ticket updated.');
         } catch (\Throwable $e) {
             return back()->withInput()->with('error', 'Failed to update: ' . $e->getMessage());
@@ -621,7 +670,7 @@ class TicketController extends Controller
                     $erpData = $erpResult['data'] ?? [];
                     foreach (is_iterable($erpData) ? $erpData : [] as $r) {
                         $row = is_array($r) ? $r : (array) $r;
-                        $policy = trim((string) ($row['policy_no'] ?? $row['policy_number'] ?? ''));
+                        $policy = trim((string) ($row['policy_number'] ?? $row['policy_no'] ?? ''));
                         if (! $policy) {
                             continue;
                         }

@@ -263,7 +263,7 @@ class CustomerController extends Controller
                 'status' => $c->status ?? '—',
                 'is_erp' => $isErp,
                 'name' => trim(($c->firstname ?? '') . ' ' . ($c->lastname ?? '')) ?: '—',
-                'email' => $c->email ?? '—',
+                'email' => personal_email_only($c->email ?? null) ?? '—',
                 'mobile' => $c->mobile ?? '—',
             ];
         })->values()->all();

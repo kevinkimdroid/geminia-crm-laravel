@@ -43,9 +43,26 @@ yum install -y nginx
 
 ### Install Python 3 (for ERP clients API, if using erp_http)
 
+CentOS 7 defaults to Python 2.7. The ERP API **requires Python 3.7+** (oracledb and Flask have no Python 2 support).
+
 ```bash
-yum install -y python3 python3-pip
-pip3 install flask oracledb  # or: pip3 install -r erp-clients-api/requirements.txt
+# Option A: SCL Python 3.8 (recommended – oracledb needs 3.7+)
+yum install -y centos-release-scl
+yum install -y rh-python38
+scl enable rh-python38 bash
+pip install -r /var/www/geminia-crm-laravel/erp-clients-api/requirements.txt
+
+# For systemd, use full path:
+# ExecStart=/opt/rh/rh-python38/root/usr/bin/python3 app.py
+
+# Option B: IUS repo (Python 3.8)
+# yum install -y https://repo.ius.io/ius-release-el7.rpm
+# yum install -y python38 python38-pip
+# pip3.8 install -r erp-clients-api/requirements.txt
+# ExecStart=/usr/bin/python3.8 app.py
+
+# Find python3 path for systemd
+which python3
 ```
 
 ---
@@ -225,7 +242,8 @@ User=nginx
 Group=nginx
 WorkingDirectory=/var/www/geminia-crm-laravel/erp-clients-api
 Environment="PATH=/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin"
-ExecStart=/usr/bin/python3 app.py
+# Use full path to Python 3.7+ (e.g. /opt/rh/rh-python38/root/usr/bin/python3)
+ExecStart=/opt/rh/rh-python38/root/usr/bin/python3 app.py
 Restart=always
 RestartSec=5
 
@@ -259,6 +277,15 @@ Add:
 ```cron
 * * * * * cd /var/www/geminia-crm-laravel && /opt/remi/php81/root/usr/bin/php artisan schedule:run >> /dev/null 2>&1
 ```
+
+The scheduler runs:
+
+- **Daily 06:00** – `maturities:sync` – refresh maturities cache
+- **Daily 08:00** – `tickets:create-maturity-reminders` – auto-create tickets for policies maturing soon
+- **Hourly** – `tickets:sla-violation-reminders` – email assigned users for SLA violations (rate-limited per ticket)
+- **Every 5 min** – `mail:fetch` – fetch inbound emails and auto-create tickets (if enabled)
+
+Ensure `MAIL_MAILER` (or Microsoft Graph) is configured so ticket-creation emails and SLA reminders can be sent.
 
 ---
 

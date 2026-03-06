@@ -3,7 +3,7 @@
     $name = $item['name'] ?? $item['client_name'] ?? $item['life_assur'] ?? $item['life_assured'] ?? trim(($item['first_name'] ?? '') . ' ' . ($item['last_name'] ?? '')) ?: 'Client';
     $policy = $item['policy_no'] ?? $item['policy_number'] ?? '';
     $phone = $item['mobile'] ?? $item['phone'] ?? '';
-    $email = $item['email'] ?? $item['email_adr'] ?? '';
+    $email = personal_email_only($item['email'] ?? $item['email_adr'] ?? null) ?? '';
     $product = $item['product'] ?? '';
     $status = $item['status'] ?? '';
     $paidAmt = $item['bal'] ?? $item['paid_mat_amt'] ?? null;

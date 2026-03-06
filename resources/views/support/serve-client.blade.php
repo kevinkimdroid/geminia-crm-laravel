@@ -305,7 +305,7 @@ document.addEventListener('DOMContentLoaded', function() {
             var storeId = 'erp_' + idx;
             erpDataStore[storeId] = item;
             const name = item.name || item.client_name || item.life_assur || item.life_assured || ((item.first_name || '') + ' ' + (item.last_name || '')).trim() || 'Client';
-            const policy = item.policy_no || item.policy_number || item.POLICY_NO || item.POLICY_NUMBER || '';
+            const policy = item.policy_number || item.policy_no || item.POLICY_NUMBER || item.POLICY_NO || '';
             const phone = item.mobile || item.phone || item.MOBILE || item.PHONE || '';
             const email = item.email || item.email_adr || item.EMAIL || '';
             const product = item.product || '';

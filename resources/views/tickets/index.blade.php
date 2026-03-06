@@ -89,11 +89,15 @@
                             $detailUrl = ($ticket->contact_id ?? null)
                                 ? route('contacts.show', $ticket->contact_id)
                                 : route('tickets.show', $ticket->ticketid);
-                            // Use only policy linked when ticket was created; do not show contact's CRM policy (A0xxx format)
-                            $policyNum = null;
-                            if (!empty($ticket->description ?? '') && preg_match('/Related policy:\s*([^\n]+)/i', $ticket->description, $m)) {
+                            // POLICY = policy_number column only. From contact cf_860/cf_856/cf_872 or "Related policy" in description.
+                            // Never use contact_id — it must be policy_number only.
+                            $policyNum = pick_policy_excluding_pin($ticket->cf_860 ?? null, $ticket->cf_856 ?? null, $ticket->cf_872 ?? null);
+                            if (!$policyNum && !empty($ticket->description ?? '') && preg_match('/Related policy:\s*([^\n]+)/i', $ticket->description, $m)) {
                                 $p = trim($m[1]);
-                                $policyNum = $p !== '' ? $p : null;
+                                $cid = (string)($ticket->contact_id ?? '');
+                                if ($p !== '' && $p !== $cid && !looks_like_kra_pin($p) && !looks_like_client_id($p)) {
+                                    $policyNum = $p;
+                                }
                             }
                             $ownerName = trim(($ticket->owner_first ?? '') . ' ' . ($ticket->owner_last ?? '')) ?: ($ticket->owner_username ?? '—');
                             $words = array_filter(explode(' ', $contactName));

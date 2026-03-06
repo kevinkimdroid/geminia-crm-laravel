@@ -14,6 +14,7 @@ class Kernel extends ConsoleKernel
     {
         $schedule->command('maturities:sync')->dailyAt('06:00');
         $schedule->command('tickets:create-maturity-reminders')->dailyAt('08:00');
+        $schedule->command('tickets:sla-violation-reminders')->hourly();
 
         if (filter_var(env('MAIL_AUTO_FETCH_ENABLED', true), FILTER_VALIDATE_BOOLEAN)) {
             $schedule->command('mail:fetch')->everyFiveMinutes();

@@ -71,7 +71,7 @@ class TicketAutoCreateService
                 $title = "Maturity reminder: {$clientName} — Policy {$policy} maturing " . ($maturity ? \Carbon\Carbon::parse($maturity)->format('d M Y') : 'soon');
                 $description = "Policy {$policy} is maturing " . ($maturity ? "on {$maturity}" : "within {$daysBefore} days") . ".\n\nRelated policy: {$policy}";
 
-                $this->createTicket([
+                $ticketId = $this->createTicket([
                     'title' => $title,
                     'description' => $description,
                     'contact_id' => $contactId,
@@ -82,6 +82,19 @@ class TicketAutoCreateService
                     'status' => 'Open',
                 ]);
                 $created++;
+
+                try {
+                    app(TicketNotificationService::class)->sendTicketCreatedNotification(
+                        $ticketId,
+                        'TT' . $ticketId,
+                        $title,
+                        $assignTo,
+                        $contactId ?: null,
+                        $policy ?: null
+                    );
+                } catch (\Throwable $notifyEx) {
+                    Log::warning('TicketAutoCreateService: creation notification failed', ['ticket_id' => $ticketId, 'error' => $notifyEx->getMessage()]);
+                }
             } catch (\Throwable $e) {
                 Log::warning('TicketAutoCreateService: maturity ticket failed', ['policy' => $policy, 'error' => $e->getMessage()]);
                 $errors[] = "Policy {$policy}: " . $e->getMessage();

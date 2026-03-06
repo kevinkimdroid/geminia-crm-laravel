@@ -62,7 +62,7 @@ class ServeClientController extends Controller
                         $crmContacts[] = [
                             'contactid' => $c->contactid,
                             'name' => trim(($c->firstname ?? '') . ' ' . ($c->lastname ?? '')),
-                            'email' => $c->email ?? '',
+                            'email' => personal_email_only($c->email ?? null) ?? '',
                             'phone' => $c->mobile ?? $c->phone ?? '',
                         ];
                     }
@@ -124,7 +124,7 @@ class ServeClientController extends Controller
                     $crmContacts[] = [
                         'contactid' => $c->contactid,
                         'name' => trim(($c->firstname ?? '') . ' ' . ($c->lastname ?? '')),
-                        'email' => $c->email ?? '',
+                        'email' => personal_email_only($c->email ?? null) ?? '',
                         'phone' => $c->mobile ?? $c->phone ?? '',
                     ];
                 }
@@ -216,10 +216,12 @@ class ServeClientController extends Controller
 
         $params = [
             'contact_id' => $contactId,
-            'policy' => $policyNumber,
             'client_name' => $clientName,
             'from' => 'serve-client',
         ];
+        if ($policyNumber !== '' && ! looks_like_kra_pin($policyNumber)) {
+            $params['policy'] = $policyNumber;
+        }
         if ($isGroupLife) {
             $params['organization_id'] = 'line:Group Life';
         }
@@ -276,8 +278,9 @@ class ServeClientController extends Controller
         }
 
         $params = ['contact_id' => $contactId, 'from' => 'serve-client'];
-        if ($validated['source'] === 'erp' && !empty($erpClient['policy_no'] ?? $erpClient['policy_number'] ?? '')) {
-            $params['policy'] = trim($erpClient['policy_no'] ?? $erpClient['policy_number'] ?? '');
+        $policyForForm = trim($erpClient['policy_no'] ?? $erpClient['policy_number'] ?? '');
+        if ($validated['source'] === 'erp' && $policyForForm !== '' && ! looks_like_kra_pin($policyForForm)) {
+            $params['policy'] = $policyForForm;
         }
         $clientName = $validated['source'] === 'erp'
             ? trim($erpClient['name'] ?? $erpClient['client_name'] ?? $erpClient['life_assur'] ?? $erpClient['life_assured'] ?? '')

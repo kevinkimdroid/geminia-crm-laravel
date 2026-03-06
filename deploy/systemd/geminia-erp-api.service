@@ -8,7 +8,9 @@ User=nginx
 Group=nginx
 WorkingDirectory=/var/www/geminia-crm-laravel/erp-clients-api
 Environment="PATH=/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin"
-# Ensure port 5000 is used; set FLASK_RUN_PORT in .env if needed
+# Python 3.7+ required. CentOS 7: use SCL (yum install rh-python38) then:
+# ExecStart=/opt/rh/rh-python38/root/usr/bin/python3 app.py
+# Or if python3 is in PATH (e.g. from IUS python38): ExecStart=/usr/bin/python3 app.py
 ExecStart=/usr/bin/python3 app.py
 Restart=always
 RestartSec=5

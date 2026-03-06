@@ -150,6 +150,7 @@ class TicketSlaService
                 't.priority',
                 'e.createdtime',
                 'e.modifiedtime',
+                'e.smownerid',
                 'c.firstname as contact_first',
                 'c.lastname as contact_last',
                 'u.first_name as owner_first',

@@ -159,8 +159,9 @@
                             </div>
                         </td>
                         <td>
-                            @if($customer->email)
-                            <a href="mailto:{{ $customer->email }}" class="text-decoration-none">{{ Str::limit($customer->email, 35) }}</a>
+                            @php $displayEmail = personal_email_only($customer->email ?? null); @endphp
+                            @if($displayEmail)
+                            <a href="mailto:{{ $displayEmail }}" class="text-decoration-none">{{ Str::limit($displayEmail, 35) }}</a>
                             @else
                             <span class="text-muted">—</span>
                             @endif

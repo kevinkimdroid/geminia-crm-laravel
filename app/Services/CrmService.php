@@ -651,6 +651,7 @@ class CrmService
                 ->table('vtiger_troubletickets as t')
                 ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
                 ->leftJoin('vtiger_contactdetails as c', 't.contact_id', '=', 'c.contactid')
+                ->leftJoin('vtiger_contactscf as cf', 't.contact_id', '=', 'cf.contactid')
                 ->leftJoin('vtiger_users as u', 'e.smownerid', '=', 'u.id')
                 ->where('e.deleted', 0)
                 ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
@@ -666,6 +667,9 @@ class CrmService
                     'e.smownerid',
                     'c.firstname as contact_first',
                     'c.lastname as contact_last',
+                    'cf.cf_860',
+                    'cf.cf_856',
+                    'cf.cf_872',
                     DB::raw("{$descExpr} as description"),
                     'u.first_name as owner_first',
                     'u.last_name as owner_last',
@@ -791,6 +795,7 @@ class CrmService
                 ->where('t.contact_id', $contactId)
                 ->select(
                     't.*',
+                    'e.description',
                     'e.createdtime',
                     'e.modifiedtime',
                     'e.smownerid',
@@ -1555,22 +1560,12 @@ class CrmService
     }
 
     /**
-     * Pick first non-empty policy value, excluding any that look like KRA PIN (e.g. A006533554X).
-     * PIN pattern: letter + 9 digits + letter.
+     * Pick first non-empty policy value, excluding KRA PIN and client IDs.
+     * Uses shared helper for consistent behavior.
      */
     protected function pickPolicyExcludingPin(?string ...$candidates): ?string
     {
-        foreach ($candidates as $v) {
-            $v = trim((string) ($v ?? ''));
-            if ($v === '') {
-                continue;
-            }
-            if (preg_match('/^[A-Z]\d{9}[A-Z]$/i', $v)) {
-                continue;
-            }
-            return $v;
-        }
-        return null;
+        return pick_policy_excluding_pin(...$candidates);
     }
 
     /**
@@ -1660,7 +1655,7 @@ class CrmService
         $email = $erpClient['email'] ?? $erpClient['email_adr'] ?? '';
         $mobile = $erpClient['mobile'] ?? $erpClient['phone'] ?? '';
         $phone = $erpClient['phone'] ?? $erpClient['mobile'] ?? '';
-        $policyNumber = $erpClient['policy_no'] ?? $erpClient['policy_number'] ?? $erpClient['POLICY_NO'] ?? $erpClient['POLICY_NUMBER'] ?? '';
+        $policyNumber = $erpClient['policy_number'] ?? $erpClient['policy_no'] ?? $erpClient['POLICY_NUMBER'] ?? $erpClient['POLICY_NO'] ?? '';
 
         $ownerId = \Illuminate\Support\Facades\Auth::guard('vtiger')->id() ?? 1;
         $label = trim($firstName . ' ' . $lastName) ?: $name ?: 'ERP Client';

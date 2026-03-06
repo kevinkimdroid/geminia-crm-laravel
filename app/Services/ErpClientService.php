@@ -6,6 +6,7 @@ use Illuminate\Database\LostConnectionException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 
 class ErpClientService
 {
@@ -307,7 +308,8 @@ class ErpClientService
     protected function mapClientObjectToSearchResult(array $row): array
     {
         $get = fn (array $keys) => collect($keys)->map(fn ($k) => $row[$k] ?? null)->first(fn ($v) => $v !== null && $v !== '');
-        $policyKeys = ['policy_no', 'policy_number', 'POLICY_NUMBER', 'ipol_policy_no', 'pol_policy_no', 'contract_no', 'scheme_no'];
+        // Policy: always prefer policy_number column first (never confuse with policy_no or others)
+        $policyKeys = ['policy_number', 'policy_no', 'POLICY_NUMBER', 'ipol_policy_no', 'pol_policy_no', 'contract_no', 'scheme_no'];
         $policyNo = '';
         foreach ($policyKeys as $k) {
             $v = $row[$k] ?? null;
@@ -327,7 +329,8 @@ class ErpClientService
         }
         $lifeAssured = (string) ($get(['life_assur', 'life_assured', 'lifeAssur', 'lifeAssured', 'client_name', 'clientName', 'member_name', 'mem_surname']) ?? '');
         $name = trim($lifeAssured) ?: trim(($row['pol_prepared_by'] ?? '') . ' ' . ($row['intermediary'] ?? '')) ?: trim(($row['firstname'] ?? '') . ' ' . ($row['lastname'] ?? ''));
-        $email = $get(['email', 'email_adr', 'emailAdr', 'client_email', 'mem_email']);
+        $emailRaw = $get(['email', 'email_adr', 'emailAdr', 'client_email', 'mem_email']);
+        $email = personal_email_only($emailRaw);
         $mobile = $get(['mobile', 'phone', 'phone_no', 'phoneNo', 'client_contact', 'mem_teleph']);
 
         return [
@@ -1051,7 +1054,7 @@ class ErpClientService
             'paid_mat_amt' => $paidMatAmt,
             'bal' => $get(['bal', 'BAL']) ?? $paidMatAmt,
             'checkoff' => $checkoff,
-            'email_adr' => $emailAdr,
+            'email_adr' => personal_email_only($emailAdr),
             'id_no' => $idNo,
             'phone_no' => $phoneNo,
             'mobile' => $phoneNo,
@@ -1069,6 +1072,9 @@ class ErpClientService
         try {
             $query = DB::connection(config('database.default'))->table('erp_clients_cache');
             $searchCols = ['policy_number', 'pol_prepared_by', 'intermediary', 'kra_pin', 'product', 'id_no', 'phone_no'];
+            if (Schema::hasColumn('erp_clients_cache', 'email_adr')) {
+                $searchCols[] = 'email_adr';
+            }
 
             if ($search && trim($search) !== '') {
                 $term = '%' . trim($search) . '%';
@@ -1108,12 +1114,14 @@ class ErpClientService
         $policyNo = $row['policy_number'] ?? '';
         $parts = explode(' ', $clientName, 2);
 
+        $email = personal_email_only($row['email_adr'] ?? null) ?? '';
+
         return (object) [
             'contactid' => $policyNo ?: ('erp-' . md5(json_encode($row))),
             'firstname' => $parts[0] ?? $clientName,
             'lastname' => $parts[1] ?? '',
             'client_name' => $clientName,
-            'email' => $row['email_adr'] ?? '',
+            'email' => $email,
             'mobile' => '',
             'phone' => '',
             'owner_first' => null,
@@ -1131,7 +1139,7 @@ class ErpClientService
             'paid_mat_amt' => $row['paid_mat_amt'] ?? null,
             'checkoff' => $row['checkoff'] ?? null,
             'effective_date' => $row['effective_date'] ?? null,
-            'email_adr' => $row['email_adr'] ?? null,
+            'email_adr' => $email ?: null,
             'id_no' => $row['id_no'] ?? null,
             'phone_no' => $row['phone_no'] ?? $row['mobile'] ?? $row['phone'] ?? null,
             'mobile' => $row['phone_no'] ?? $row['mobile'] ?? $row['phone'] ?? '',
@@ -1152,11 +1160,13 @@ class ErpClientService
         $last = $mapped['last_name'] ?? (explode(' ', $name, 2)[1] ?? '');
         $policyNo = $mapped['policy_no'] ?? $mapped['policy_number'] ?? '';
 
+        $email = personal_email_only($mapped['email'] ?? null) ?? '';
+
         return (object) [
             'contactid' => $policyNo ?: ('erp-' . md5(json_encode($row))),
             'firstname' => $first ?: $name,
             'lastname' => $last,
-            'email' => $mapped['email'] ?? '',
+            'email' => $email,
             'mobile' => $mapped['mobile'] ?? $mapped['phone'] ?? '',
             'phone' => $mapped['phone'] ?? $mapped['mobile'] ?? '',
             'owner_first' => null,

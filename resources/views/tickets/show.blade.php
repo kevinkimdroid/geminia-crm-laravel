@@ -73,6 +73,23 @@
             <a href="{{ route('tickets.close.form', $ticket->ticketid) }}" class="btn btn-sm btn-success"><i class="bi bi-check-circle me-1"></i> Close Ticket</a>
         </div>
         @endif
+        @if(($ticket->status ?? '') === 'Closed' && ($feedback ?? null))
+        <div class="app-card p-4 mt-4 border-start border-4 border-success">
+            <h6 class="text-uppercase small fw-bold mb-4" style="color:var(--geminia-primary);letter-spacing:0.08em">Client Feedback</h6>
+            <p class="mb-2">
+                <strong>Rating:</strong>
+                @if($feedback->rating === 'happy')
+                    <span class="text-success"><i class="bi bi-emoji-smile me-1"></i>Happy with the service</span>
+                @else
+                    <span class="text-warning"><i class="bi bi-emoji-frown me-1"></i>Not satisfied</span>
+                @endif
+            </p>
+            @if($feedback->comment)
+            <p class="text-muted small mb-0"><strong>Comment:</strong> {{ e($feedback->comment) }}</p>
+            @endif
+            <p class="text-muted small mt-2 mb-0">Submitted {{ $feedback->created_at?->diffForHumans() ?? '' }}</p>
+        </div>
+        @endif
     </div>
     <div class="col-lg-4">
         <div class="app-card p-4">

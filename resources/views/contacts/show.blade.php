@@ -272,11 +272,14 @@
                         <tbody>
                             @forelse($tickets ?? [] as $ticket)
                             @php
-                                // Use only policy linked when ticket was created; do not show contact's CRM policy (A0xxx)
-                                $policyNum = null;
-                                if (!empty($ticket->description ?? '') && preg_match('/Related policy:\s*([^\n]+)/i', $ticket->description, $m)) {
+                                // POLICY = policy_number only (from contact cf or "Related policy"). Never contact_id.
+                                $policyNum = pick_policy_excluding_pin($ticket->cf_860 ?? null, $ticket->cf_856 ?? null, $ticket->cf_872 ?? null);
+                                if (!$policyNum && !empty($ticket->description ?? '') && preg_match('/Related policy:\s*([^\n]+)/i', $ticket->description, $m)) {
                                     $p = trim($m[1]);
-                                    $policyNum = $p !== '' ? $p : null;
+                                    $cid = (string)($ticket->contact_id ?? '');
+                                    if ($p !== '' && $p !== $cid && !looks_like_kra_pin($p) && !looks_like_client_id($p)) {
+                                        $policyNum = $p;
+                                    }
                                 }
                                 $ownerName = trim(($ticket->owner_first ?? '') . ' ' . ($ticket->owner_last ?? '')) ?: ($ticket->owner_username ?? '—');
                             @endphp
@@ -401,7 +404,11 @@
                                     <button type="button" class="btn btn-sm btn-outline-primary policy-view-btn" data-policy='@json($policy)' title="View details">
                                         <i class="bi bi-eye"></i>
                                     </button>
-                                    <a href="{{ route('tickets.create', ['contact_id' => $contact->contactid, 'policy' => $policyNo]) }}" class="btn btn-sm btn-success" title="Create ticket">
+                                    @php
+                                        $ticketParams = ['contact_id' => $contact->contactid];
+                                        if ($policyNo !== '—' && !looks_like_kra_pin($policyNo)) { $ticketParams['policy'] = $policyNo; }
+                                    @endphp
+                                    <a href="{{ route('tickets.create', $ticketParams) }}" class="btn btn-sm btn-success" title="Create ticket">
                                         <i class="bi bi-ticket-perforated"></i>
                                     </a>
                                 </td>
