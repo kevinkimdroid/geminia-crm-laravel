@@ -17,4 +17,15 @@ return [
     'fetch_endpoint' => env('EMAIL_SERVICE_FETCH_ENDPOINT', ''),
     // When true, fall back to IMAP if HTTP service is unreachable (connection timeout)
     'fallback_to_imap' => filter_var(env('EMAIL_SERVICE_FALLBACK_TO_IMAP', true), FILTER_VALIDATE_BOOLEAN),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Excluded Sender Domains (organizations, not clients)
+    |--------------------------------------------------------------------------
+    | Emails FROM these domains will NOT create tickets or complaints.
+    | Use for partner organizations (e.g. GABNet@gab.co.ke) - only individual
+    | client emails (Gmail, Yahoo, etc.) will be processed.
+    | Comma-separated: EMAIL_EXCLUDED_SENDER_DOMAINS=geminialife.co.ke,gab.co.ke
+    */
+    'excluded_sender_domains' => array_filter(array_map('strtolower', array_map('trim', explode(',', env('EMAIL_EXCLUDED_SENDER_DOMAINS', 'geminialife.co.ke,gab.co.ke'))))),
 ];

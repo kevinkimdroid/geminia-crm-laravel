@@ -339,6 +339,9 @@
                     @if($can('tickets'))
                     <a href="{{ route('support.maturities') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('support.maturities') ? 'active' : '' }}"><i class="bi bi-calendar-event"></i><span>Maturities</span></a>
                     @endif
+                    @if($can('compliance.complaints'))
+                    <a href="{{ route('compliance.complaints.index') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('compliance.complaints.*') ? 'active' : '' }}"><i class="bi bi-clipboard2-data"></i><span>Complaint Register</span></a>
+                    @endif
                 </div>
                 @endif
                 <div class="app-nav-group">

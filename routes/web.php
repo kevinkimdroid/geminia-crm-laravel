@@ -72,6 +72,10 @@ Route::get('/support/maturities/export', [\App\Http\Controllers\MaturitiesContro
 Route::get('/support/sms-notifier', [\App\Http\Controllers\SmsNotifierController::class, 'index'])->name('support.sms-notifier');
 Route::post('/support/sms-notifier/send', [\App\Http\Controllers\SmsNotifierController::class, 'send'])->name('support.sms-notifier.send');
 Route::get('/support/customers', [\App\Http\Controllers\CustomerController::class, 'index'])->name('support.customers');
+Route::prefix('compliance')->name('compliance.')->group(function () {
+    Route::get('complaints/export', [\App\Http\Controllers\ComplaintController::class, 'export'])->name('complaints.export');
+    Route::resource('complaints', \App\Http\Controllers\ComplaintController::class)->parameters(['complaints' => 'complaint']);
+});
 Route::get('/api/support/clients', [\App\Http\Controllers\CustomerController::class, 'clientsApi'])->name('api.support.clients');
 Route::get('/support/clients/show', [\App\Http\Controllers\CustomerController::class, 'show'])->name('support.clients.show');
 Route::get('/support/clients/debug-api', [\App\Http\Controllers\CustomerController::class, 'debugApi'])->name('support.clients.debug-api');

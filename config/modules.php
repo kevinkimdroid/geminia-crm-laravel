@@ -34,6 +34,7 @@ return [
         'settings' => null,
         'settings.crm' => null,
         'settings.manage-users' => null,
+        'compliance.complaints' => null, // IRA complaint register - compliance requirement
     ],
 
     /*
@@ -60,6 +61,7 @@ return [
             ],
             ['key' => 'support', 'label' => 'Support', 'icon' => 'bi-headset', 'route' => 'support'],
             ['key' => 'tickets', 'label' => 'Tickets', 'icon' => 'bi-ticket-perforated-fill', 'route' => 'tickets.index'],
+            ['key' => 'compliance.complaints', 'label' => 'Complaint Register', 'icon' => 'bi-clipboard2-data', 'route' => 'compliance.complaints.index'],
         ],
         'tools' => [
             ['key' => 'tools', 'label' => 'Tools', 'icon' => 'bi-tools', 'route' => 'tools'],

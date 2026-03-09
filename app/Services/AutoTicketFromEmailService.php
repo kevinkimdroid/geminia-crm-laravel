@@ -109,7 +109,12 @@ class AutoTicketFromEmailService
                 return true;
             }
         }
-        return str_ends_with($address, '@geminialife.co.ke');
+        foreach (config('email-service.excluded_sender_domains', []) as $domain) {
+            if ($domain && str_ends_with($address, '@' . $domain)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

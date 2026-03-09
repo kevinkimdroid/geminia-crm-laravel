@@ -88,6 +88,7 @@ class MicrosoftGraphMailService
 
                 $results['stored']++;
                 $this->processAutoTicket($emailId);
+                $this->processAutoComplaint($emailId);
             } catch (\Throwable $e) {
                 $results['errors'][] = $e->getMessage();
                 Log::warning('MicrosoftGraphMailService message error: ' . $e->getMessage());
@@ -180,6 +181,15 @@ class MicrosoftGraphMailService
             app(AutoTicketFromEmailService::class)->processNewInboundEmail($emailId);
         } catch (\Throwable $e) {
             Log::warning('MicrosoftGraphMailService auto-ticket: ' . $e->getMessage());
+        }
+    }
+
+    protected function processAutoComplaint(int $emailId): void
+    {
+        try {
+            app(AutoComplaintFromEmailService::class)->processNewInboundEmail($emailId);
+        } catch (\Throwable $e) {
+            Log::warning('MicrosoftGraphMailService auto-complaint: ' . $e->getMessage());
         }
     }
 

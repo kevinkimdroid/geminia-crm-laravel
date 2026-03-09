@@ -34,6 +34,7 @@ class ModuleService
             ['key' => 'tools.pdf-maker', 'label' => 'PDF Maker', 'icon' => 'bi-file-pdf', 'sort' => 14],
             ['key' => 'tools.recycle-bin', 'label' => 'Recycle Bin', 'icon' => 'bi-trash', 'sort' => 15],
             ['key' => 'support.sms-notifier', 'label' => 'SMS Notifier', 'icon' => 'bi-chat-dots', 'sort' => 16],
+            ['key' => 'compliance.complaints', 'label' => 'Complaint Register', 'icon' => 'bi-clipboard2-data', 'sort' => 17],
         ];
     }
 
@@ -72,7 +73,7 @@ class ModuleService
             if (empty($rows)) {
                 return $allKeys;
             }
-            $alwaysOn = ['dashboard', 'marketing', 'support', 'tools', 'settings', 'settings.crm', 'settings.manage-users'];
+            $alwaysOn = ['dashboard', 'marketing', 'support', 'tools', 'settings', 'settings.crm', 'settings.manage-users', 'compliance.complaints'];
             $enabled = [];
             foreach ($allKeys as $key) {
                 if (in_array($key, $alwaysOn, true)) {

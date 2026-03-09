@@ -157,7 +157,7 @@ class MailService
                     continue;
                 }
 
-                DB::connection('vtiger')->table('mail_manager_emails')->insert([
+                $emailId = DB::connection('vtiger')->table('mail_manager_emails')->insertGetId([
                     'message_uid' => $uid,
                     'folder' => $folder,
                     'from_address' => $this->extractFromAddress($msg),
@@ -174,6 +174,8 @@ class MailService
                 ]);
 
                 $results['stored']++;
+                $this->processAutoTicketFromEmail($emailId);
+                $this->processAutoComplaintFromEmail($emailId);
             } catch (\Throwable $e) {
                 $results['errors'][] = $e->getMessage();
                 Log::warning('MailService::fetchViaHttp message error: ' . $e->getMessage());
@@ -368,6 +370,7 @@ class MailService
 
                     $results['stored']++;
                     $this->processAutoTicketFromEmail($emailId);
+                    $this->processAutoComplaintFromEmail($emailId);
                 } catch (\Throwable $e) {
                     $results['errors'][] = $e->getMessage();
                     Log::warning('MailService::fetchAndStoreEmails message error: ' . $e->getMessage());
@@ -403,6 +406,15 @@ class MailService
             app(AutoTicketFromEmailService::class)->processNewInboundEmail($emailId);
         } catch (\Throwable $e) {
             Log::warning('MailService auto-ticket: ' . $e->getMessage());
+        }
+    }
+
+    protected function processAutoComplaintFromEmail(int $emailId): void
+    {
+        try {
+            app(AutoComplaintFromEmailService::class)->processNewInboundEmail($emailId);
+        } catch (\Throwable $e) {
+            Log::warning('MailService auto-complaint: ' . $e->getMessage());
         }
     }
 
