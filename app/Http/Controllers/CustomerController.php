@@ -177,7 +177,7 @@ class CustomerController extends Controller
             if ($clientsError && $customers->isEmpty()) {
                 $customers = $this->crm->getCustomers($perPage, $offset, $search);
                 $total = $this->crm->getCustomersCount($search);
-                $clientsError = 'Oracle connection failed. Showing CRM contacts below (if any).';
+                $clientsError = $clientsError . ' Showing CRM contacts below (if any).';
             }
         } elseif ($lazyLoad) {
             $customers = collect();

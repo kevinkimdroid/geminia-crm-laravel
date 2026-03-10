@@ -683,6 +683,11 @@ class ErpClientService
             return $this->getClientsFromCache($limit, $offset, $search, $system);
         }
         if ($source === 'erp_http') {
+            // When "All" (no system filter): merge Group Life + Individual Life for proper differentiation
+            if (! $system || $system === '') {
+                return $this->getClientsForListViewMerged($limit, $offset, $search);
+            }
+
             $result = $this->getClientsFromHttpApi($limit, $offset, $search, null, false, $system);
             // Group Life: when search returns 0, try Individual view (policy may be in either view)
             if (
@@ -765,6 +770,46 @@ class ErpClientService
                 ];
             }
         }
+    }
+
+    /**
+     * Get clients for "All" filter: merge Group Life + Individual Life, interleaved.
+     * Ensures both types are differentiated and displayed when no system filter is set.
+     *
+     * @return array{data: \Illuminate\Support\Collection, total: int, error: string|null}
+     */
+    protected function getClientsForListViewMerged(int $limit, int $offset, ?string $search): array
+    {
+        $groupOffset = (int) floor($offset / 2);
+        $individualOffset = (int) floor(($offset + 1) / 2);
+        $groupLimit = (int) (floor(($offset + $limit) / 2) - floor($offset / 2));
+        $individualLimit = (int) (floor(($offset + $limit + 1) / 2) - floor(($offset + 1) / 2));
+
+        $groupResult = $this->getClientsFromHttpApi($groupLimit, $groupOffset, $search, null, false, 'group');
+        $indResult = $this->getClientsFromHttpApi($individualLimit, $individualOffset, $search, null, false, 'individual');
+
+        $groupData = $groupResult['data']->values()->all();
+        $indData = $indResult['data']->values()->all();
+
+        // Interleave: g0, i0, g1, i1, ...
+        $merged = [];
+        $maxLen = max(count($groupData), count($indData));
+        for ($i = 0; $i < $maxLen && count($merged) < $limit; $i++) {
+            if ($i < count($groupData)) {
+                $merged[] = $groupData[$i];
+            }
+            if (count($merged) < $limit && $i < count($indData)) {
+                $merged[] = $indData[$i];
+            }
+        }
+        $data = collect(array_slice($merged, 0, $limit));
+
+        $groupTotal = (int) ($groupResult['total'] ?? 0);
+        $indTotal = (int) ($indResult['total'] ?? 0);
+        $total = $groupTotal + $indTotal;
+        $error = $groupResult['error'] ?: $indResult['error'];
+
+        return ['data' => $data, 'total' => $total, 'error' => $error];
     }
 
     /**

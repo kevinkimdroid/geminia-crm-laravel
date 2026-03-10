@@ -27,9 +27,14 @@
 @if ($clientsError ?? null)
 <div class="alert alert-warning alert-dismissible fade show d-flex align-items-center" role="alert">
     <i class="bi bi-exclamation-triangle-fill me-2"></i>
-    <div>
-        <strong>Oracle connection issue</strong><br>
+    <div class="flex-grow-1">
+        <strong>ERP/Oracle connection issue</strong><br>
         <span class="small">{{ $clientsError }}</span>
+        @if(in_array($clientsSource ?? 'crm', ['erp_http', 'erp_sync']))
+        <p class="small mb-0 mt-2 text-muted">
+            <strong>Fix:</strong> Ensure ERP API is running. On CentOS: <code>sudo setsebool -P httpd_can_network_connect 1</code> then <code>sudo systemctl restart httpd</code>
+        </p>
+        @endif
     </div>
     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
 </div>
