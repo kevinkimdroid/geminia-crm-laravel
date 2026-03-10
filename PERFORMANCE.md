@@ -86,7 +86,9 @@ Undo for local dev: `php artisan optimize:clear`
 - **Dashboard** – Stats cached for 2 minutes
 - **Reports page** – All metrics cached for 2 minutes
 - **Deals pipeline value** – Cached for 90 seconds (invalidated on deal changes)
-- **Ticket counts** – Cached for 2 minutes
+- **Ticket counts** – Cached for 5 minutes
+- **Tickets list** – Cached for 3 min (All) / 2 min (filtered tabs)
+- **Ticket count totals** – Cached for 5 minutes
 - **Module settings** – Cached for 5 minutes
 - **Leads today count** – Cached for 2 minutes
 
@@ -116,9 +118,15 @@ Use Octane instead of `php artisan serve`. Requires Swoole or RoadRunner.
 
 ---
 
+## Tickets page slow (3k+ tickets)
+
+1. **Run index script** – `database/sql/tickets_performance_indexes.sql` adds indexes for faster ticket queries.
+2. **Warm cache** – Visit `/tickets` once; subsequent loads serve from cache.
+3. **Production** – Set `APP_DEBUG=false` to avoid query logging overhead.
+
 ## If still slow
 
-1. **Database indexes** – Ensure `vtiger_crmentity` has indexes on `crmid`, `deleted`, `setype`
+1. **Database indexes** – Run `database/sql/tickets_performance_indexes.sql`. Ensure `vtiger_crmentity` has indexes on `crmid`, `deleted`, `setype`.
 2. **PHP OPcache** – In `php.ini` add:
    ```ini
    opcache.enable=1

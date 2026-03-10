@@ -63,6 +63,7 @@
                 <input type="text" name="search" class="form-control border-0 bg-transparent" placeholder="Search tickets, contacts, policy numbers..." value="{{ $search ?? '' }}">
             </div>
             <button type="submit" class="btn btn-sm" style="background:var(--geminia-primary);color:#fff;border-radius:8px;padding:.4rem 1rem">Search</button>
+            <a href="{{ route('tickets.export', array_filter(['list' => $currentList ?? null, 'search' => $search ?? null])) }}" class="btn btn-sm btn-outline-secondary" title="Export to Excel"><i class="bi bi-file-earmark-spreadsheet me-1"></i>Export Excel</a>
             <a href="{{ route('tickets.create') }}" class="btn btn-sm app-topbar-add">Add Ticket</a>
         </form>
 

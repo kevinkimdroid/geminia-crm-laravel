@@ -2,6 +2,8 @@
 
 Files for running the app on **CentOS 7** so the web app, queue worker, and ERP API keep running.
 
+**Auto-start with Apache:** See [docs/AUTO-START-WITH-HTTPD.md](../docs/AUTO-START-WITH-HTTPD.md) for Windows (XAMPP) and Linux setup.
+
 ## Contents
 
 | File | Purpose |

@@ -2,12 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Exports\TicketsExport;
 use App\Models\Ticket;
 use App\Services\CrmService;
 use App\Services\ErpClientService;
 use App\Services\TicketAutomationService;
 use App\Services\TicketSlaService;
 use Illuminate\Http\RedirectResponse;
+use Maatwebsite\Excel\Facades\Excel;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -48,7 +50,7 @@ class TicketController extends Controller
         $cacheKey = $isDefaultView ? 'tickets_list_default' : ($isStatusPage1 ? 'tickets_list_' . $statusSlug : null);
 
         if ($cacheKey) {
-            $ttl = $isDefaultView ? 60 : 45;
+            $ttl = $isDefaultView ? 180 : 120;
             $cached = Cache::remember($cacheKey, $ttl, function () use ($perPage, $status, $search) {
                 $items = $this->crm->getTickets($perPage, 0, $status, $search);
                 $count = $this->crm->getTicketsCount($status, $search);
@@ -78,6 +80,51 @@ class TicketController extends Controller
             'currentList' => $status,
             'search' => $search,
         ]);
+    }
+
+    public function export(Request $request): \Symfony\Component\HttpFoundation\BinaryFileResponse
+    {
+        $status = $request->get('list');
+        $search = $request->get('search');
+
+        $tickets = $this->crm->getTicketsForExport($status, $search);
+
+        $rows = collect($tickets)->map(function ($ticket) {
+            $contactName = trim(($ticket->contact_first ?? '') . ' ' . ($ticket->contact_last ?? '')) ?: '—';
+            $policyNum = pick_policy_excluding_pin($ticket->cf_860 ?? null, $ticket->cf_856 ?? null, $ticket->cf_872 ?? null);
+            if (! $policyNum && ! empty($ticket->description ?? '') && preg_match('/Related policy:\s*([^\n]+)/i', $ticket->description, $m)) {
+                $p = trim($m[1]);
+                $cid = (string) ($ticket->contact_id ?? '');
+                if ($p !== '' && $p !== $cid && ! looks_like_kra_pin($p) && ! looks_like_client_id($p)) {
+                    $policyNum = $p;
+                }
+            }
+            $ownerName = trim(($ticket->owner_first ?? '') . ' ' . ($ticket->owner_last ?? '')) ?: ($ticket->owner_username ?? '—');
+            $createdByName = trim((string) ($ticket->creator_name ?? '')) ?: ($ticket->creator_username ?? '—');
+            $closedByName = ($ticket->status ?? '') === 'Closed'
+                ? (trim((string) ($ticket->modifier_name ?? '')) ?: ($ticket->modifier_username ?? '—'))
+                : '—';
+            $ticketNo = $ticket->ticket_no ?? 'TT' . $ticket->ticketid;
+            $created = $ticket->createdtime ? date('Y-m-d H:i', strtotime($ticket->createdtime)) : '—';
+
+            return [
+                $ticketNo,
+                $ticket->title ?? 'Untitled',
+                $contactName,
+                $policyNum ?? '—',
+                $ticket->status ?? '—',
+                $ticket->priority ?? 'Normal',
+                $ticket->source ?? '—',
+                $createdByName,
+                $ownerName,
+                $closedByName,
+                $created,
+                trim($ticket->description ?? ''),
+            ];
+        })->toArray();
+
+        $filename = 'tickets-' . date('Y-m-d') . '.xlsx';
+        return Excel::download(new TicketsExport($rows), $filename);
     }
 
     public function create(Request $request): View
@@ -403,10 +450,15 @@ class TicketController extends Controller
             $solution = 'Closed';
         }
         try {
+            $userId = $authUser ? (int) $authUser->id : 1;
             \DB::connection('vtiger')->table('vtiger_troubletickets')->where('ticketid', $ticket)->update(['status' => 'Closed']);
             $existingDesc = \DB::connection('vtiger')->table('vtiger_crmentity')->where('crmid', $ticket)->value('description') ?? '';
             $fullDesc = trim($existingDesc . "\n\n--- Resolution ---\n" . $solution);
-            \DB::connection('vtiger')->table('vtiger_crmentity')->where('crmid', $ticket)->update(['description' => $fullDesc, 'modifiedtime' => now()->format('Y-m-d H:i:s')]);
+            \DB::connection('vtiger')->table('vtiger_crmentity')->where('crmid', $ticket)->update([
+                'description' => $fullDesc,
+                'modifiedtime' => now()->format('Y-m-d H:i:s'),
+                'modifiedby' => $userId,
+            ]);
             $this->forgetTicketListCaches();
             \App\Events\DashboardStatsUpdated::dispatch();
 
@@ -503,7 +555,12 @@ class TicketController extends Controller
                 'hours' => $validated['hours'] ?? $ticket->hours,
                 'days' => $validated['days'] ?? $ticket->days,
             ]);
+            $authUser = \Illuminate\Support\Facades\Auth::guard('vtiger')->user();
+            $userId = $authUser ? (int) $authUser->id : 1;
             $crmentityUpdates = ['description' => $fullDescription, 'modifiedtime' => now()->format('Y-m-d H:i:s')];
+            if ($newStatus === 'Closed') {
+                $crmentityUpdates['modifiedby'] = $userId;
+            }
             if (!empty($validated['ticket_source'] ?? '')) {
                 $crmentityUpdates['source'] = $validated['ticket_source'];
             }

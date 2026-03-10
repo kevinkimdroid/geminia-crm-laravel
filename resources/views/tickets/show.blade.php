@@ -56,6 +56,26 @@
     </div>
 @endif
 
+{{-- Ticket workflow: Created by → Assigned to → Closed by --}}
+<div class="ticket-workflow mb-4">
+    <div class="ticket-workflow-step">
+        <span class="ticket-workflow-label">Created by</span>
+        <span class="ticket-workflow-value">{{ $ticket->created_by_name ?? '—' }}</span>
+    </div>
+    <i class="bi bi-arrow-right ticket-workflow-arrow"></i>
+    <div class="ticket-workflow-step">
+        <span class="ticket-workflow-label">Assigned to</span>
+        <span class="ticket-workflow-value">{{ $ticket->assigned_to_name ?? '—' }}</span>
+    </div>
+    @if(($ticket->status ?? '') === 'Closed')
+    <i class="bi bi-arrow-right ticket-workflow-arrow"></i>
+    <div class="ticket-workflow-step">
+        <span class="ticket-workflow-label">Closed by</span>
+        <span class="ticket-workflow-value">{{ $ticket->closed_by_name ?? '—' }}</span>
+    </div>
+    @endif
+</div>
+
 <div class="row g-4">
     <div class="col-lg-8">
         <div class="app-card p-4">
@@ -100,12 +120,12 @@
                     <dd class="mb-0"><span class="ticket-status-badge ticket-status-{{ Str::slug($ticket->status ?? '') }}">{{ $ticket->status ?? '—' }}</span></dd>
                 </div>
                 <div class="d-flex justify-content-between py-2 border-bottom" style="border-color:var(--geminia-border)!important">
-                    <dt class="text-muted small mb-0">Priority</dt>
-                    <dd class="mb-0">{{ $ticket->priority ?? '—' }}</dd>
-                </div>
-                <div class="d-flex justify-content-between py-2 border-bottom" style="border-color:var(--geminia-border)!important">
                     <dt class="text-muted small mb-0">Assigned To</dt>
                     <dd class="mb-0">{{ $ticket->assigned_to_name ?? '—' }}</dd>
+                </div>
+                <div class="d-flex justify-content-between py-2 border-bottom" style="border-color:var(--geminia-border)!important">
+                    <dt class="text-muted small mb-0">Priority</dt>
+                    <dd class="mb-0">{{ $ticket->priority ?? '—' }}</dd>
                 </div>
                 @if($ticket->category ?? null)
                 <div class="d-flex justify-content-between py-2 border-bottom" style="border-color:var(--geminia-border)!important">
@@ -129,6 +149,14 @@
 </div>
 
 <style>
+.ticket-workflow {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1rem;
+    padding: 1rem 1.25rem; background: #f8fafc; border: 1px solid var(--geminia-border); border-radius: 12px;
+}
+.ticket-workflow-step { display: flex; flex-direction: column; gap: 0.15rem; }
+.ticket-workflow-label { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--geminia-text-muted); }
+.ticket-workflow-value { font-weight: 500; color: var(--geminia-text); }
+.ticket-workflow-arrow { color: var(--geminia-border); font-size: 0.9rem; }
 .ticket-status-badge {
     font-size: 0.75rem; font-weight: 600; padding: 0.35rem 0.75rem; border-radius: 9999px; display: inline-block;
 }

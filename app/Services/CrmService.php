@@ -18,7 +18,7 @@ class CrmService
 {
     public function getTicketCountsByStatus(): array
     {
-        return Cache::remember('geminia_ticket_counts_by_status', 120, function () {
+        return Cache::remember('geminia_ticket_counts_by_status', 300, function () {
             return $this->fetchTicketCountsByStatus();
         });
     }
@@ -26,29 +26,51 @@ class CrmService
     protected function fetchTicketCountsByStatus(): array
     {
         try {
-            $counts = DB::connection('vtiger')
-                ->table('vtiger_troubletickets as t')
-                ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
-                ->where('e.deleted', 0)
-                ->whereNotNull('t.contact_id')
-                ->where('t.contact_id', '>', 0)
-                ->selectRaw('t.status, count(*) as cnt')
-                ->groupBy('t.status')
-                ->pluck('cnt', 'status')
-                ->toArray();
-
-            $unassigned = DB::connection('vtiger')
-                ->table('vtiger_troubletickets as t')
-                ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
-                ->where('e.deleted', 0)
-                ->where(function ($q) {
-                    $q->whereNull('t.contact_id')->orWhere('t.contact_id', '<=', 0);
-                })
-                ->count();
-            if ($unassigned > 0) {
-                $counts['Unassigned'] = $unassigned;
+            $driver = DB::connection('vtiger')->getDriverName();
+            $setypeIn = "'HelpDesk','Ticket'";
+            if (in_array($driver, ['mysql', 'mariadb'], true)) {
+                $rows = DB::connection('vtiger')->select(
+                    "(SELECT t.status, COUNT(*) as cnt FROM vtiger_troubletickets t " .
+                    "INNER JOIN vtiger_crmentity e ON t.ticketid = e.crmid " .
+                    "WHERE e.deleted = 0 AND e.setype IN ({$setypeIn}) " .
+                    "AND t.contact_id IS NOT NULL AND t.contact_id > 0 " .
+                    "GROUP BY t.status) " .
+                    "UNION ALL " .
+                    "(SELECT 'Unassigned' as status, COUNT(*) as cnt FROM vtiger_troubletickets t " .
+                    "INNER JOIN vtiger_crmentity e ON t.ticketid = e.crmid " .
+                    "WHERE e.deleted = 0 AND e.setype IN ({$setypeIn}) " .
+                    "AND (t.contact_id IS NULL OR t.contact_id <= 0))"
+                );
+            } else {
+                $counts = DB::connection('vtiger')
+                    ->table('vtiger_troubletickets as t')
+                    ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
+                    ->where('e.deleted', 0)
+                    ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
+                    ->whereNotNull('t.contact_id')
+                    ->where('t.contact_id', '>', 0)
+                    ->selectRaw('t.status, count(*) as cnt')
+                    ->groupBy('t.status')
+                    ->pluck('cnt', 'status')
+                    ->toArray();
+                $unassigned = DB::connection('vtiger')
+                    ->table('vtiger_troubletickets as t')
+                    ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
+                    ->where('e.deleted', 0)
+                    ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
+                    ->where(function ($q) {
+                        $q->whereNull('t.contact_id')->orWhere('t.contact_id', '<=', 0);
+                    })
+                    ->count();
+                $rows = collect($counts)->map(fn ($cnt, $status) => (object) ['status' => $status, 'cnt' => $cnt])->values()->all();
+                if ($unassigned > 0) {
+                    $rows[] = (object) ['status' => 'Unassigned', 'cnt' => $unassigned];
+                }
             }
-
+            $counts = [];
+            foreach ($rows as $r) {
+                $counts[$r->status] = (int) $r->cnt;
+            }
             return $counts;
         } catch (\Throwable $e) {
             Log::warning('CrmService::getTicketCountsByStatus: ' . $e->getMessage());
@@ -639,13 +661,15 @@ class CrmService
         }
     }
 
-    public function getTickets(int $limit = 50, int $offset = 0, ?string $status = null, ?string $search = null)
+    public function getTickets(int $limit = 50, int $offset = 0, ?string $status = null, ?string $search = null, bool $fullDescription = false)
     {
         try {
             $driver = DB::connection('vtiger')->getDriverName();
-            $descExpr = in_array($driver, ['mysql', 'mariadb'], true)
-                ? 'LEFT(e.description, 500)'
-                : 'SUBSTR(COALESCE(e.description, \'\'), 1, 500)';
+            $descExpr = $fullDescription
+                ? 'e.description'
+                : (in_array($driver, ['mysql', 'mariadb'], true)
+                    ? 'LEFT(e.description, 500)'
+                    : 'SUBSTR(COALESCE(e.description, \'\'), 1, 500)');
 
             $query = DB::connection('vtiger')
                 ->table('vtiger_troubletickets as t')
@@ -653,6 +677,9 @@ class CrmService
                 ->leftJoin('vtiger_contactdetails as c', 't.contact_id', '=', 'c.contactid')
                 ->leftJoin('vtiger_contactscf as cf', 't.contact_id', '=', 'cf.contactid')
                 ->leftJoin('vtiger_users as u', 'e.smownerid', '=', 'u.id')
+                ->when($fullDescription, fn ($q) => $q
+                    ->leftJoin('vtiger_users as creator', 'e.smcreatorid', '=', 'creator.id')
+                    ->leftJoin('vtiger_users as modifier', 'e.modifiedby', '=', 'modifier.id'))
                 ->where('e.deleted', 0)
                 ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
                 ->select(
@@ -665,6 +692,7 @@ class CrmService
                     'e.createdtime',
                     'e.modifiedtime',
                     'e.smownerid',
+                    'e.source',
                     'c.firstname as contact_first',
                     'c.lastname as contact_last',
                     'cf.cf_860',
@@ -673,7 +701,13 @@ class CrmService
                     DB::raw("{$descExpr} as description"),
                     'u.first_name as owner_first',
                     'u.last_name as owner_last',
-                    'u.user_name as owner_username'
+                    'u.user_name as owner_username',
+                    ...($fullDescription ? [
+                        DB::raw("TRIM(CONCAT(COALESCE(creator.first_name,''), ' ', COALESCE(creator.last_name,''))) as creator_name"),
+                        DB::raw("creator.user_name as creator_username"),
+                        DB::raw("TRIM(CONCAT(COALESCE(modifier.first_name,''), ' ', COALESCE(modifier.last_name,''))) as modifier_name"),
+                        DB::raw("modifier.user_name as modifier_username"),
+                    ] : [])
                 );
 
             if ($status === 'Unassigned') {
@@ -708,10 +742,18 @@ class CrmService
         }
     }
 
+    /**
+     * Get all tickets for Excel export. Same filters as getTickets but full description and high limit.
+     */
+    public function getTicketsForExport(?string $status = null, ?string $search = null, int $limit = 50000)
+    {
+        return $this->getTickets($limit, 0, $status, $search, true);
+    }
+
     public function getTicketsCount(?string $status = null, ?string $search = null): int
     {
         if ((!$status || trim($status) === '') && (!$search || trim($search) === '')) {
-            return (int) Cache::remember('geminia_tickets_count', 60, fn () => $this->fetchTicketsCount(null, null));
+            return (int) Cache::remember('geminia_tickets_count', 300, fn () => $this->fetchTicketsCount(null, null));
         }
         return $this->fetchTicketsCount($status, $search);
     }

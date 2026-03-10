@@ -38,6 +38,7 @@ Route::post('contacts/{contact}/followup', [ContactController::class, 'storeFoll
 Route::post('contacts/{contact}/campaigns', [ContactController::class, 'addToCampaign'])->name('contacts.campaigns.add');
 Route::delete('contacts/{contact}/campaigns/{campaign}', [ContactController::class, 'removeFromCampaign'])->name('contacts.campaigns.remove');
 Route::resource('leads', LeadController::class);
+Route::get('/tickets/export', [TicketController::class, 'export'])->name('tickets.export');
 Route::get('/tickets/{ticket}/close', [TicketController::class, 'showCloseForm'])->name('tickets.close.form');
 Route::post('/tickets/{ticket}/close', [TicketController::class, 'quickClose'])->name('tickets.close');
 Route::post('/tickets/{ticket}/inactivate', [TicketController::class, 'inactivate'])->name('tickets.inactivate');
