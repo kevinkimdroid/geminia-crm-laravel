@@ -176,6 +176,10 @@
             transition: background 0.2s;
         }
         .app-topbar-add:hover { background: var(--geminia-primary-dark); color: #fff !important; }
+        .app-topbar-add.dropdown-toggle::after { margin-left: 0.4rem; }
+        .quick-create-menu .dropdown-header { font-size: 0.7rem; letter-spacing: 0.08em; }
+        .quick-create-menu .dropdown-item { font-size: 0.9rem; }
+        .quick-create-menu .dropdown-item:hover { background: var(--geminia-primary-muted); color: var(--geminia-primary); }
         .app-topbar-user {
             display: flex;
             align-items: center;
@@ -395,9 +399,30 @@
                     <div id="searchResults" class="search-dropdown" style="display:none"></div>
                 </div>
                 <div class="app-topbar-actions ms-auto">
-                    <a href="{{ route('leads.create') }}" class="app-topbar-add">
-                        <i class="bi bi-plus-lg"></i> Add Lead
-                    </a>
+                    <div class="dropdown">
+                        <button class="app-topbar-add dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi bi-plus-lg"></i> Quick Create
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end quick-create-menu shadow border-0 rounded-2 py-2" style="min-width: 200px">
+                            <li class="dropdown-header px-3 py-2 text-muted small fw-bold text-uppercase">Quick Create</li>
+                            @if($can('leads'))
+                            <li><a class="dropdown-item py-2" href="{{ route('leads.create') }}"><i class="bi bi-briefcase me-2"></i>Lead</a></li>
+                            @endif
+                            @if($can('support.serve-client') || $can('tickets'))
+                            <li><a class="dropdown-item py-2" href="{{ route('support.serve-client') }}"><i class="bi bi-person-plus me-2"></i>Customer</a></li>
+                            @endif
+                            @if($can('deals'))
+                            <li><a class="dropdown-item py-2" href="{{ route('deals.create') }}"><i class="bi bi-currency-dollar me-2"></i>Opportunity</a></li>
+                            @endif
+                            @if($can('tickets'))
+                            <li><a class="dropdown-item py-2" href="{{ route('tickets.create') }}"><i class="bi bi-ticket-perforated me-2"></i>Ticket</a></li>
+                            @endif
+                            @if($can('calendar'))
+                            <li><a class="dropdown-item py-2" href="{{ route('activities.create', ['type' => 'Event']) }}"><i class="bi bi-calendar-event me-2"></i>Event</a></li>
+                            <li><a class="dropdown-item py-2" href="{{ route('activities.create', ['type' => 'Task']) }}"><i class="bi bi-check2-square me-2"></i>Task</a></li>
+                            @endif
+                        </ul>
+                    </div>
                     <a href="{{ route('reports') }}" class="app-topbar-btn" title="Reports"><i class="bi bi-bar-chart"></i></a>
                     <a href="{{ route('tickets.index') }}" class="app-topbar-btn" title="Tickets"><i class="bi bi-ticket-perforated"></i></a>
                     <div class="dropdown">

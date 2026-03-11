@@ -41,6 +41,7 @@ class DashboardController extends Controller
             $stats['contactsCountDeferred'] = false;
         }
         $stats['pbxCanCall'] = $this->pbxConfig->isConfigured();
+        $stats['salesByPerson'] = $this->crm->getSalesByPerson(8);
 
         return view('dashboard', $stats);
     }

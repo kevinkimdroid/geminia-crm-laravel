@@ -97,11 +97,31 @@
         </div>
     </div>
 
+    {{-- Dashboard toolbar --}}
+    <div class="d-flex justify-content-end gap-2 mb-3">
+        <div class="dropdown">
+            <button class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">More</button>
+            <ul class="dropdown-menu dropdown-menu-end">
+                <li><a class="dropdown-item" href="{{ route('tickets.index') }}"><i class="bi bi-ticket-perforated me-2"></i>Tickets by Status</a></li>
+                <li><a class="dropdown-item" href="{{ route('reports') }}"><i class="bi bi-currency-dollar me-2"></i>Revenue by Salesperson</a></li>
+                <li><a class="dropdown-item" href="{{ route('activities.index') }}"><i class="bi bi-exclamation-triangle me-2"></i>Overdue Activities</a></li>
+            </ul>
+        </div>
+        <div class="dropdown">
+            <button class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">Add Widget</button>
+            <ul class="dropdown-menu dropdown-menu-end">
+                <li><a class="dropdown-item" href="{{ route('leads.index') }}"><i class="bi bi-people me-2"></i>Leads by Source</a></li>
+                <li><a class="dropdown-item" href="{{ route('deals.index') }}"><i class="bi bi-calendar-check me-2"></i>Deals Closing Soon</a></li>
+                <li><a class="dropdown-item" href="{{ route('reports') }}"><i class="bi bi-pie-chart me-2"></i>Pipeline by Stage</a></li>
+            </ul>
+        </div>
+    </div>
+
     {{-- Main grid --}}
-    <div class="row g-4">
+    <div class="row g-4 dashboard-widgets-row">
         {{-- Tickets by Status --}}
-        <div class="col-lg-8">
-            <div class="app-card dashboard-card">
+        <div class="col-lg-4 min-w-0">
+            <div class="app-card dashboard-card dashboard-card-tickets h-100">
                 <div class="dashboard-card-header">
                     <h2 class="dashboard-card-title"><i class="bi bi-ticket-perforated me-2"></i>Tickets by Status</h2>
                     <a href="{{ route('tickets.index') }}" class="dashboard-card-link">View all</a>
@@ -139,20 +159,56 @@
             </div>
         </div>
 
-        {{-- Overdue Activities --}}
-        <div class="col-lg-4">
+        {{-- Revenue by Salesperson --}}
+        <div class="col-lg-4 min-w-0">
             <div class="app-card dashboard-card h-100">
                 <div class="dashboard-card-header">
-                    <h2 class="dashboard-card-title"><i class="bi bi-exclamation-triangle me-2"></i>Overdue</h2>
-                    <a href="{{ route('activities.index') }}" class="dashboard-card-link">View</a>
+                    <h2 class="dashboard-card-title"><i class="bi bi-currency-dollar me-2"></i>Revenue by Salesperson</h2>
+                    <a href="{{ route('reports') }}" class="dashboard-card-link">View</a>
+                </div>
+                @php $salesByPerson = $salesByPerson ?? collect(); @endphp
+                @if ($salesByPerson->isNotEmpty())
+                    <div class="dashboard-sales-list">
+                        @foreach ($salesByPerson->take(5) as $row)
+                            <div class="dashboard-sales-item">
+                                <span class="dashboard-sales-name">{{ $row->name }}</span>
+                                <span class="dashboard-sales-amount">KES {{ number_format($row->total ?? 0, 0) }}</span>
+                            </div>
+                        @endforeach
+                    </div>
+                @else
+                    <div class="dashboard-empty dashboard-empty-tall">
+                        <i class="bi bi-currency-dollar"></i>
+                        <span>No opportunities matched this criteria</span>
+                        <a href="{{ route('deals.index') }}" class="btn btn-sm app-btn-primary mt-2">View Deals</a>
+                    </div>
+                @endif
+            </div>
+        </div>
+
+        {{-- Overdue Activities --}}
+        <div class="col-lg-4 min-w-0">
+            <div class="app-card dashboard-card dashboard-card-overdue h-100">
+                <div class="dashboard-card-header dashboard-card-header-overdue">
+                    <h2 class="dashboard-card-title"><i class="bi bi-exclamation-triangle me-2"></i><span class="dashboard-card-title-text">Overdue Activities</span></h2>
+                    <div class="dashboard-card-actions">
+                        <div class="dropdown">
+                            <button class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">Mine</button>
+                            <ul class="dropdown-menu dropdown-menu-end">
+                                <li><a class="dropdown-item active" href="#">Mine</a></li>
+                                <li><a class="dropdown-item" href="{{ route('activities.index') }}">View all</a></li>
+                            </ul>
+                        </div>
+                        <a href="{{ route('activities.index') }}" class="dashboard-card-link">View</a>
+                    </div>
                 </div>
                 <div class="dashboard-list">
-                    @forelse ($overdueActivities ?? [] as $activity)
+                    @forelse(($overdueActivities ?? []) as $activity)
                         <div class="dashboard-list-item dashboard-list-item-overdue">
-                            <i class="bi bi-exclamation-circle"></i>
-                            <div class="flex-grow-1 min-w-0">
-                                <div class="fw-600 text-truncate">{{ $activity['subject'] }}</div>
-                                <small class="text-muted">{{ $activity['due_date'] ? \Carbon\Carbon::parse($activity['due_date'])->diffForHumans() : '—' }}</small>
+                            <i class="bi bi-exclamation-circle dashboard-list-item-icon" aria-hidden="true"></i>
+                            <div class="dashboard-list-item-body">
+                                <span class="dashboard-list-item-subject">{{ $activity['subject'] }}</span>
+                                <span class="dashboard-list-item-date">{{ $activity['due_date'] ? \Carbon\Carbon::parse($activity['due_date'])->diffForHumans() : '—' }}</span>
                             </div>
                         </div>
                     @empty
@@ -308,22 +364,42 @@
 .dashboard-stat-main-link { display: block; text-decoration: none; color: inherit; }
 .dashboard-stat-main-link:hover { color: inherit; }
 
-.dashboard-card { padding: 1.5rem; }
-.dashboard-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; }
-.dashboard-card-title { font-size: 1rem; font-weight: 700; color: var(--geminia-text); margin: 0; display: flex; align-items: center; }
-.dashboard-card-title i { color: var(--geminia-primary); }
-.dashboard-card-link { font-size: 0.85rem; font-weight: 600; color: var(--geminia-primary); text-decoration: none; }
+.dashboard-widgets-row { overflow-x: hidden; }
+.dashboard-card { padding: 1.5rem; display: flex; flex-direction: column; min-width: 0; }
+.dashboard-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+    flex-shrink: 0;
+    min-width: 0;
+}
+.dashboard-card-header .dashboard-card-title { min-width: 0; flex-shrink: 1; }
+.dashboard-card-header .dashboard-card-title-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.dashboard-card-header .dashboard-card-actions,
+.dashboard-card-header .d-flex { flex-shrink: 0; }
+.dashboard-card-title { font-size: 1rem; font-weight: 700; color: var(--geminia-text); margin: 0; display: flex; align-items: center; gap: 0.5rem; }
+.dashboard-card-title i { color: var(--geminia-primary); flex-shrink: 0; }
+.dashboard-card-link { font-size: 0.85rem; font-weight: 600; color: var(--geminia-primary); text-decoration: none; white-space: nowrap; }
 .dashboard-card-link:hover { color: var(--geminia-primary-dark); text-decoration: underline; }
+/* Overdue card: prevent header dropdown from overlapping list */
+.dashboard-card-overdue .dashboard-card-header-overdue { position: relative; z-index: 1; overflow: visible; }
+.dashboard-card-overdue .dashboard-list { margin-top: 0; }
+/* Tickets card: contain content to prevent overlap with adjacent widgets */
+.dashboard-card-tickets { overflow: hidden; }
+.dashboard-card-tickets .dashboard-ticket-stats { overflow: hidden; }
 
-.dashboard-ticket-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
+.dashboard-ticket-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; min-width: 0; }
 .dashboard-ticket-stat {
     background: var(--geminia-bg);
     border-radius: 12px;
-    padding: 1.25rem;
+    padding: 1rem 1.25rem;
     text-align: center;
     text-decoration: none;
     color: inherit;
     transition: all 0.2s;
+    min-width: 0;
 }
 .dashboard-ticket-stat:hover { background: var(--geminia-primary-muted); }
 .dashboard-ticket-count { display: block; font-size: 1.5rem; font-weight: 700; color: var(--geminia-text); }
@@ -334,9 +410,17 @@
 .dashboard-ticket-progress .dashboard-ticket-fill { background: #0ea5e9; }
 .dashboard-ticket-wait .dashboard-ticket-fill { background: #f59e0b; }
 .dashboard-ticket-closed .dashboard-ticket-fill { background: #059669; }
-@media (max-width: 768px) { .dashboard-ticket-stats { grid-template-columns: repeat(2, 1fr); } }
+@media (min-width: 1400px) { .dashboard-ticket-stats { grid-template-columns: repeat(4, 1fr); } }
 
-.dashboard-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.dashboard-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    max-height: 280px;
+}
 .dashboard-list-item {
     display: flex;
     align-items: center;
@@ -344,12 +428,47 @@
     padding: 0.85rem 1rem;
     border-radius: 10px;
     transition: background 0.2s;
+    flex-shrink: 0;
+    min-width: 0;
 }
 .dashboard-list-item-overdue {
     background: rgba(220, 38, 38, 0.06);
     border-left: 4px solid #dc2626;
 }
-.dashboard-list-item-overdue i { color: #dc2626; font-size: 1.1rem; }
+.dashboard-list-item-icon { font-size: 1.1rem; flex-shrink: 0; }
+.dashboard-list-item-overdue .dashboard-list-item-icon,
+.dashboard-list-item-overdue i { color: #dc2626; }
+.dashboard-list-item-body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.dashboard-list-item-subject {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+}
+.dashboard-list-item-date {
+    flex-shrink: 0;
+    font-size: 0.8rem;
+    color: var(--geminia-text-muted);
+}
+/* Fallback for legacy .flex-grow-1 structure */
+.dashboard-list-item .flex-grow-1 {
+    min-width: 0;
+    overflow: hidden;
+}
+.dashboard-list-item .flex-grow-1 .text-truncate {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 
 .dashboard-empty {
     display: flex;
@@ -390,6 +509,19 @@
     font-size: 0.85rem;
     border-radius: 8px;
 }
+
+.dashboard-sales-list { display: flex; flex-direction: column; gap: 0.75rem; }
+.dashboard-sales-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    background: var(--geminia-bg);
+    border-radius: 10px;
+    font-size: 0.9rem;
+}
+.dashboard-sales-name { font-weight: 500; color: var(--geminia-text); }
+.dashboard-sales-amount { font-weight: 700; color: var(--geminia-primary); }
 
 .dashboard-quick-actions {
     display: flex;
