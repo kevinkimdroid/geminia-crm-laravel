@@ -115,10 +115,10 @@ elseif ($ticket && $expires && $signature) {
     } else {
         $ticketNo = $result['ticket_no'] ?? 'TT' . $ticket;
         $title = $result['title'] ?? 'Support request';
-        $showForm = true;
+        $formUrl = ''; // POST to current URL (params in query string)
     }
 } else {
-    $error = 'Invalid or missing parameters in the feedback link.';
+    $error = 'Please use the link from the email we sent you after closing your support ticket. That link contains a secure token needed for this form.';
 }
 
 header('Content-Type: text/html; charset=utf-8');
