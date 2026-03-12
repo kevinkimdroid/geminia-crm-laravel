@@ -11,6 +11,9 @@
     @elseif($fromMailManager ?? false)
     <a href="{{ route('tools.mail-manager') }}" class="text-muted small text-decoration-none">Mail Manager</a>
     <span class="text-muted mx-2">/</span>
+    @elseif($fromLead ?? false)
+    <a href="{{ route('leads.show', $returnToLead ?? '') }}" class="text-muted small text-decoration-none">Lead</a>
+    <span class="text-muted mx-2">/</span>
     @endif
     <a href="{{ route('tickets.index') }}" class="text-muted small text-decoration-none">Tickets</a>
     <span class="text-muted mx-2">/</span>
@@ -41,6 +44,8 @@
     @elseif($fromMailManager ?? false)
     <input type="hidden" name="return_to_mail_manager" value="1">
     <input type="hidden" name="email_id" value="{{ $emailId ?? '' }}">
+    @elseif(($fromLead ?? false) && ($returnToLead ?? null))
+    <input type="hidden" name="return_to_lead" value="{{ $returnToLead }}">
     @elseif($presetContactId ?? null)
     <input type="hidden" name="return_to_contact" value="{{ $presetContactId }}">
     @endif

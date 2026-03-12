@@ -41,6 +41,10 @@ class AutoTicketFromEmailService
             return ['ticket_id' => null, 'sent' => false, 'error' => 'Internal sender'];
         }
 
+        if (! $this->isAllowedSenderDomain($fromAddress)) {
+            return ['ticket_id' => null, 'sent' => false, 'error' => 'Sender domain not allowed (only Gmail, Yahoo, Hotmail)'];
+        }
+
         $contactResult = $this->resolveOrCreateContactWithPolicy($fromAddress, $email->from_name ?? '');
         $contactId = $contactResult['contact_id'] ?? null;
         $policyNumber = $contactResult['policy_number'] ?? null;
@@ -115,6 +119,20 @@ class AutoTicketFromEmailService
             }
         }
         return false;
+    }
+
+    /**
+     * Return true if sender domain is allowed (Gmail, Yahoo, Hotmail only by default).
+     * When allowed_sender_domains is empty, all domains are allowed.
+     */
+    protected function isAllowedSenderDomain(string $address): bool
+    {
+        $domains = config('tickets.auto_ticket_from_email.allowed_sender_domains', []);
+        if (empty($domains)) {
+            return true;
+        }
+        $domain = strtolower(explode('@', $address, 2)[1] ?? '');
+        return $domain !== '' && in_array($domain, $domains, true);
     }
 
     /**

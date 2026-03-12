@@ -87,15 +87,37 @@ return [
         'assign_to_user_id' => (int) env('TICKET_AUTO_FROM_EMAIL_ASSIGN_TO', 1),
         'category' => env('TICKET_AUTO_FROM_EMAIL_CATEGORY', 'Other'),
         'source' => env('TICKET_AUTO_FROM_EMAIL_SOURCE', 'Email'),
+        // Only Gmail, Yahoo, Hotmail create tickets from email. Set TICKET_EMAIL_ALLOWED_DOMAINS= to allow all (except excluded).
+        'allowed_sender_domains' => array_filter(array_map('strtolower', array_map('trim', explode(',', env('TICKET_EMAIL_ALLOWED_DOMAINS', 'gmail.com,googlemail.com,yahoo.com,yahoo.co.ke,yahoo.co.uk,ymail.com,rocketmail.com,hotmail.com,hotmail.co.ke,hotmail.co.uk,live.com,outlook.com,outlook.co.ke,msn.com'))))),
         'auto_reply_enabled' => filter_var(env('TICKET_AUTO_REPLY_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
         'auto_reply_subject' => env('TICKET_AUTO_REPLY_SUBJECT', ''),
         'auto_reply_body' => env('TICKET_AUTO_REPLY_BODY', ''),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Notify on Ticket Creation
+    |--------------------------------------------------------------------------
+    | TICKET_NOTIFY_ON_CREATION_ENABLED - Master switch for creation emails.
+    | TICKET_NOTIFY_ASSIGNED_USER - Email the assigned staff (default: true).
+    | TICKET_NOTIFY_CONTACT - Email the client/contact (default: false).
+    |   Set TICKET_NOTIFY_CONTACT=true to turn on client emails.
+    */
     'notify_on_creation' => [
         'enabled' => filter_var(env('TICKET_NOTIFY_ON_CREATION_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
         'notify_assigned_user' => filter_var(env('TICKET_NOTIFY_ASSIGNED_USER', true), FILTER_VALIDATE_BOOLEAN),
-        'notify_contact' => filter_var(env('TICKET_NOTIFY_CONTACT', true), FILTER_VALIDATE_BOOLEAN),
+        'notify_contact' => false, // Client emails off. Set TICKET_NOTIFY_CONTACT=true in .env to enable.
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Notify on Reassignment
+    |--------------------------------------------------------------------------
+    | When a ticket is reassigned (assigned_to changes on edit), email the new
+    | assignee. Set TICKET_NOTIFY_ON_REASSIGNMENT=true (default: true).
+    */
+    'notify_on_reassignment' => [
+        'enabled' => filter_var(env('TICKET_NOTIFY_ON_REASSIGNMENT', true), FILTER_VALIDATE_BOOLEAN),
     ],
 
     'sla_violation_reminders' => [
@@ -116,5 +138,9 @@ return [
     'feedback_request' => [
         'enabled' => filter_var(env('TICKET_FEEDBACK_REQUEST_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
         'notify_email' => env('TICKET_FEEDBACK_NOTIFY_EMAIL', 'life@geminialife.co.ke'),
+        // Public URL for feedback links in emails (clients must reach this). E.g. https://geminialife.co.ke/feedback
+        'public_url' => rtrim(env('FEEDBACK_PUBLIC_URL', ''), '/'),
+        // CRM API URL for the standalone feedback app to call (server-to-server). E.g. http://10.1.1.65
+        'crm_api_url' => rtrim(env('FEEDBACK_CRM_API_URL', env('APP_URL', 'http://localhost')), '/'),
     ],
 ];

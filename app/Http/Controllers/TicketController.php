@@ -137,7 +137,40 @@ class TicketController extends Controller
         $contactId = $request->filled('contact_id') ? (int) $request->get('contact_id') : null;
         $fromServeClient = $request->get('from') === 'serve-client';
         $fromMailManager = $request->get('from') === 'mail-manager';
+        $fromLead = $request->get('from') === 'lead';
+        $leadId = $request->filled('lead_id') ? (int) $request->get('lead_id') : null;
         $clientNameParam = $request->filled('client_name') ? trim($request->get('client_name')) : null;
+
+        if ($fromLead && $leadId) {
+            $lead = $crm->getLead($leadId);
+            if (! $lead) {
+                return redirect()->route('leads.index')->with('error', 'Lead not found.');
+            }
+            $contact = $crm->findContactByPhoneOrEmail($lead->phone ?? $lead->mobile ?? null, $lead->email ?? '');
+            if ($contact) {
+                $contactId = (int) $contact->contactid;
+            } else {
+                $contactId = $crm->createContactFromErpClient([
+                    'first_name' => $lead->firstname ?? 'Client',
+                    'last_name' => $lead->lastname ?? '',
+                    'email' => $lead->email ?? '',
+                    'mobile' => $lead->mobile ?? $lead->phone ?? '',
+                    'phone' => $lead->phone ?? $lead->mobile ?? '',
+                ]);
+            }
+            if (! $contactId) {
+                return redirect()->route('leads.show', $leadId)->with('error', 'Could not find or create contact for this lead.');
+            }
+            $presetTitle = 'Lead follow-up: ' . ($lead->company ?: $lead->full_name);
+            $presetDescription = "Lead: {$lead->full_name}" . ($lead->company ? " ({$lead->company})" : '');
+            if ($lead->email || $lead->phone || $lead->mobile) {
+                $presetDescription .= "\n\nContact: " . trim(($lead->email ?: '') . ' ' . ($lead->phone ?: $lead->mobile ?: ''));
+            }
+            $clientNameParam = $lead->full_name;
+        }
+
+        $presetTitle = $presetTitle ?? ($request->filled('title') ? $request->get('title') : null);
+        $presetDescription = $presetDescription ?? ($request->filled('description') ? $request->get('description') : null);
 
         if ($fromServeClient && $contactId) {
             $clients = collect([$crm->getContactById($contactId)])->filter();
@@ -186,10 +219,12 @@ class TicketController extends Controller
             'presetContactDisplay' => $contactDisplay ?: $clientNameParam,
             'presetPolicy' => $presetPolicy,
             'presetOrganizationId' => $request->get('organization_id'),
-            'presetTitle' => $request->filled('title') ? $request->get('title') : null,
-            'presetDescription' => $request->filled('description') ? $request->get('description') : null,
+            'presetTitle' => $presetTitle,
+            'presetDescription' => $presetDescription,
             'fromServeClient' => $fromServeClient,
             'fromMailManager' => $fromMailManager,
+            'fromLead' => $fromLead,
+            'returnToLead' => $fromLead ? $leadId : null,
             'returnToMailManager' => $request->filled('email_id'),
             'emailId' => $request->filled('email_id') ? (int) $request->get('email_id') : null,
             'canCloseTickets' => $this->sla->canUserCloseTickets($userRole),
@@ -215,6 +250,7 @@ class TicketController extends Controller
             'assigned_to' => 'nullable|integer',
             'policy_number' => 'nullable|string|max:100',
             'return_to_mail_manager' => 'nullable',
+            'return_to_lead' => 'nullable|integer',
             'email_id' => 'nullable|integer',
         ]);
 
@@ -315,7 +351,8 @@ class TicketController extends Controller
                     $validated['title'],
                     $ownerId,
                     (int) $validated['contact_id'],
-                    $notifyPolicy
+                    $notifyPolicy,
+                    config('tickets.notify_on_creation.notify_contact', false)
                 );
             } catch (\Throwable $e) {
                 \Illuminate\Support\Facades\Log::warning('Ticket creation notification failed', ['error' => $e->getMessage()]);
@@ -328,9 +365,16 @@ class TicketController extends Controller
             if ($request->filled('return_to_serve_client')) {
                 return redirect()->route('support.serve-client')->with('success', 'Ticket created. You can create another or search for a different client.');
             }
+            if ($request->filled('return_to_lead')) {
+                return redirect()->route('leads.show', (int) $request->get('return_to_lead'))->with('success', 'Ticket created.');
+            }
             $returnToContact = $request->filled('return_to_contact') ? (int) $request->get('return_to_contact') : null;
             if ($returnToContact) {
                 return redirect()->to(route('contacts.show', $returnToContact) . '?tab=tickets')->with('success', 'Ticket created.');
+            }
+            $returnToLead = $request->filled('return_to_lead') ? (int) $request->get('return_to_lead') : null;
+            if ($returnToLead) {
+                return redirect()->route('leads.show', $returnToLead)->with('success', 'Ticket created.');
             }
             return redirect()->route('tickets.index')->with('success', 'Ticket created.');
         } catch (\Throwable $e) {
@@ -564,12 +608,28 @@ class TicketController extends Controller
             if (!empty($validated['ticket_source'] ?? '')) {
                 $crmentityUpdates['source'] = $validated['ticket_source'];
             }
+            $newOwnerId = null;
             if (!empty($validated['assigned_to'] ?? '')) {
-                $crmentityUpdates['smownerid'] = (int) $validated['assigned_to'];
+                $newOwnerId = (int) $validated['assigned_to'];
+                $crmentityUpdates['smownerid'] = $newOwnerId;
             }
             \DB::connection('vtiger')->table('vtiger_crmentity')->where('crmid', $id)->update($crmentityUpdates);
             $this->forgetTicketListCaches();
             \App\Events\DashboardStatsUpdated::dispatch();
+
+            // Notify new assignee when ticket is reassigned
+            if ($newOwnerId !== null && (int) ($ticket->smownerid ?? 0) !== $newOwnerId) {
+                try {
+                    app(\App\Services\TicketNotificationService::class)->sendTicketAssignedNotification(
+                        $id,
+                        $ticket->ticket_no ?? 'TT' . $id,
+                        $validated['title'],
+                        $newOwnerId
+                    );
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning('Ticket reassignment notification failed', ['error' => $e->getMessage(), 'ticket' => $id]);
+                }
+            }
 
             if ($newStatus === 'Closed') {
                 $contactId = (int) ($validated['contact_id'] ?? $ticket->contact_id ?? 0);

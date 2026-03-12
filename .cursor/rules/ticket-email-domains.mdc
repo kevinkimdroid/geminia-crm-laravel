@@ -1,0 +1,16 @@
+---
+description: Only Gmail, Yahoo, Hotmail create tickets from email
+globs: app/Services/AutoTicketFromEmailService.php,app/Services/AutoComplaintFromEmailService.php,config/tickets.php
+alwaysApply: false
+---
+
+# Ticket Email Allowed Domains
+
+**Rule**: Only ticket emails from Gmail, Yahoo, and Hotmail create tickets or complaints from inbound email.
+
+## Implementation
+
+- **Config**: `config/tickets.php` → `auto_ticket_from_email.allowed_sender_domains`
+- **Env**: `TICKET_EMAIL_ALLOWED_DOMAINS` (comma-separated, default: gmail.com, googlemail.com, yahoo.com, yahoo.co.ke, yahoo.co.uk, ymail.com, rocketmail.com, hotmail.com, hotmail.co.ke, hotmail.co.uk, live.com, outlook.com, outlook.co.ke, msn.com)
+- **Services**: `AutoTicketFromEmailService`, `AutoComplaintFromEmailService` (when added) check `isAllowedSenderDomain()` before creating records
+- **Override**: Set `TICKET_EMAIL_ALLOWED_DOMAINS=` (empty) to allow all domains (except excluded)

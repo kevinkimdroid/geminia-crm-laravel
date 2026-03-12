@@ -18,6 +18,9 @@ Route::get('/feedback', [\App\Http\Controllers\FeedbackController::class, 'form'
 Route::post('/feedback', [\App\Http\Controllers\FeedbackController::class, 'form']);
 Route::get('/feedback/thank-you', [\App\Http\Controllers\FeedbackController::class, 'thankYou'])->name('feedback.thank-you');
 
+Route::get('/api/feedback/validate', [\App\Http\Controllers\Api\FeedbackApiController::class, 'validate'])->name('api.feedback.validate');
+Route::post('/api/feedback/submit', [\App\Http\Controllers\Api\FeedbackApiController::class, 'submit'])->name('api.feedback.submit');
+
 Route::get('/api/erp/clients', [\App\Http\Controllers\Api\ErpClientController::class, 'index'])
     ->middleware(['erp.api.token', 'throttle:60,1'])
     ->name('api.erp.clients');

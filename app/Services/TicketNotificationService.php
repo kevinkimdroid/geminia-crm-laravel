@@ -26,7 +26,7 @@ class TicketNotificationService
         int $assignedToUserId,
         ?int $contactId = null,
         ?string $policyNumber = null,
-        bool $notifyContact = true
+        bool $notifyContact = false
     ): array {
         $config = config('tickets.notify_on_creation', []);
         if (empty($config['enabled'])) {
@@ -56,7 +56,8 @@ class TicketNotificationService
             }
         }
 
-        // Notify contact (if enabled, has email, and not skipped e.g. auto-reply already sent)
+        // Notify contact (if enabled via TICKET_NOTIFY_CONTACT, has email, and not skipped)
+        // Default off: only Evans/assignee gets email; set TICKET_NOTIFY_CONTACT=true to email clients
         if (! empty($config['notify_contact']) && $notifyContact && $contactId) {
             $contact = DB::connection('vtiger')->table('vtiger_contactdetails')
                 ->where('contactid', $contactId)
@@ -81,6 +82,54 @@ class TicketNotificationService
         }
 
         return $results;
+    }
+
+    /**
+     * Send notification when a ticket is reassigned to a user.
+     */
+    public function sendTicketAssignedNotification(
+        int $ticketId,
+        string $ticketNo,
+        string $title,
+        int $assignedToUserId
+    ): bool {
+        $config = config('tickets.notify_on_reassignment', []);
+        if (empty($config['enabled'])) {
+            Log::info('TicketNotificationService: notify_on_reassignment disabled', ['ticket' => $ticketNo]);
+            return false;
+        }
+
+        $user = DB::connection('vtiger')->table('vtiger_users')
+            ->where('id', $assignedToUserId)
+            ->select('id', 'email1', 'first_name', 'last_name', 'user_name')
+            ->first();
+        if (! $user) {
+            Log::warning('TicketNotificationService: assigned user not found', ['ticket' => $ticketNo, 'user_id' => $assignedToUserId]);
+            return false;
+        }
+        if (empty(trim($user->email1 ?? ''))) {
+            Log::warning('TicketNotificationService: assigned user has no email', ['ticket' => $ticketNo, 'user_id' => $assignedToUserId]);
+            return false;
+        }
+
+        $userName = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) ?: $user->user_name;
+        $subject = "Ticket assigned to you: {$ticketNo} — {$title}";
+        $body = $this->buildTicketAssignedBody($ticketId, $ticketNo, $title, $userName);
+
+        return $this->send($user->email1, $userName, $subject, $body);
+    }
+
+    protected function buildTicketAssignedBody(int $ticketId, string $ticketNo, string $title, string $recipientName): string
+    {
+        $appName = config('app.name', 'Geminia CRM');
+        $ticketUrl = rtrim(config('app.url', ''), '/') . '/tickets/' . $ticketId;
+
+        return "Hello {$recipientName},\n\n"
+            . "A support ticket has been assigned to you.\n\n"
+            . "Ticket: {$ticketNo}\n"
+            . "Title: {$title}\n\n"
+            . "View ticket: {$ticketUrl}\n\n"
+            . "Kind regards,\n{$appName}";
     }
 
     /**
@@ -208,11 +257,20 @@ class TicketNotificationService
             return false;
         }
 
-        $feedbackUrl = \Illuminate\Support\Facades\URL::temporarySignedRoute(
-            'feedback.form',
-            now()->addDays(7),
-            ['ticket' => $ticketId]
-        );
+        $publicUrl = trim((string) ($config['public_url'] ?? ''));
+        if ($publicUrl !== '') {
+            $expires = now()->addDays(7)->getTimestamp();
+            $params = ['ticket' => $ticketId, 'expires' => $expires];
+            $signed = rtrim($publicUrl, '/') . '/feedback?' . http_build_query($params);
+            $params['signature'] = hash_hmac('sha256', $signed, config('app.key'));
+            $feedbackUrl = rtrim($publicUrl, '/') . '/feedback?' . http_build_query($params);
+        } else {
+            $feedbackUrl = \Illuminate\Support\Facades\URL::temporarySignedRoute(
+                'feedback.form',
+                now()->addDays(7),
+                ['ticket' => $ticketId]
+            );
+        }
 
         $contactName = trim(($contact->firstname ?? '') . ' ' . ($contact->lastname ?? '')) ?: 'Customer';
         $appName = config('app.name', 'Geminia CRM');

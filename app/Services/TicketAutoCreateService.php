@@ -90,7 +90,8 @@ class TicketAutoCreateService
                         $title,
                         $assignTo,
                         $contactId ?: null,
-                        $policy ?: null
+                        $policy ?: null,
+                        config('tickets.notify_on_creation.notify_contact', false)
                     );
                 } catch (\Throwable $notifyEx) {
                     Log::warning('TicketAutoCreateService: creation notification failed', ['ticket_id' => $ticketId, 'error' => $notifyEx->getMessage()]);

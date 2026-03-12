@@ -44,6 +44,10 @@ class AutoComplaintFromEmailService
             return null;
         }
 
+        if (! $this->isAllowedSenderDomain($fromAddress)) {
+            return null; // Only Gmail, Yahoo, Hotmail
+        }
+
         if ($this->emailAlreadyHasComplaint($emailId)) {
             return null;
         }
