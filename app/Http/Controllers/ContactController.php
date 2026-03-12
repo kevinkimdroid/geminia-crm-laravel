@@ -78,18 +78,45 @@ class ContactController extends Controller
         ]);
 
         try {
-            $id = \DB::connection('vtiger')->table('vtiger_contactdetails')->insertGetId([
-                'firstname' => $validated['firstname'],
-                'lastname' => $validated['lastname'],
-                'email' => $validated['email'] ?? '',
-                'phone' => $validated['phone'] ?? '',
-                'mobile' => $validated['mobile'] ?? '',
-            ]);
+            $ownerId = \Illuminate\Support\Facades\Auth::id() ?? \Illuminate\Support\Facades\Auth::guard('vtiger')->id() ?? 1;
+            $label = trim($validated['firstname'] . ' ' . $validated['lastname']);
+            $now = now()->format('Y-m-d H:i:s');
+            $id = (int) \DB::connection('vtiger')->table('vtiger_crmentity')->max('crmid') + 1;
+
+            \DB::connection('vtiger')->transaction(function () use ($id, $ownerId, $label, $now, $validated) {
+                \DB::connection('vtiger')->table('vtiger_crmentity')->insert([
+                    'crmid' => $id,
+                    'smcreatorid' => $ownerId,
+                    'smownerid' => $ownerId,
+                    'modifiedby' => $ownerId,
+                    'setype' => 'Contacts',
+                    'description' => '',
+                    'createdtime' => $now,
+                    'modifiedtime' => $now,
+                    'viewedtime' => null,
+                    'status' => '',
+                    'version' => 0,
+                    'presence' => 1,
+                    'deleted' => 0,
+                    'smgroupid' => 0,
+                    'source' => 'CRM',
+                    'label' => $label,
+                ]);
+
+                \DB::connection('vtiger')->table('vtiger_contactdetails')->insert([
+                    'contactid' => $id,
+                    'firstname' => $validated['firstname'],
+                    'lastname' => $validated['lastname'],
+                    'email' => $validated['email'] ?? '',
+                    'phone' => $validated['phone'] ?? '',
+                    'mobile' => $validated['mobile'] ?? '',
+                ]);
+            });
+
             Cache::forget('geminia_contacts_count');
             Cache::forget('ticket_create_clients');
             Cache::forget('geminia_dashboard_stats');
             \App\Events\DashboardStatsUpdated::dispatch();
-            // Would need vtiger_crmentity insert - simplified for now
             return redirect()->route('contacts.show', $id)->with('success', 'Contact created.');
         } catch (\Throwable $e) {
             return back()->withInput()->with('error', 'Failed to create contact: ' . $e->getMessage());
