@@ -10,6 +10,7 @@ class ScheduledSocialPost extends Model
     protected $fillable = [
         'social_account_id',
         'platform',
+        'campaign_id',
         'content',
         'media_urls',
         'scheduled_at',
@@ -33,6 +34,11 @@ class ScheduledSocialPost extends Model
     public function socialAccount(): BelongsTo
     {
         return $this->belongsTo(SocialAccount::class);
+    }
+
+    public function campaign(): BelongsTo
+    {
+        return $this->belongsTo(Campaign::class);
     }
 
     public function scopeUpcoming($query)

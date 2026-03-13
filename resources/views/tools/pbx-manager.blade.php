@@ -9,6 +9,11 @@
         <p class="page-subtitle mb-0">Call logs and recordings.</p>
     </div>
     <div class="d-flex gap-2 align-items-center">
+        @auth
+        <button type="button" class="btn btn-outline-primary pbx-claim-latest-btn" title="I received the most recent unclaimed call">
+            <i class="bi bi-person-check me-2"></i>I received the last call
+        </button>
+        @endauth
         @if($pbxCanCall ?? false)
         <button type="button" class="btn btn-success pbx-make-call-btn" data-number="" data-customer="">
             <i class="bi bi-telephone-outbound-fill me-2"></i>Make Call
@@ -113,7 +118,14 @@
                                     </td>
                                     <td class="text-muted">{{ Str::limit($call->reason_for_calling ?? '—', 25) }}</td>
                                     <td>{{ $call->customer_name ?? '—' }}</td>
-                                    <td>{{ $call->user_name ?? '—' }}</td>
+                                    <td>
+                                        <span class="pbx-user-display">{{ $call->user_name ?? '—' }}</span>
+                                        @auth
+                                        <button type="button" class="btn btn-link btn-sm p-0 ms-1 pbx-claim-btn" data-call-id="{{ $call->id }}" data-source="{{ $pbxSource ?? 'vtiger' }}" title="I received this call">
+                                            <i class="bi bi-person-check text-success"></i>
+                                        </button>
+                                        @endauth
+                                    </td>
                                     <td>
                                         @if(($call->from_vtiger ?? false) && !empty($call->id))
                                             <button type="button" class="btn btn-sm btn-outline-primary pbx-play-btn" data-recording-url="{{ route('tools.pbx-manager.recording.vtiger', $call->id) }}" data-call-info="{{ $call->customer_number ?? '' }} - {{ optional($call->start_time)->format('d/m H:i') ?: '' }}">
@@ -228,6 +240,87 @@ document.getElementById('pbxRecordingModal')?.addEventListener('hidden.bs.modal'
         audio.pause();
         audio.removeAttribute('src');
     }
+});
+
+// "I received this call" — claim specific call as received by logged-in user
+document.querySelectorAll('.pbx-claim-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        const callId = this.dataset.callId;
+        const source = this.dataset.source || 'vtiger';
+        const row = this.closest('tr');
+        const userDisplay = row?.querySelector('.pbx-user-display');
+        if (!callId || !row) return;
+
+        if (this.disabled) return;
+        this.disabled = true;
+        this.title = 'Saving...';
+
+        fetch('{{ route("tools.pbx-manager.claim") }}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || document.querySelector('input[name="_token"]')?.value
+            },
+            body: JSON.stringify({ call_id: parseInt(callId, 10), source: source })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success && userDisplay) {
+                userDisplay.textContent = data.user_name || 'You';
+            }
+            if (data.message) {
+                const alert = document.createElement('div');
+                alert.className = 'alert alert-success alert-dismissible fade show position-fixed top-0 start-50 translate-middle-x mt-3';
+                alert.style.zIndex = '9999';
+                alert.innerHTML = '<i class="bi bi-check-circle me-2"></i>' + data.message + '<button type="button" class="btn-close" data-bs-dismiss="alert"></button>';
+                document.body.appendChild(alert);
+                setTimeout(() => alert.remove(), 3000);
+            }
+        })
+        .catch(() => {
+            this.disabled = false;
+            this.title = 'I received this call';
+            alert('Could not save. Please try again.');
+        })
+        .finally(() => {
+            this.disabled = false;
+            this.title = 'I received this call';
+        });
+    });
+});
+
+// "I received the last call" — session-based, one-click for most recent unclaimed
+document.querySelector('.pbx-claim-latest-btn')?.addEventListener('click', function() {
+    if (this.disabled) return;
+    this.disabled = true;
+    const originalHtml = this.innerHTML;
+    this.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Saving...';
+
+    fetch('{{ route("tools.pbx-manager.claim-latest") }}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || document.querySelector('input[name="_token"]')?.value
+        },
+        body: JSON.stringify({})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            window.location.reload();
+        } else {
+            alert(data.message || 'Could not claim call.');
+        }
+    })
+    .catch(() => {
+        alert('Could not save. Please try again.');
+    })
+    .finally(() => {
+        this.disabled = false;
+        this.innerHTML = originalHtml;
+    });
 });
 </script>
 @endsection

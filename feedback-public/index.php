@@ -10,7 +10,7 @@
 session_start();
 
 $config = [
-    'crm_api_url' => getenv('FEEDBACK_CRM_API_URL') ?: 'http://10.1.1.65',
+    'crm_api_url' => getenv('FEEDBACK_CRM_API_URL') ?: 'https://geminialife.co.ke',
     'app_name' => 'Geminia Life Insurance',
 ];
 

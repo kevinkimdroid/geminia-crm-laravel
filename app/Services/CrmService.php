@@ -148,6 +148,7 @@ class CrmService
                 ->table('vtiger_troubletickets as t')
                 ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
                 ->leftJoin('vtiger_contactdetails as c', 't.contact_id', '=', 'c.contactid')
+                ->leftJoin('vtiger_contactscf as cf', 't.contact_id', '=', 'cf.contactid')
                 ->where('e.deleted', 0)
                 ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
                 ->whereNotNull('t.contact_id')
@@ -156,7 +157,10 @@ class CrmService
                     $q->where('t.title', 'like', $t)
                         ->orWhere('t.ticket_no', 'like', $t)
                         ->orWhere('c.firstname', 'like', $t)
-                        ->orWhere('c.lastname', 'like', $t);
+                        ->orWhere('c.lastname', 'like', $t)
+                        ->orWhere('cf.cf_860', 'like', $t)
+                        ->orWhere('cf.cf_856', 'like', $t)
+                        ->orWhere('cf.cf_872', 'like', $t);
                 })
                 ->select('t.ticketid as id', 't.title')
                 ->limit($limitPerType)
@@ -728,7 +732,10 @@ class CrmService
                     $q->where('t.title', 'like', $term)
                         ->orWhere('t.ticket_no', 'like', $term)
                         ->orWhere('c.firstname', 'like', $term)
-                        ->orWhere('c.lastname', 'like', $term);
+                        ->orWhere('c.lastname', 'like', $term)
+                        ->orWhere('cf.cf_860', 'like', $term)
+                        ->orWhere('cf.cf_856', 'like', $term)
+                        ->orWhere('cf.cf_872', 'like', $term);
                 });
             }
 
@@ -765,6 +772,7 @@ class CrmService
                 ->table('vtiger_troubletickets as t')
                 ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
                 ->leftJoin('vtiger_contactdetails as c', 't.contact_id', '=', 'c.contactid')
+                ->leftJoin('vtiger_contactscf as cf', 't.contact_id', '=', 'cf.contactid')
                 ->where('e.deleted', 0)
                 ->whereIn('e.setype', ['HelpDesk', 'Ticket']);
 
@@ -786,7 +794,10 @@ class CrmService
                     $q->where('t.title', 'like', $term)
                         ->orWhere('t.ticket_no', 'like', $term)
                         ->orWhere('c.firstname', 'like', $term)
-                        ->orWhere('c.lastname', 'like', $term);
+                        ->orWhere('c.lastname', 'like', $term)
+                        ->orWhere('cf.cf_860', 'like', $term)
+                        ->orWhere('cf.cf_856', 'like', $term)
+                        ->orWhere('cf.cf_872', 'like', $term);
                 });
             }
 

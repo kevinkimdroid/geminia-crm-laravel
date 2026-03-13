@@ -25,6 +25,9 @@
         <div class="card lead-form-card p-4">
             <form method="POST" action="{{ route('leads.store') }}">
                 @csrf
+                @if(session('from_interaction_id'))
+                    <input type="hidden" name="from_interaction_id" value="{{ session('from_interaction_id') }}">
+                @endif
                 <div class="form-section mb-4">
                     <h6 class="form-section-title"><i class="bi bi-person me-2"></i>Contact Information</h6>
                     <div class="row g-3">

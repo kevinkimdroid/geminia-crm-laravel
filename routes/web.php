@@ -58,6 +58,7 @@ Route::get('/api/contacts/{contact}/tickets', [\App\Http\Controllers\ActivityCon
 Route::get('/marketing', fn () => view('marketing'))->name('marketing');
 Route::get('/marketing/social-media', [\App\Http\Controllers\SocialMediaController::class, 'index'])->name('marketing.social-media');
 Route::post('/marketing/social-media/schedule', [\App\Http\Controllers\SocialMediaController::class, 'schedule'])->name('marketing.social-media.schedule');
+Route::get('/marketing/social-media/create-lead/{id}', [\App\Http\Controllers\SocialMediaController::class, 'createLeadFromInteraction'])->name('marketing.social-media.create-lead');
 Route::post('/marketing/social-media/schedule/{id}/cancel', [\App\Http\Controllers\SocialMediaController::class, 'cancelSchedule'])->name('marketing.social-media.schedule.cancel');
 Route::get('/social-auth/{platform}/redirect', [SocialAuthController::class, 'redirect'])->name('social-auth.redirect');
 Route::get('/social-auth/{platform}/callback', [SocialAuthController::class, 'callback'])->name('social-auth.callback');
@@ -98,6 +99,8 @@ Route::post('/tools/pbx-manager/fetch', [\App\Http\Controllers\PbxController::cl
 Route::post('/tools/pbx-manager/make-call', [\App\Http\Controllers\PbxController::class, 'makeCall'])->name('tools.pbx-manager.make-call');
 Route::get('/tools/pbx-manager/vtiger/{id}/recording', [\App\Http\Controllers\PbxController::class, 'recordingVtiger'])->name('tools.pbx-manager.recording.vtiger');
 Route::get('/tools/pbx-manager/calls/{pbxCall}/recording', [\App\Http\Controllers\PbxController::class, 'recording'])->name('tools.pbx-manager.recording');
+Route::post('/tools/pbx-manager/claim', [\App\Http\Controllers\PbxController::class, 'claim'])->name('tools.pbx-manager.claim');
+Route::post('/tools/pbx-manager/claim-latest', [\App\Http\Controllers\PbxController::class, 'claimLatest'])->name('tools.pbx-manager.claim-latest');
 Route::get('/tools/pdf-maker', [\App\Http\Controllers\PdfMakerController::class, 'index'])->name('tools.pdf-maker');
 Route::get('/tools/pdf-maker/{module}/create', [\App\Http\Controllers\PdfMakerController::class, 'create'])->name('tools.pdf-maker.create');
 Route::get('/tools/pdf-maker/{module}/template', [\App\Http\Controllers\PdfMakerController::class, 'template'])->name('tools.pdf-maker.template');
@@ -119,6 +122,15 @@ Route::delete('/settings/crm/groups/{id}', [\App\Http\Controllers\GroupsControll
 Route::post('/settings/crm/ticket-automation', [\App\Http\Controllers\TicketAutomationController::class, 'store'])->name('settings.ticket-automation.store');
 Route::put('/settings/crm/ticket-automation/{id}', [\App\Http\Controllers\TicketAutomationController::class, 'update'])->name('settings.ticket-automation.update');
 Route::delete('/settings/crm/ticket-automation/{id}', [\App\Http\Controllers\TicketAutomationController::class, 'destroy'])->name('settings.ticket-automation.destroy');
+Route::post('/settings/crm/pbx-extension-mapping', [\App\Http\Controllers\PbxExtensionMappingController::class, 'store'])->name('settings.pbx-extension-mapping.store');
+Route::post('/settings/crm/pbx-extension-mapping/sync', [\App\Http\Controllers\PbxExtensionMappingController::class, 'sync'])->name('settings.pbx-extension-mapping.sync');
+Route::delete('/settings/crm/pbx-extension-mapping/{mapping}', [\App\Http\Controllers\PbxExtensionMappingController::class, 'destroy'])->name('settings.pbx-extension-mapping.destroy');
+Route::post('/settings/crm/pbx-extension-mapping', [\App\Http\Controllers\PbxExtensionMappingController::class, 'store'])->name('settings.pbx-extension-mapping.store');
+Route::post('/settings/crm/pbx-extension-mapping/sync', [\App\Http\Controllers\PbxExtensionMappingController::class, 'sync'])->name('settings.pbx-extension-mapping.sync');
+Route::delete('/settings/crm/pbx-extension-mapping/{mapping}', [\App\Http\Controllers\PbxExtensionMappingController::class, 'destroy'])->name('settings.pbx-extension-mapping.destroy');
+Route::post('/settings/crm/pbx-extension-mapping', [\App\Http\Controllers\PbxExtensionMappingController::class, 'store'])->name('settings.pbx-extension-mapping.store');
+Route::post('/settings/crm/pbx-extension-mapping/sync', [\App\Http\Controllers\PbxExtensionMappingController::class, 'sync'])->name('settings.pbx-extension-mapping.sync');
+Route::delete('/settings/crm/pbx-extension-mapping/{mapping}', [\App\Http\Controllers\PbxExtensionMappingController::class, 'destroy'])->name('settings.pbx-extension-mapping.destroy');
 Route::post('/settings/crm/ticket-sla/roles', [\App\Http\Controllers\TicketSlaController::class, 'updateRoles'])->name('settings.ticket-sla.update-roles');
 Route::post('/settings/crm/ticket-sla/departments', [\App\Http\Controllers\TicketSlaController::class, 'addDepartmentTat'])->name('settings.ticket-sla.add-department');
 Route::post('/settings/crm/ticket-sla/sync-categories', [\App\Http\Controllers\TicketSlaController::class, 'syncFromCategories'])->name('settings.ticket-sla.sync-categories');

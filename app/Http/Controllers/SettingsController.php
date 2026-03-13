@@ -76,6 +76,10 @@ class SettingsController extends Controller
             $data['loginPage'] = $page;
             $data['loginPerPage'] = $perPage;
             $data['loginFilter'] = $filter;
+        } elseif ($section === 'pbx-extension-mapping') {
+            $extService = app(\App\Services\PbxExtensionMappingService::class);
+            $data['pbxMappings'] = $extService->getAll();
+            $data['vtigerUsers'] = VtigerUser::on('vtiger')->where('status', 'Active')->orderBy('first_name')->orderBy('last_name')->get();
         }
 
         return view('settings', $data);

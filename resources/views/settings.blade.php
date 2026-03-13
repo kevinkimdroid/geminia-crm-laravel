@@ -77,7 +77,7 @@
                 </div>
 
                 {{-- Configuration --}}
-                @php $configOpen = ($section ?? '') === 'configuration'; @endphp
+                @php $configOpen = in_array($section ?? '', ['configuration', 'pbx-extension-mapping']); @endphp
                 <div class="settings-nav-group">
                     <button type="button" class="settings-nav-toggle w-100 text-start d-flex align-items-center justify-content-between py-2 px-3" data-settings-toggle="navConfig" aria-expanded="{{ $configOpen ? 'true' : 'false' }}">
                         <span class="settings-nav-label">Configuration</span>
@@ -86,6 +86,7 @@
                     <div class="settings-nav-panel {{ $configOpen ? 'open' : '' }}" id="navConfig">
                         <div class="settings-nav-links">
                             <a href="{{ route('settings.crm') }}?section=configuration" class="settings-nav-link {{ ($section ?? '') === 'configuration' ? 'active' : '' }}">General</a>
+                            <a href="{{ route('settings.crm') }}?section=pbx-extension-mapping" class="settings-nav-link {{ ($section ?? '') === 'pbx-extension-mapping' ? 'active' : '' }}">PBX Extension Mapping</a>
                         </div>
                     </div>
                 </div>
@@ -138,7 +139,7 @@
         <div class="settings-content-inner">
             @php
                 $section = $section ?? 'users';
-                $validSections = ['users', 'roles', 'profiles', 'sharing-rules', 'groups', 'login-history', 'modules', 'module-layouts', 'module-numbering', 'scheduler', 'workflows', 'ticket-automation', 'ticket-sla', 'configuration', 'marketing', 'integration', 'other'];
+                $validSections = ['users', 'roles', 'profiles', 'sharing-rules', 'groups', 'login-history', 'modules', 'module-layouts', 'module-numbering', 'scheduler', 'workflows', 'ticket-automation', 'ticket-sla', 'configuration', 'pbx-extension-mapping', 'marketing', 'integration', 'other'];
                 $section = in_array($section, $validSections) ? $section : 'users';
             @endphp
             @include('settings.sections.' . $section)

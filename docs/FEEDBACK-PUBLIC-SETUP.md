@@ -22,12 +22,12 @@ Copy `feedback-public/config.example.php` to `feedback-public/config.php`:
 
 ```php
 return [
-    'crm_api_url' => 'http://10.1.1.65',  // Internal CRM URL (server-to-server)
+    'crm_api_url' => 'https://geminialife.co.ke',  // CRM base URL (same domain when both are on geminialife.co.ke)
     'app_name' => 'Geminia Life Insurance',
 ];
 ```
 
-Ensure the web server can reach `http://10.1.1.65` (same machine or internal network).
+When the feedback app and CRM are both on geminialife.co.ke, use `https://geminialife.co.ke` so the form validates and submits via the public domain.
 
 ### 3. Configure the CRM (.env)
 
@@ -37,8 +37,8 @@ In the main Laravel app's `.env`:
 # Public URL where clients access the feedback form
 FEEDBACK_PUBLIC_URL=https://geminialife.co.ke/feedback
 
-# Internal CRM URL (for API calls from the standalone app)
-FEEDBACK_CRM_API_URL=http://10.1.1.65
+# CRM base URL for API calls (use geminialife.co.ke when both apps are on the same server)
+FEEDBACK_CRM_API_URL=https://geminialife.co.ke
 ```
 
 ### 4. Clear config cache

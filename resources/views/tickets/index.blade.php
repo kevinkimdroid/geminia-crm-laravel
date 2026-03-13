@@ -56,11 +56,11 @@
 
     <div class="app-card overflow-hidden">
         {{-- Search --}}
-        <form action="{{ route('tickets.index') }}" method="GET" class="tickets-toolbar">
+        <form action="{{ route('tickets.index') }}" method="GET" class="tickets-toolbar" id="tickets-search-form">
             @if($currentList ?? '')<input type="hidden" name="list" value="{{ $currentList }}">@endif
             <div class="tickets-search">
                 <i class="bi bi-search"></i>
-                <input type="text" name="search" class="form-control border-0 bg-transparent" placeholder="Search tickets, contacts, policy numbers..." value="{{ $search ?? '' }}">
+                <input type="text" name="search" id="tickets-search-input" class="form-control border-0 bg-transparent" placeholder="Search tickets, contacts, policy numbers… (Ctrl+K)" value="{{ $search ?? '' }}">
             </div>
             <button type="submit" class="btn btn-sm" style="background:var(--geminia-primary);color:#fff;border-radius:8px;padding:.4rem 1rem">Search</button>
             <a href="{{ route('tickets.export', array_filter(['list' => $currentList ?? null, 'search' => $search ?? null])) }}" class="btn btn-sm btn-outline-secondary" title="Export to Excel"><i class="bi bi-file-earmark-spreadsheet me-1"></i>Export Excel</a>
@@ -191,7 +191,7 @@
     padding: 1rem 1.25rem; background: #f8fafc; border-bottom: 1px solid var(--geminia-border);
 }
 .tickets-search {
-    flex: 1; min-width: 200px; max-width: 360px;
+    flex: 1; min-width: 220px; max-width: 460px;
     display: flex; align-items: center; gap: 0.5rem;
     padding: 0.5rem 1rem; background: #fff; border: 1px solid var(--geminia-border); border-radius: 8px;
 }
@@ -238,4 +238,29 @@
 .tickets-pagination .page-link:hover { background: var(--geminia-primary-muted); border-color: var(--geminia-primary); color: var(--geminia-primary); }
 .tickets-pagination .page-item.active .page-link { background: var(--geminia-primary); border-color: var(--geminia-primary); }
 </style>
+
+@push('scripts')
+<script>
+(function(){
+    var form = document.getElementById('tickets-search-form');
+    var input = document.getElementById('tickets-search-input');
+    if (!form || !input) return;
+    var debounceTimer;
+    input.addEventListener('input', function(){
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(function(){ form.submit(); }, 400);
+    });
+    document.addEventListener('keydown', function(e){
+        if (e.key === '/' && document.activeElement !== input && !e.ctrlKey && !e.metaKey && !e.altKey && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
+            e.preventDefault();
+            input.focus();
+        } else if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+            e.preventDefault();
+            input.focus();
+            input.select();
+        }
+    });
+})();
+</script>
+@endpush
 @endsection

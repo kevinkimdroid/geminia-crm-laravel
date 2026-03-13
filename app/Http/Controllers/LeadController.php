@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Lead;
+use App\Models\SocialInteraction;
 use App\Services\CrmService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Cache;
@@ -107,6 +108,9 @@ class LeadController extends Controller
                     );
                 }
             });
+            if ($request->filled('from_interaction_id')) {
+                SocialInteraction::where('id', $request->from_interaction_id)->update(['lead_id' => $id]);
+            }
             Cache::forget('geminia_leads_count');
             Cache::forget('geminia_leads_today_' . now()->format('Y-m-d'));
             Cache::forget('geminia_dashboard_stats');

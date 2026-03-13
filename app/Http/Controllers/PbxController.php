@@ -3,7 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Models\PbxCall;
+use App\Models\PbxCallRecipient;
 use App\Services\PbxConfigService;
+use App\Services\PbxExtensionMappingService;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
@@ -15,7 +19,8 @@ use Illuminate\Support\Str;
 class PbxController extends Controller
 {
     public function __construct(
-        protected PbxConfigService $pbxConfig
+        protected PbxConfigService $pbxConfig,
+        protected PbxExtensionMappingService $extensionMapping
     ) {}
 
     public function index(Request $request)
@@ -34,6 +39,7 @@ class PbxController extends Controller
             ->leftJoin('vtiger_users as u', 'p.user', '=', 'u.id')
             ->select(
                 'p.pbxmanagerid',
+                'p.user as pbx_user',
                 'p.direction',
                 'p.callstatus as call_status',
                 'p.customernumber as customer_number',
@@ -77,6 +83,8 @@ class PbxController extends Controller
             ['path' => $request->url(), 'query' => $request->query()]
         );
 
+        $this->mergeClaimedRecipients($calls, 'vtiger');
+
         return view('tools.pbx-manager', [
             'calls' => $calls,
             'currentList' => $request->get('list', ''),
@@ -109,6 +117,8 @@ class PbxController extends Controller
 
         $calls = $query->orderByDesc('start_time')->paginate(50)->withQueryString();
 
+        $this->mergeClaimedRecipients($calls, 'local');
+
         return view('tools.pbx-manager', [
             'calls' => $calls,
             'currentList' => $request->get('list', ''),
@@ -118,11 +128,147 @@ class PbxController extends Controller
         ]);
     }
 
+    /**
+     * Allow the logged-in user to claim they received a call.
+     * Overrides PBX/vTiger user when incorrect or empty.
+     */
+    public function claim(Request $request)
+    {
+        $validated = $request->validate([
+            'call_id' => 'required|integer|min:1',
+            'source' => 'required|in:vtiger,local',
+        ]);
+
+        $user = $request->user();
+        if (! $user) {
+            return response()->json(['success' => false, 'message' => 'Not authenticated.'], 401);
+        }
+
+        $fullName = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) ?: $user->user_name ?? '';
+
+        PbxCallRecipient::updateOrCreate(
+            [
+                'call_source' => $validated['source'],
+                'call_id' => (int) $validated['call_id'],
+            ],
+            [
+                'received_by_user_id' => $user->id,
+                'received_by_user_name' => $fullName,
+            ]
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Call recorded as received by you.',
+            'user_name' => $fullName,
+        ]);
+    }
+
+    /**
+     * Claim the most recent unclaimed call for the logged-in user (session-based).
+     * Uses session to know who received the call — one-click for "I just answered the last call".
+     */
+    public function claimLatest(Request $request)
+    {
+        $user = $request->user();
+        if (! $user) {
+            return response()->json(['success' => false, 'message' => 'Not authenticated.'], 401);
+        }
+
+        $fullName = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) ?: $user->user_name ?? '';
+        $source = $this->pbxConfig->isConfigured() ? 'vtiger' : 'local';
+
+        $call = null;
+        if ($source === 'vtiger') {
+            $claimedIds = PbxCallRecipient::where('call_source', 'vtiger')->pluck('call_id')->toArray();
+            $query = DB::connection('vtiger')
+                ->table('vtiger_pbxmanager')
+                ->whereNotIn('pbxmanagerid', $claimedIds ?: [0])
+                ->orderByDesc('starttime')
+                ->select('pbxmanagerid')
+                ->limit(1);
+            $row = $query->first();
+            if ($row) {
+                $call = (object) ['id' => $row->pbxmanagerid, 'source' => 'vtiger'];
+            }
+        } else {
+            $claimedIds = PbxCallRecipient::where('call_source', 'local')->pluck('call_id')->toArray();
+            $row = PbxCall::whereNotIn('id', $claimedIds ?: [0])
+                ->orderByDesc('start_time')
+                ->select('id')
+                ->first();
+            if ($row) {
+                $call = (object) ['id' => $row->id, 'source' => 'local'];
+            }
+        }
+
+        if (! $call) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No unclaimed call found. All calls are already attributed.',
+            ]);
+        }
+
+        PbxCallRecipient::updateOrCreate(
+            ['call_source' => $call->source, 'call_id' => $call->id],
+            ['received_by_user_id' => $user->id, 'received_by_user_name' => $fullName]
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Most recent call recorded as received by you.',
+            'user_name' => $fullName,
+            'call_id' => $call->id,
+        ]);
+    }
+
+    /**
+     * Merge claimed recipients into call list. Overrides user_name when a claim exists.
+     *
+     * @param  \Illuminate\Contracts\Pagination\LengthAwarePaginator  $calls
+     */
+    protected function mergeClaimedRecipients($calls, string $source): void
+    {
+        $items = $calls->items();
+        if (empty($items)) {
+            return;
+        }
+
+        $callIds = [];
+        foreach ($items as $call) {
+            $id = $call->id ?? (is_object($call) ? ($call->getAttribute('id') ?? null) : null);
+            if ($id) {
+                $callIds[] = (int) $id;
+            }
+        }
+        if (empty($callIds)) {
+            return;
+        }
+
+        $claims = PbxCallRecipient::where('call_source', $source)
+            ->whereIn('call_id', $callIds)
+            ->get()
+            ->keyBy('call_id');
+
+        foreach ($items as $call) {
+            $id = $call->id ?? (is_object($call) ? ($call->getAttribute('id') ?? null) : null);
+            if ($id && $claims->has($id)) {
+                $claim = $claims->get($id);
+                $call->user_name = $claim->received_by_user_name;
+            }
+        }
+    }
+
     protected function toCallDto(object $row, bool $fromVtiger): object
     {
         $recordingUrl = $row->recording_url ?? null;
         if (! $recordingUrl && ! empty($row->sourceuuid) && $fromVtiger) {
             $recordingUrl = $this->pbxConfig->getRecordingUrl($row->sourceuuid);
+        }
+
+        $userName = trim($row->user_name ?? '') ?: null;
+        if (! $userName && $fromVtiger && isset($row->pbx_user)) {
+            $userName = $this->extensionMapping->resolveUserName($userName, $row->pbx_user);
         }
 
         return (object) [
@@ -132,7 +278,7 @@ class PbxController extends Controller
             'customer_number' => $row->customer_number ?? null,
             'reason_for_calling' => null,
             'customer_name' => $row->customer_name ?? null,
-            'user_name' => trim($row->user_name ?? '') ?: null,
+            'user_name' => $userName,
             'recording_url' => $recordingUrl,
             'recording_path' => null,
             'duration_sec' => (int) ($row->duration_sec ?? 0),
@@ -487,5 +633,80 @@ class PbxController extends Controller
             'failed' => 'failed',
         ];
         return $map[$status] ?? $status ?: 'unknown';
+    }
+
+    /**
+     * Merge claimed recipients (logged-in user who received the call) into call list.
+     * Overrides user_name when a manual claim exists.
+     */
+    /**
+     * @param  LengthAwarePaginator<\Illuminate\Database\Eloquent\Model|object>  $calls
+     */
+    protected function mergeClaimedRecipients(LengthAwarePaginator $calls, string $source): void
+    {
+        $callIds = [];
+        foreach ($calls as $call) {
+            $id = $call->id ?? ($call->pbxmanagerid ?? null);
+            if ($id) {
+                $callIds[] = $id;
+            }
+        }
+        if (empty($callIds)) {
+            return;
+        }
+
+        $claims = PbxCallRecipient::where('call_source', $source)
+            ->whereIn('call_id', $callIds)
+            ->get()
+            ->keyBy(fn ($r) => "{$r->call_source}:{$r->call_id}");
+
+        foreach ($calls as $call) {
+            $id = $call->id ?? ($call->pbxmanagerid ?? null);
+            if (! $id) {
+                continue;
+            }
+            $key = "{$source}:{$id}";
+            $claim = $claims->get($key);
+            if ($claim && trim($claim->received_by_user_name ?? '') !== '') {
+                $call->user_name = trim($claim->received_by_user_name);
+                $call->received_by_user_id = $claim->received_by_user_id;
+            }
+        }
+    }
+
+    /**
+     * Allow the logged-in user to claim they received a call.
+     * Shows who actually received the call when PBX/vTiger mapping is wrong or empty.
+     */
+    public function claim(Request $request)
+    {
+        $validated = $request->validate([
+            'call_id' => 'required|integer|min:1',
+            'source' => 'required|in:vtiger,local',
+        ]);
+
+        $user = $request->user();
+        if (! $user) {
+            return response()->json(['success' => false, 'message' => 'You must be logged in to claim a call.'], 401);
+        }
+
+        $userName = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) ?: $user->user_name ?? 'Agent';
+
+        PbxCallRecipient::updateOrCreate(
+            [
+                'call_source' => $validated['source'],
+                'call_id' => (int) $validated['call_id'],
+            ],
+            [
+                'received_by_user_id' => $user->id,
+                'received_by_user_name' => $userName,
+            ]
+        );
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Call marked as received by you.',
+            'user_name' => $userName,
+        ]);
     }
 }

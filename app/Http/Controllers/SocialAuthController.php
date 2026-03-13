@@ -18,7 +18,7 @@ class SocialAuthController extends Controller
         switch ($platform) {
             case 'facebook':
                 return Socialite::driver('facebook')
-                    ->scopes(['pages_show_list', 'pages_read_engagement', 'pages_manage_posts'])
+                    ->scopes(['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'ads_read'])
                     ->redirect();
             case 'instagram':
                 return Socialite::driver('facebook')
@@ -96,12 +96,32 @@ class SocialAuthController extends Controller
     private function handleFacebookCallback(): ?SocialAccount
     {
         $user = Socialite::driver('facebook')->user();
+        $metadata = array_filter(['email' => $user->getEmail()]);
+
+        // Fetch ad accounts for Meta campaigns (requires ads_read scope)
+        try {
+            $adAccountsResp = Http::withToken($user->token)
+                ->get('https://graph.facebook.com/v18.0/me/adaccounts', [
+                    'fields' => 'id,name,account_id',
+                    'limit' => 5,
+                ]);
+            if ($adAccountsResp->successful()) {
+                $adAccounts = $adAccountsResp->json('data') ?? [];
+                if (!empty($adAccounts)) {
+                    $metadata['ad_account_id'] = $adAccounts[0]['id'] ?? null;
+                    $metadata['ad_account_name'] = $adAccounts[0]['name'] ?? null;
+                }
+            }
+        } catch (\Throwable $e) {
+            // Ads not available - continue without
+        }
+
         SocialAccount::updateOrCreate(
             ['platform' => 'facebook', 'account_id' => $user->getId()],
             [
                 'account_name' => $user->getName(),
                 'access_token' => $user->token,
-                'metadata' => ['email' => $user->getEmail()],
+                'metadata' => $metadata,
             ]
         );
         return SocialAccount::where('platform', 'facebook')->first();

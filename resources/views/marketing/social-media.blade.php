@@ -115,6 +115,21 @@
         </button>
     </li>
     <li class="nav-item" role="presentation">
+        <button class="nav-link" id="meta-campaigns-tab" data-bs-toggle="tab" data-bs-target="#meta-campaigns" type="button" role="tab">
+            <i class="bi bi-megaphone-fill me-2"></i>Meta Campaigns
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="interactions-tab" data-bs-toggle="tab" data-bs-target="#interactions" type="button" role="tab">
+            <i class="bi bi-chat-dots me-2"></i>Interactions
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" id="leads-tab" data-bs-toggle="tab" data-bs-target="#leads" type="button" role="tab">
+            <i class="bi bi-people me-2"></i>Social Leads
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
         <button class="nav-link" id="scheduling-tab" data-bs-toggle="tab" data-bs-target="#scheduling" type="button" role="tab">
             <i class="bi bi-calendar-event me-2"></i>Scheduling & Publishing
         </button>
@@ -188,6 +203,39 @@
         </div>
         @endif
 
+        {{-- Social Leads from Social Media source --}}
+        @if(!empty($socialLeads ?? []) && count($socialLeads) > 0)
+        <div class="card p-4 mb-4">
+            <h6 class="card-section-title mb-3"><i class="bi bi-person-plus-fill me-2"></i>Leads from Social Media</h6>
+            <p class="text-muted small mb-3">Leads captured with source "Social Media" — track and convert your social audience.</p>
+            <div class="table-responsive">
+                <table class="table table-sm table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Name</th>
+                            <th>Company</th>
+                            <th>Email</th>
+                            <th class="text-end">Created</th>
+                            <th class="text-end">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach($socialLeads as $lead)
+                        <tr>
+                            <td><strong>{{ trim(($lead['firstname'] ?? '') . ' ' . ($lead['lastname'] ?? '')) ?: '—' }}</strong></td>
+                            <td>{{ Str::limit($lead['company'] ?? '—', 25) }}</td>
+                            <td>{{ Str::limit($lead['email'] ?? '—', 30) }}</td>
+                            <td class="text-end text-muted small">{{ isset($lead['createdtime']) ? \Carbon\Carbon::parse($lead['createdtime'])->diffForHumans() : '—' }}</td>
+                            <td class="text-end"><a href="{{ route('leads.show', $lead['leadid']) }}" class="btn btn-sm btn-outline-primary">View</a></td>
+                        </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+            <div class="mt-2"><a href="{{ route('leads.index') }}?source=Social Media" class="small">View all Social Media leads →</a></div>
+        </div>
+        @endif
+
         <div class="row g-4">
             <div class="col-lg-6">
                 <div class="card p-4 h-100">
@@ -209,9 +257,23 @@
             </div>
             <div class="col-lg-6">
                 <div class="card p-4 h-100">
-                    <div class="card-header-custom">
-                        <h6><i class="bi bi-inbox me-2"></i>Recent Posts & Conversations</h6>
-                        <a href="#" class="card-arrow" title="View inbox"><i class="bi bi-arrow-right"></i></a>
+                    <div class="card-header-custom d-flex flex-wrap justify-content-between align-items-center gap-2">
+                        <h6 class="mb-0"><i class="bi bi-inbox me-2"></i>Recent Posts & Conversations</h6>
+                        <form action="{{ route('marketing.social-media') }}" method="GET" class="d-flex gap-2 align-items-center flex-wrap">
+                            @foreach(request()->except(['post_platform','post_sort']) as $k => $v) @if($v)<input type="hidden" name="{{ $k }}" value="{{ $v }}">@endif @endforeach
+                            <select name="post_platform" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
+                                <option value="">All platforms</option>
+                                @foreach(['twitter','youtube','tiktok','facebook','instagram'] as $p)
+                                <option value="{{ $p }}" {{ ($postPlatform ?? '') === $p ? 'selected' : '' }}>{{ ucfirst($p) }}</option>
+                                @endforeach
+                            </select>
+                            <select name="post_sort" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
+                                <option value="date_desc" {{ ($postSort ?? 'date_desc') === 'date_desc' ? 'selected' : '' }}>Newest first</option>
+                                <option value="date_asc" {{ ($postSort ?? '') === 'date_asc' ? 'selected' : '' }}>Oldest first</option>
+                                <option value="engagement_desc" {{ ($postSort ?? '') === 'engagement_desc' ? 'selected' : '' }}>Top engagement</option>
+                                <option value="engagement_asc" {{ ($postSort ?? '') === 'engagement_asc' ? 'selected' : '' }}>Low engagement</option>
+                            </select>
+                        </form>
                     </div>
                     @if(!empty($recentPosts))
                         <div class="recent-posts-list">
@@ -258,6 +320,15 @@
                     <form action="{{ route('marketing.social-media.schedule') }}" method="POST">
                         @csrf
                         <div class="mb-3">
+                            <label class="form-label">Campaign <span class="text-muted">(optional)</span></label>
+                            <select name="campaign_id" class="form-select">
+                                <option value="">— No campaign —</option>
+                                @foreach($campaigns ?? [] as $c)
+                                <option value="{{ $c->id }}">{{ $c->campaign_name }}</option>
+                                @endforeach
+                            </select>
+                        </div>
+                        <div class="mb-3">
                             <label class="form-label">Platform</label>
                             <select name="social_account_id" class="form-select" required>
                                 <option value="">Select platform...</option>
@@ -266,6 +337,18 @@
                                 @endforeach
                             </select>
                         </div>
+                        @if(($campaigns ?? collect())->isNotEmpty())
+                        <div class="mb-3">
+                            <label class="form-label">Campaign <span class="text-muted">(optional)</span></label>
+                            <select name="campaign_id" class="form-select">
+                                <option value="">— No campaign —</option>
+                                @foreach($campaigns as $c)
+                                <option value="{{ $c->id }}">{{ $c->campaign_name }}</option>
+                                @endforeach
+                            </select>
+                            <small class="text-muted">Link this post to a marketing campaign to track performance.</small>
+                        </div>
+                        @endif
                         <div class="mb-3">
                             <label class="form-label">Content</label>
                             <textarea name="content" class="form-control" rows="4" placeholder="Write your post..." required maxlength="10000"></textarea>
@@ -291,7 +374,23 @@
             </div>
             <div class="col-lg-7">
                 <div class="card p-4">
-                    <h6 class="card-section-title mb-3"><i class="bi bi-calendar-event me-2"></i>Scheduled & Published Posts</h6>
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                        <h6 class="card-section-title mb-0"><i class="bi bi-calendar-event me-2"></i>Scheduled & Published Posts</h6>
+                        <form action="{{ route('marketing.social-media') }}" method="GET" class="d-flex gap-2 align-items-center">
+                            @foreach(request()->except(['sched_platform','sched_sort']) as $k => $v) @if($v)<input type="hidden" name="{{ $k }}" value="{{ $v }}">@endif @endforeach
+                            <input type="hidden" name="sched_platform" value="{{ $schedPlatform ?? '' }}">
+                            <select name="sched_platform" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
+                                <option value="">All platforms</option>
+                                @foreach(['twitter','youtube','tiktok','facebook','instagram'] as $p)
+                                <option value="{{ $p }}" {{ ($schedPlatform ?? '') === $p ? 'selected' : '' }}>{{ ucfirst($p) }}</option>
+                                @endforeach
+                            </select>
+                            <select name="sched_sort" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
+                                <option value="date_desc" {{ ($schedSort ?? 'date_desc') === 'date_desc' ? 'selected' : '' }}>Newest first</option>
+                                <option value="date_asc" {{ ($schedSort ?? '') === 'date_asc' ? 'selected' : '' }}>Oldest first</option>
+                            </select>
+                        </form>
+                    </div>
                     @if(!empty($scheduledPosts ?? []) && $scheduledPosts->isNotEmpty())
                     <div class="scheduled-posts-list">
                         @foreach($scheduledPosts as $post)
@@ -299,6 +398,9 @@
                             <div class="d-flex justify-content-between align-items-start gap-2">
                                 <div class="flex-grow-1 min-w-0">
                                     <span class="badge platform-badge platform-{{ $post->platform }} me-2">{{ ucfirst($post->platform) }}</span>
+                                    @if($post->campaign_id && ($post->campaign ?? null))
+                                    <span class="badge bg-outline-secondary me-1" title="Campaign">{{ Str::limit($post->campaign->campaign_name ?? 'Campaign', 15) }}</span>
+                                    @endif
                                     <span class="badge {{ $post->status === 'published' ? 'bg-success' : ($post->status === 'scheduled' ? 'bg-primary' : 'bg-secondary') }}">{{ ucfirst($post->status) }}</span>
                                     <p class="mb-1 mt-2 small text-break">{{ Str::limit($post->content, 120) }}</p>
                                     <small class="text-muted">
@@ -327,6 +429,104 @@
                     @endif
                 </div>
             </div>
+        </div>
+    </div>
+
+    {{-- INTERACTIONS --}}
+    <div class="tab-pane fade" id="interactions" role="tabpanel">
+        <div class="card p-4 mb-4">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+                <h6 class="card-section-title mb-0"><i class="bi bi-chat-dots me-2"></i>Comments & Replies</h6>
+                <form action="{{ route('marketing.social-media') }}" method="GET" class="d-flex gap-2 align-items-center">
+                    @foreach(request()->except(['int_platform','int_sort']) as $k => $v) @if($v)<input type="hidden" name="{{ $k }}" value="{{ $v }}">@endif @endforeach
+                    <select name="int_platform" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
+                        <option value="">All platforms</option>
+                        @foreach(['twitter','youtube','tiktok','facebook','instagram'] as $p)
+                        <option value="{{ $p }}" {{ ($intPlatform ?? '') === $p ? 'selected' : '' }}>{{ ucfirst($p) }}</option>
+                        @endforeach
+                    </select>
+                    <select name="int_sort" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
+                        <option value="date_desc" {{ ($intSort ?? 'date_desc') === 'date_desc' ? 'selected' : '' }}>Newest first</option>
+                        <option value="date_asc" {{ ($intSort ?? '') === 'date_asc' ? 'selected' : '' }}>Oldest first</option>
+                    </select>
+                </form>
+            </div>
+            @if(($interactions ?? collect())->isNotEmpty())
+            <div class="recent-posts-list">
+                @foreach($interactions as $int)
+                <div class="recent-post-item">
+                    <div class="d-flex justify-content-between align-items-start gap-2">
+                        <div class="flex-grow-1 min-w-0">
+                            <span class="badge platform-badge platform-{{ $int->platform }} me-2">{{ ucfirst($int->platform) }}</span>
+                            <span class="badge bg-secondary">{{ ucfirst($int->type) }}</span>
+                            <strong class="ms-1">{{ $int->author_name ?: $int->author_handle ?: 'Anonymous' }}</strong>
+                            <p class="mb-1 mt-1 small text-break">{{ Str::limit($int->content, 120) }}</p>
+                            @if($int->post_url)
+                            <a href="{{ $int->post_url }}" target="_blank" rel="noopener" class="small">View post</a>
+                            @endif
+                        </div>
+                        <div class="d-flex gap-1 flex-shrink-0">
+                            @if(!$int->lead_id)
+                            <a href="{{ route('marketing.social-media.create-lead', $int->id) }}" class="btn btn-sm btn-primary-custom" title="Create lead from this interaction">
+                                <i class="bi bi-person-plus"></i> Create Lead
+                            </a>
+                            @else
+                            <a href="{{ route('leads.show', $int->lead_id) }}" class="btn btn-sm btn-outline-success" title="View lead">
+                                <i class="bi bi-person-check"></i> Lead
+                            </a>
+                            @endif
+                        </div>
+                    </div>
+                    <small class="text-muted">{{ $int->interaction_at?->diffForHumans() }}</small>
+                </div>
+                @endforeach
+            </div>
+            @else
+            <div class="placeholder-content min-h-150">
+                <i class="bi bi-chat-dots text-muted"></i>
+                <p class="text-muted mt-2 mb-0">No interactions stored yet.</p>
+                <p class="text-muted small">Interactions (comments, replies) from your social posts will appear here when captured via webhooks or API sync.</p>
+                <p class="text-muted small">You can manually add interactions or set up platform webhooks to auto-capture them.</p>
+            </div>
+            @endif
+        </div>
+    </div>
+
+    {{-- SOCIAL LEADS --}}
+    <div class="tab-pane fade" id="leads" role="tabpanel">
+        <div class="card p-4">
+            <h6 class="card-section-title mb-3"><i class="bi bi-people me-2"></i>Leads from Social Media</h6>
+            <p class="text-muted small mb-4">Leads with source &quot;Social Media&quot; — use &quot;Create Lead&quot; from the Interactions tab when someone engages.</p>
+            @if(!empty($socialLeads ?? []) && count($socialLeads) > 0)
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead class="table-light">
+                        <tr><th>Name</th><th>Company</th><th>Email</th><th>Created</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach($socialLeads as $lead)
+                        <tr>
+                            <td><strong>{{ trim(($lead['firstname'] ?? '') . ' ' . ($lead['lastname'] ?? '')) ?: '—' }}</strong></td>
+                            <td>{{ $lead['company'] ?? '—' }}</td>
+                            <td>{{ $lead['email'] ?? '—' }}</td>
+                            <td><small class="text-muted">{{ isset($lead['createdtime']) ? \Carbon\Carbon::parse($lead['createdtime'])->format('M j, Y') : '—' }}</small></td>
+                            <td><a href="{{ route('leads.show', $lead['leadid']) }}" class="btn btn-sm btn-outline-primary">View</a></td>
+                        </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+            <div class="mt-3">
+                <a href="{{ route('leads.index') }}?source=Social+Media" class="btn btn-sm btn-outline-secondary">View all social leads</a>
+            </div>
+            @else
+            <div class="placeholder-content min-h-150">
+                <i class="bi bi-people text-muted"></i>
+                <p class="text-muted mt-2 mb-0">No leads from Social Media yet.</p>
+                <p class="text-muted small">When you create a lead from an interaction, or add leads with source &quot;Social Media&quot;, they will appear here.</p>
+                <a href="{{ route('leads.create') }}" class="btn btn-sm btn-primary-custom mt-2">Add Lead</a>
+            </div>
+            @endif
         </div>
     </div>
 
@@ -392,6 +592,97 @@
             <a href="{{ route('marketing.social-media') }}#monitoring" class="btn btn-primary-custom btn-sm">Connect Accounts</a>
         </div>
         @endif
+    </div>
+
+    {{-- META CAMPAIGNS --}}
+    <div class="tab-pane fade" id="meta-campaigns" role="tabpanel">
+        @if($metaCampaignsError ?? null)
+        <div class="alert alert-warning d-flex align-items-center">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>
+            <div>
+                <strong>Meta campaigns unavailable</strong>
+                <p class="mb-0 small">{{ $metaCampaignsError }}</p>
+                <p class="mb-0 mt-2 small">Connect your Facebook account (with Ads access) above. You may need to reconnect to grant the <code>ads_read</code> permission.</p>
+            </div>
+        </div>
+        @endif
+        <div class="card p-4 mb-4">
+            <h6 class="card-section-title mb-4"><i class="bi bi-megaphone-fill me-2"></i>Meta Ad Campaigns (Facebook &amp; Instagram)</h6>
+            <p class="text-muted small mb-4">Campaign performance for the last 30 days. Data from your connected Facebook Ad Account.</p>
+            @if(!empty($metaCampaigns ?? []))
+            <div class="row g-3 mb-4">
+                <div class="col-md-4">
+                    <div class="metric-card">
+                        <div class="metric-icon"><i class="bi bi-currency-dollar"></i></div>
+                        <div>
+                            <p class="metric-label">Total Spend</p>
+                            <h3 class="metric-value">KES {{ number_format($metaCampaignsSummary['spend'] ?? 0, 0) }}</h3>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="metric-card">
+                        <div class="metric-icon"><i class="bi bi-eye-fill"></i></div>
+                        <div>
+                            <p class="metric-label">Impressions</p>
+                            <h3 class="metric-value">{{ ($metaCampaignsSummary['impressions'] ?? 0) ? number_format($metaCampaignsSummary['impressions']) : '0' }}</h3>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="metric-card">
+                        <div class="metric-icon"><i class="bi bi-cursor-fill"></i></div>
+                        <div>
+                            <p class="metric-label">Clicks</p>
+                            <h3 class="metric-value">{{ ($metaCampaignsSummary['clicks'] ?? 0) ? number_format($metaCampaignsSummary['clicks']) : '0' }}</h3>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Campaign</th>
+                            <th>Status</th>
+                            <th>Objective</th>
+                            <th class="text-end">Spend</th>
+                            <th class="text-end">Impressions</th>
+                            <th class="text-end">Clicks</th>
+                            <th class="text-end">Leads</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach($metaCampaigns as $c)
+                        <tr>
+                            <td><strong>{{ Str::limit($c['name'] ?? '—', 40) }}</strong></td>
+                            <td><span class="badge {{ ($c['status'] ?? '') === 'ACTIVE' ? 'bg-success' : 'bg-secondary' }}">{{ $c['status'] ?? '—' }}</span></td>
+                            <td class="text-muted small">{{ Str::limit($c['objective'] ?? '—', 20) }}</td>
+                            <td class="text-end">KES {{ number_format($c['spend'] ?? 0, 0) }}</td>
+                            <td class="text-end">{{ number_format($c['impressions'] ?? 0) }}</td>
+                            <td class="text-end">{{ number_format($c['clicks'] ?? 0) }}</td>
+                            <td class="text-end">{{ ($c['leads'] ?? 0) > 0 ? $c['leads'] : '—' }}</td>
+                        </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+            <div class="mt-3">
+                <a href="{{ (isset($metaCampaigns[0]) ? ($metaCampaigns[0]['url'] ?? null) : null) ?: 'https://business.facebook.com/adsmanager' }}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary">
+                    <i class="bi bi-box-arrow-up-right me-1"></i>Open in Meta Ads Manager
+                </a>
+            </div>
+            @else
+            <div class="placeholder-content min-h-150">
+                <i class="bi bi-megaphone text-muted"></i>
+                <p class="text-muted mt-2 mb-0">No Meta campaigns found.</p>
+                <p class="text-muted small">Connect your Facebook account with Ads access above. Campaigns run on Facebook and/or Instagram will appear here.</p>
+                @if(!($metaCampaignsError ?? null))
+                <a href="{{ route('social-auth.redirect', 'facebook') }}" class="btn btn-sm btn-primary-custom mt-2">Connect Facebook</a>
+                @endif
+            </div>
+            @endif
+        </div>
     </div>
 </div>
 

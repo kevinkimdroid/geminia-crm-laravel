@@ -55,6 +55,8 @@ class AppServiceProvider extends ServiceProvider
                 $view->with('currentUserEmail', '');
                 $view->with('pbxCanCall', false);
                 $view->with('pbxDefaultExtension', '');
+                $allowed = $view->getData()['allowedModules'] ?? [];
+                $view->with('can', fn ($k) => empty($allowed) || in_array($k, $allowed));
                 return;
             }
 
@@ -94,6 +96,9 @@ class AppServiceProvider extends ServiceProvider
                 $view->with('pbxCanCall', false);
                 $view->with('pbxDefaultExtension', '');
             }
+
+            $allowed = $view->getData()['allowedModules'] ?? [];
+            $view->with('can', fn ($k) => empty($allowed) || in_array($k, $allowed));
         });
 
         View::composer('settings', function ($view) {

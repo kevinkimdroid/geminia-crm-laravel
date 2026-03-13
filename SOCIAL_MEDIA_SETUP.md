@@ -26,6 +26,7 @@ TIKTOK_CLIENT_SECRET=your_tiktok_client_secret
 2. Create an app → Add **Facebook Login** and **Instagram Graph API**
 3. Add redirect URIs: `{APP_URL}/social-auth/facebook/callback` and `{APP_URL}/social-auth/instagram/callback`
 4. Use same App ID/Secret for both (Instagram uses Meta's API)
+5. **For Meta Ad Campaigns:** Add the **Marketing API** product and request the `ads_read` permission. In App Review, submit for approval if you need production access. Development mode works with test users who have Ad Account access.
 
 ### Twitter / X
 1. Go to [developer.twitter.com](https://developer.twitter.com/)

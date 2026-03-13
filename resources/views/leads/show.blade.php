@@ -14,7 +14,7 @@
         <p class="page-subtitle">{{ $lead->company ?: 'No company' }}</p>
     </div>
     <div class="d-flex gap-2">
-        @if($can('tickets') ?? true)
+        @if((isset($can) ? $can('tickets') : true))
         <a href="{{ route('tickets.create', ['from' => 'lead', 'lead_id' => $lead->leadid]) }}" class="btn btn-primary-custom">
             <i class="bi bi-ticket-perforated me-1"></i>Create Ticket
         </a>
