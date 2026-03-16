@@ -52,7 +52,8 @@ class UserManagementService
         }
 
         $userName = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) ?: $user->user_name;
-        $resetUrl = rtrim(config('app.url', ''), '/') . '/password/reset?token=' . urlencode($token) . '&email=' . urlencode($email);
+        $baseUrl = rtrim(config('services.password_reset.base_url') ?? config('app.url', ''), '/');
+        $resetUrl = $baseUrl . '/password/reset?token=' . urlencode($token) . '&email=' . urlencode($email);
         $appName = config('app.name', 'Geminia Life');
 
         $subject = 'Reset your password — ' . $appName;

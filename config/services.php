@@ -105,10 +105,13 @@ return [
     | Password Reset
     |--------------------------------------------------------------------------
     | url: If set, forgot-password form redirects here instead of sending email.
+    | base_url: Base URL for reset links in emails (default: APP_URL). Use when
+    |           the app is accessed via a different address, e.g. http://10.1.1.65
     | connection: DB connection for password_reset_tokens (null = default).
     */
     'password_reset' => [
         'url' => env('PASSWORD_RESET_URL'),
+        'base_url' => env('PASSWORD_RESET_BASE_URL'),
         'connection' => env('PASSWORD_RESET_DB_CONNECTION'),
     ],
 
