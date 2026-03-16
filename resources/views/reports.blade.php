@@ -274,7 +274,7 @@
 @php $salesChart = collect($salesByPerson ?? [])->take(10)->map(fn($r) => ['name' => trim($r->name ?? '') ?: 'Unassigned', 'total' => (float)($r->total ?? 0)])->values()->toArray(); @endphp
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    var colors = ['#1A559E','#2563eb','#3b82f6','#60a5fa','#93c5fd','#0ea5e9','#06b6d4','#14b8a6'];
+    var colors = ['#1A468A','#2563eb','#3b82f6','#60a5fa','#93c5fd','#0ea5e9','#06b6d4','#14b8a6'];
     var pipelineData = @json($pipelineByStage ?? []);
     var ticketsStatusData = @json($ticketsByStatus ?? []);
     var leadsSourceData = @json($leadsBySource ?? []);

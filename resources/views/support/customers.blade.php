@@ -233,7 +233,7 @@
 
 <style>
 /* Clients page - modern, fast, presentable */
-.clients-search-input-group { border-radius: 12px; overflow: hidden; box-shadow: 0 2px 12px rgba(26, 85, 158, 0.08); border: 1px solid var(--geminia-border); }
+.clients-search-input-group { border-radius: 12px; overflow: hidden; box-shadow: 0 2px 12px rgba(26, 70, 138, 0.08); border: 1px solid var(--geminia-border); }
 .clients-search-input-group .input-group-text { background: #fff; border: none; padding: 0.75rem 1rem; }
 .clients-search-input-group .form-control { border: none; padding: 0.75rem 1rem; }
 .clients-search-input-group .form-control:focus { box-shadow: none; }
@@ -241,7 +241,7 @@
 
 .clients-stat-card {
     background: linear-gradient(135deg, var(--geminia-primary) 0%, var(--geminia-primary-dark) 100%);
-    color: #fff; padding: 1rem 1.5rem; border-radius: 14px; text-align: center; box-shadow: 0 4px 14px rgba(26, 85, 158, 0.25);
+    color: #fff; padding: 1rem 1.5rem; border-radius: 14px; text-align: center; box-shadow: 0 4px 14px rgba(26, 70, 138, 0.25);
 }
 .clients-stat-value { display: block; font-size: 1.75rem; font-weight: 700; }
 .clients-stat-label { font-size: 0.75rem; opacity: 0.9; }
@@ -254,7 +254,7 @@
 .clients-table {
     width: 100%; border-collapse: collapse; font-size: 0.9rem;
 }
-.clients-table thead { background: linear-gradient(180deg, #1e3a5f 0%, #1A559E 100%); color: #fff; }
+.clients-table thead { background: linear-gradient(180deg, #1e3a5f 0%, #1A468A 100%); color: #fff; }
 .clients-table th {
     padding: 1rem 1.25rem; text-align: left; font-weight: 600; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em;
 }

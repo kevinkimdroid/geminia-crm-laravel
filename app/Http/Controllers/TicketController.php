@@ -40,30 +40,32 @@ class TicketController extends Controller
     {
         $status = $request->get('list');
         $search = $request->get('search');
+        $assignedTo = $request->filled('assigned_to') ? (int) $request->get('assigned_to') : null;
         $page = max(1, (int) $request->get('page', 1));
         $perPage = max(10, min(100, (int) ($request->get('per_page') ?: 25)));
         $offset = ($page - 1) * $perPage;
 
-        $isDefaultView = (!$status || trim((string) $status) === '') && (!$search || trim((string) $search) === '') && $page === 1;
-        $isStatusPage1 = $status && trim((string) $status) !== '' && (!$search || trim((string) $search) === '') && $page === 1;
+        $isDefaultView = (!$status || trim((string) $status) === '') && (!$search || trim((string) $search) === '') && $page === 1 && !$assignedTo;
+        $isStatusPage1 = $status && trim((string) $status) !== '' && (!$search || trim((string) $search) === '') && $page === 1 && !$assignedTo;
         $statusSlug = $status ? str_replace(' ', '_', trim((string) $status)) : '';
         $cacheKey = $isDefaultView ? 'tickets_list_default' : ($isStatusPage1 ? 'tickets_list_' . $statusSlug : null);
 
         if ($cacheKey) {
             $ttl = $isDefaultView ? 180 : 120;
-            $cached = Cache::remember($cacheKey, $ttl, function () use ($perPage, $status, $search) {
-                $items = $this->crm->getTickets($perPage, 0, $status, $search);
-                $count = $this->crm->getTicketsCount($status, $search);
+            $cached = Cache::remember($cacheKey, $ttl, function () use ($perPage, $status, $search, $assignedTo) {
+                $items = $this->crm->getTickets($perPage, 0, $status, $search, false, $assignedTo);
+                $count = $this->crm->getTicketsCount($status, $search, $assignedTo);
                 return ['tickets' => $items, 'total' => $count];
             });
             $tickets = $cached['tickets'];
             $total = $cached['total'];
         } else {
-            $tickets = $this->crm->getTickets($perPage, $offset, $status, $search);
-            $total = $this->crm->getTicketsCount($status, $search);
+            $tickets = $this->crm->getTickets($perPage, $offset, $status, $search, false, $assignedTo);
+            $total = $this->crm->getTicketsCount($status, $search, $assignedTo);
         }
 
         $ticketCounts = $this->crm->getTicketCountsByStatus();
+        $users = Cache::remember('ticket_assign_users', 300, fn () => $this->crm->getActiveUsers());
 
         $tickets = new LengthAwarePaginator(
             $tickets instanceof Collection ? $tickets : collect($tickets),
@@ -79,6 +81,8 @@ class TicketController extends Controller
             'total' => $total,
             'currentList' => $status,
             'search' => $search,
+            'assignedTo' => $assignedTo,
+            'users' => $users,
         ]);
     }
 
@@ -86,8 +90,9 @@ class TicketController extends Controller
     {
         $status = $request->get('list');
         $search = $request->get('search');
+        $assignedTo = $request->filled('assigned_to') ? (int) $request->get('assigned_to') : null;
 
-        $tickets = $this->crm->getTicketsForExport($status, $search);
+        $tickets = $this->crm->getTicketsForExport($status, $search, 50000, $assignedTo);
 
         $rows = collect($tickets)->map(function ($ticket) {
             $contactName = trim(($ticket->contact_first ?? '') . ' ' . ($ticket->contact_last ?? '')) ?: '—';
@@ -252,6 +257,8 @@ class TicketController extends Controller
             'return_to_mail_manager' => 'nullable',
             'return_to_lead' => 'nullable|integer',
             'email_id' => 'nullable|integer',
+            'send_email_to_client' => 'nullable|boolean',
+            'client_email_message' => 'nullable|string|max:2000',
         ]);
 
         if (($validated['status'] ?? '') === 'Closed') {
@@ -352,7 +359,8 @@ class TicketController extends Controller
                     $ownerId,
                     (int) $validated['contact_id'],
                     $notifyPolicy,
-                    config('tickets.notify_on_creation.notify_contact', false)
+                    $request->boolean('send_email_to_client'),
+                    trim($validated['client_email_message'] ?? '') ?: null
                 );
             } catch (\Throwable $e) {
                 \Illuminate\Support\Facades\Log::warning('Ticket creation notification failed', ['error' => $e->getMessage()]);

@@ -19,11 +19,30 @@ class SettingsController extends Controller
         $data = ['section' => $section];
 
         if ($section === 'users') {
-            $data['users'] = VtigerUser::on('vtiger')
-                ->where('status', 'Active')
-                ->orderBy('first_name')
-                ->orderBy('last_name')
-                ->get();
+            $usersQuery = VtigerUser::on('vtiger')
+                ->where('status', 'Active');
+            $search = trim((string) $request->get('search', ''));
+            if ($search !== '') {
+                $term = '%' . $search . '%';
+                $usersQuery->where(function ($q) use ($term) {
+                    $q->where('first_name', 'like', $term)
+                        ->orWhere('last_name', 'like', $term)
+                        ->orWhere('email1', 'like', $term)
+                        ->orWhere('user_name', 'like', $term);
+                });
+            }
+            $roleFilter = $request->get('role');
+            if ($roleFilter && $roleFilter !== '') {
+                $userIdsWithRole = DB::connection('vtiger')
+                    ->table('vtiger_user2role')
+                    ->where('roleid', $roleFilter)
+                    ->pluck('userid')
+                    ->toArray();
+                $usersQuery->whereIn('id', $userIdsWithRole ?: [0]);
+            }
+            $data['users'] = $usersQuery->orderBy('first_name')->orderBy('last_name')->get();
+            $data['usersSearch'] = $search;
+            $data['usersRoleFilter'] = $roleFilter ?? '';
             $data['userRoles'] = DB::connection('vtiger')
                 ->table('vtiger_user2role')
                 ->pluck('roleid', 'userid')

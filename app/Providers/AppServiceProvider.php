@@ -28,7 +28,7 @@ class AppServiceProvider extends ServiceProvider
             return "<?php echo app(\App\Support\ViteAssets::class)->toHtml({$expression}); ?>";
         });
 
-        View::composer('layouts.app', function ($view) {
+        View::composer(['layouts.app', 'dashboard'], function ($view) {
             try {
                 $view->with('leadsTodayCount', Cache::remember(
                     'geminia_leads_today_' . now()->format('Y-m-d'),
@@ -53,6 +53,7 @@ class AppServiceProvider extends ServiceProvider
                 $view->with('currentUserName', 'User');
                 $view->with('currentUserRole', '—');
                 $view->with('currentUserEmail', '');
+                $view->with('currentUserInitials', 'U');
                 $view->with('pbxCanCall', false);
                 $view->with('pbxDefaultExtension', '');
                 $allowed = $view->getData()['allowedModules'] ?? [];
@@ -68,6 +69,8 @@ class AppServiceProvider extends ServiceProvider
                     ];
                 });
                 $view->with('currentUserName', $user->full_name);
+                $initials = strtoupper(substr($user->first_name ?? '', 0, 1) . substr($user->last_name ?? '', 0, 1));
+                $view->with('currentUserInitials', $initials ?: strtoupper(substr($user->full_name ?? 'U', 0, 2)));
                 $view->with('currentUserRole', $layoutData['role']);
                 $view->with('currentUserEmail', $user->email1 ?? '');
                 $allowed = $layoutData['allowed'];
@@ -88,6 +91,7 @@ class AppServiceProvider extends ServiceProvider
                 $view->with('currentUserName', 'User');
                 $view->with('currentUserRole', '—');
                 $view->with('currentUserEmail', '');
+                $view->with('currentUserInitials', 'U');
                 try {
                     $view->with('allowedModules', app(\App\Services\ModuleService::class)->getEnabledModuleKeys());
                 } catch (\Throwable $e2) {
@@ -107,10 +111,13 @@ class AppServiceProvider extends ServiceProvider
                 $view->with('currentUserName', ($user ? $user->full_name : null) ?? 'User');
                 $view->with('currentUserRole', ($user && $user->primary_role ? $user->primary_role->rolename : null) ?? '—');
                 $view->with('currentUserEmail', ($user ? $user->email1 : null) ?? '');
+                $initials = $user ? (strtoupper(substr($user->first_name ?? '', 0, 1) . substr($user->last_name ?? '', 0, 1)) ?: strtoupper(substr($user->full_name, 0, 2))) : 'U';
+                $view->with('currentUserInitials', $initials);
             } catch (\Throwable $e) {
                 $view->with('currentUserName', 'User');
                 $view->with('currentUserRole', '—');
                 $view->with('currentUserEmail', '');
+                $view->with('currentUserInitials', 'U');
             }
         });
     }

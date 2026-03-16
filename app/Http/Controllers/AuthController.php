@@ -19,6 +19,12 @@ class AuthController extends Controller
         return view('auth.login');
     }
 
+    /** @return View */
+    public function showForgotPassword(): View
+    {
+        return view('auth.forgot-password');
+    }
+
     public function login(Request $request): RedirectResponse
     {
         $validated = $request->validate([
@@ -57,5 +63,78 @@ class AuthController extends Controller
         $request->session()->regenerateToken();
 
         return redirect()->route('login');
+    }
+
+    public function sendResetLink(Request $request): RedirectResponse
+    {
+        $request->validate(['email' => 'required|email']);
+        $email = $request->email;
+
+        $resetUrl = config('services.password_reset.url');
+        if (! empty($resetUrl)) {
+            return redirect()->away($resetUrl);
+        }
+
+        // Self-service: look up user by email and send reset link
+        $user = VtigerUser::on('vtiger')
+            ->where('email1', $email)
+            ->where('status', 'Active')
+            ->first();
+
+        if ($user && app(\App\Services\UserManagementService::class)->sendPasswordResetEmail($user)) {
+            return back()->with('status', 'A password reset link has been sent to your email. Check your inbox and follow the link.');
+        }
+
+        // Don't reveal whether the email exists; always show success-like message for security
+        return back()->with('status', 'If an account exists for that email, a reset link has been sent. Please contact your administrator if you do not receive it.');
+    }
+
+    public function showResetForm(Request $request): View|RedirectResponse
+    {
+        $token = $request->query('token');
+        $email = $request->query('email');
+
+        if (! $token || ! $email) {
+            return redirect()->route('password.request')
+                ->with('status', 'Invalid or expired reset link. Please request a new one.');
+        }
+
+        $service = app(\App\Services\UserManagementService::class);
+        if (! $service->verifyToken($token, $email)) {
+            return redirect()->route('password.request')
+                ->with('status', 'This reset link is invalid or has expired. Please request a new one.');
+        }
+
+        $user = VtigerUser::on('vtiger')
+            ->where('email1', $email)
+            ->where('status', 'Active')
+            ->select(['user_name'])
+            ->first();
+
+        return view('auth.reset-password', [
+            'token' => $token,
+            'email' => $email,
+            'user_name' => $user?->user_name ?? null,
+        ]);
+    }
+
+    public function resetPassword(Request $request): RedirectResponse
+    {
+        $request->validate([
+            'token' => 'required|string',
+            'email' => 'required|email',
+            'password' => 'required|string|min:8|confirmed',
+        ]);
+
+        $service = app(\App\Services\UserManagementService::class);
+
+        if (! $service->verifyToken($request->token, $request->email)) {
+            return back()->withErrors(['email' => 'This reset link is invalid or has expired. Please contact your administrator for a new one.'])
+                ->withInput($request->only('email'));
+        }
+
+        $service->resetPassword($request->email, $request->password);
+
+        return redirect()->route('login')->with('status', 'Password reset successfully. You can now sign in.');
     }
 }

@@ -100,6 +100,18 @@
                     <label class="form-label fw-semibold">Description <span class="text-muted fw-normal">(optional)</span></label>
                     <textarea name="description" class="form-control" rows="2" placeholder="Brief details if needed">{{ old('description', $presetDescription ?? '') }}</textarea>
                 </div>
+                <div class="col-12">
+                    <div class="form-check mb-2">
+                        <input type="checkbox" name="send_email_to_client" id="send_email_to_client" value="1" class="form-check-input" {{ old('send_email_to_client', true) ? 'checked' : '' }}>
+                        <label class="form-check-label" for="send_email_to_client">Send email notification to client</label>
+                    </div>
+                    <div class="ms-4" id="client-email-options">
+                        <label class="form-label fw-normal text-muted small mb-1">Custom message for client email <span class="text-muted">(optional)</span></label>
+                        <textarea name="client_email_message" class="form-control form-control-sm" rows="3" placeholder="e.g. We will process your policy renewal notice within 3 business days." maxlength="2000">{{ old('client_email_message') }}</textarea>
+                        <p class="text-muted small mb-0 mt-1">Leave blank for the default message. When provided, this is inserted into the email sent to the client.</p>
+                    </div>
+                    <p class="text-muted small mb-0 mt-1">When checked, the client will receive an email with the ticket number after creation.</p>
+                </div>
             </div>
         </div>
     </div>
@@ -243,6 +255,18 @@
     if (oldId) {
         const c = clients.find(x => String(x.id) === String(oldId));
         if (c) searchInput.value = c.name;
+    }
+
+    // Toggle custom message field visibility based on send-email checkbox
+    const sendEmailCb = document.getElementById('send_email_to_client');
+    const emailOptions = document.getElementById('client-email-options');
+    if (sendEmailCb && emailOptions) {
+        function toggleEmailOptions() {
+            emailOptions.style.opacity = sendEmailCb.checked ? '1' : '0.5';
+            emailOptions.style.pointerEvents = sendEmailCb.checked ? 'auto' : 'none';
+        }
+        sendEmailCb.addEventListener('change', toggleEmailOptions);
+        toggleEmailOptions();
     }
 })();
 </script>

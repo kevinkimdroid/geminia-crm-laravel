@@ -134,7 +134,7 @@ header('Content-Type: text/html; charset=utf-8');
     <style>
         body{font-family:system-ui,sans-serif;background:#f8fafc;min-height:100vh;margin:0;padding:2rem 0}
         .feedback-card{max-width:480px;margin:0 auto;padding:2rem;background:#fff;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,.08)}
-        .feedback-logo{width:48px;height:48px;background:#1A559E;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:1.5rem;margin-bottom:1rem}
+        .feedback-logo{width:48px;height:48px;background:#1A468A;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:1.5rem;margin-bottom:1rem}
     </style>
 </head>
 <body>

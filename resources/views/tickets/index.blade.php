@@ -60,10 +60,18 @@
             @if($currentList ?? '')<input type="hidden" name="list" value="{{ $currentList }}">@endif
             <div class="tickets-search">
                 <i class="bi bi-search"></i>
-                <input type="text" name="search" id="tickets-search-input" class="form-control border-0 bg-transparent" placeholder="Search tickets, contacts, policy numbers… (Ctrl+K)" value="{{ $search ?? '' }}">
+                <input type="text" name="search" id="tickets-search-input" class="form-control border-0 bg-transparent" placeholder="Search tickets, contacts, assigned to… (Ctrl+K)" value="{{ $search ?? '' }}">
             </div>
+            <select name="assigned_to" class="form-select form-select-sm tickets-assign-filter" onchange="this.form.submit()">
+                <option value="">All assignees</option>
+                @foreach($users ?? [] as $u)
+                    <option value="{{ $u->id }}" {{ ($assignedTo ?? null) == $u->id ? 'selected' : '' }}>
+                        {{ trim($u->first_name . ' ' . $u->last_name) ?: $u->user_name }}
+                    </option>
+                @endforeach
+            </select>
             <button type="submit" class="btn btn-sm" style="background:var(--geminia-primary);color:#fff;border-radius:8px;padding:.4rem 1rem">Search</button>
-            <a href="{{ route('tickets.export', array_filter(['list' => $currentList ?? null, 'search' => $search ?? null])) }}" class="btn btn-sm btn-outline-secondary" title="Export to Excel"><i class="bi bi-file-earmark-spreadsheet me-1"></i>Export Excel</a>
+            <a href="{{ route('tickets.export', array_filter(['list' => $currentList ?? null, 'search' => $search ?? null, 'assigned_to' => $assignedTo ?? null])) }}" class="btn btn-sm btn-outline-secondary" title="Export to Excel"><i class="bi bi-file-earmark-spreadsheet me-1"></i>Export Excel</a>
             <a href="{{ route('tickets.create') }}" class="btn btn-sm app-topbar-add">Add Ticket</a>
         </form>
 
@@ -198,6 +206,10 @@
 .tickets-search i { color: var(--geminia-text-muted); }
 .tickets-search input { padding: 0; font-size: 0.9rem; }
 .tickets-search input:focus { box-shadow: none; }
+.tickets-assign-filter {
+    min-width: 160px; font-size: 0.875rem; border-radius: 8px;
+    border-color: var(--geminia-border); background: #fff; padding: 0.4rem 0.75rem;
+}
 
 .tickets-table th { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--geminia-text-muted); padding: 1rem 1.25rem; white-space: nowrap; }
 .tickets-table td { padding: 1rem 1.25rem; vertical-align: middle; }

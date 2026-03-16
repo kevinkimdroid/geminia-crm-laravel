@@ -62,7 +62,7 @@
                 </div>
             </div>
             <div class="card-footer pdf-maker-footer bg-transparent border-top py-2 px-3">
-                <span class="text-muted small">PDF Maker — Geminia CRM</span>
+                <span class="text-muted small">PDF Maker — Geminia Life</span>
             </div>
         </div>
     </div>

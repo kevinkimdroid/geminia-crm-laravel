@@ -665,7 +665,7 @@ class CrmService
         }
     }
 
-    public function getTickets(int $limit = 50, int $offset = 0, ?string $status = null, ?string $search = null, bool $fullDescription = false)
+    public function getTickets(int $limit = 50, int $offset = 0, ?string $status = null, ?string $search = null, bool $fullDescription = false, ?int $assignedTo = null)
     {
         try {
             $driver = DB::connection('vtiger')->getDriverName();
@@ -726,6 +726,10 @@ class CrmService
                 $query->where('t.status', $status);
             }
 
+            if ($assignedTo !== null && $assignedTo > 0) {
+                $query->where('e.smownerid', $assignedTo);
+            }
+
             if ($search && trim($search) !== '') {
                 $term = '%' . trim($search) . '%';
                 $query->where(function ($q) use ($term) {
@@ -735,7 +739,10 @@ class CrmService
                         ->orWhere('c.lastname', 'like', $term)
                         ->orWhere('cf.cf_860', 'like', $term)
                         ->orWhere('cf.cf_856', 'like', $term)
-                        ->orWhere('cf.cf_872', 'like', $term);
+                        ->orWhere('cf.cf_872', 'like', $term)
+                        ->orWhere('u.first_name', 'like', $term)
+                        ->orWhere('u.last_name', 'like', $term)
+                        ->orWhere('u.user_name', 'like', $term);
                 });
             }
 
@@ -752,20 +759,20 @@ class CrmService
     /**
      * Get all tickets for Excel export. Same filters as getTickets but full description and high limit.
      */
-    public function getTicketsForExport(?string $status = null, ?string $search = null, int $limit = 50000)
+    public function getTicketsForExport(?string $status = null, ?string $search = null, int $limit = 50000, ?int $assignedTo = null)
     {
-        return $this->getTickets($limit, 0, $status, $search, true);
+        return $this->getTickets($limit, 0, $status, $search, true, $assignedTo);
     }
 
-    public function getTicketsCount(?string $status = null, ?string $search = null): int
+    public function getTicketsCount(?string $status = null, ?string $search = null, ?int $assignedTo = null): int
     {
-        if ((!$status || trim($status) === '') && (!$search || trim($search) === '')) {
-            return (int) Cache::remember('geminia_tickets_count', 300, fn () => $this->fetchTicketsCount(null, null));
+        if ((!$status || trim($status) === '') && (!$search || trim($search) === '') && ($assignedTo === null || $assignedTo <= 0)) {
+            return (int) Cache::remember('geminia_tickets_count', 300, fn () => $this->fetchTicketsCount(null, null, null));
         }
-        return $this->fetchTicketsCount($status, $search);
+        return $this->fetchTicketsCount($status, $search, $assignedTo);
     }
 
-    protected function fetchTicketsCount(?string $status, ?string $search): int
+    protected function fetchTicketsCount(?string $status, ?string $search, ?int $assignedTo = null): int
     {
         try {
             $query = DB::connection('vtiger')
@@ -773,6 +780,7 @@ class CrmService
                 ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
                 ->leftJoin('vtiger_contactdetails as c', 't.contact_id', '=', 'c.contactid')
                 ->leftJoin('vtiger_contactscf as cf', 't.contact_id', '=', 'cf.contactid')
+                ->leftJoin('vtiger_users as u', 'e.smownerid', '=', 'u.id')
                 ->where('e.deleted', 0)
                 ->whereIn('e.setype', ['HelpDesk', 'Ticket']);
 
@@ -788,6 +796,10 @@ class CrmService
                 $query->where('t.status', $status);
             }
 
+            if ($assignedTo !== null && $assignedTo > 0) {
+                $query->where('e.smownerid', $assignedTo);
+            }
+
             if ($search && trim($search) !== '') {
                 $term = '%' . trim($search) . '%';
                 $query->where(function ($q) use ($term) {
@@ -797,7 +809,10 @@ class CrmService
                         ->orWhere('c.lastname', 'like', $term)
                         ->orWhere('cf.cf_860', 'like', $term)
                         ->orWhere('cf.cf_856', 'like', $term)
-                        ->orWhere('cf.cf_872', 'like', $term);
+                        ->orWhere('cf.cf_872', 'like', $term)
+                        ->orWhere('u.first_name', 'like', $term)
+                        ->orWhere('u.last_name', 'like', $term)
+                        ->orWhere('u.user_name', 'like', $term);
                 });
             }
 

@@ -222,7 +222,7 @@
 .campaigns-pill-active.active { background: var(--geminia-success); border-color: var(--geminia-success); }
 .campaigns-pill-planning { border-color: rgba(217, 119, 6, 0.4); }
 .campaigns-pill-planning.active { background: var(--geminia-warning); border-color: var(--geminia-warning); }
-.campaigns-pill-completed { border-color: rgba(26, 85, 158, 0.4); }
+.campaigns-pill-completed { border-color: rgba(26, 70, 138, 0.4); }
 .campaigns-pill-completed.active { background: var(--geminia-primary); border-color: var(--geminia-primary); }
 
 .campaigns-toolbar {

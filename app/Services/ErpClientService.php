@@ -630,7 +630,8 @@ class ErpClientService
     }
 
     /**
-     * Get total clients count (for dashboard). Uses same source as clients list.
+     * Get total clients count (for dashboard). Uses same source and logic as Support > Clients page.
+     * For erp_http: sums Group Life + Individual Life to match the "All" filter on the Clients page.
      */
     public function getClientsCount(int $timeoutSeconds = 15): ?int
     {
@@ -639,8 +640,15 @@ class ErpClientService
         }
         $source = config('erp.clients_view_source', 'crm');
         if ($source === 'erp_http') {
-            $result = $this->getClientsFromHttpApi(1, 0, null, $timeoutSeconds, true);
-            return $result['error'] ? null : (int) $result['total'];
+            $groupResult = $this->getClientsFromHttpApi(1, 0, null, $timeoutSeconds, true, 'group');
+            $indResult = $this->getClientsFromHttpApi(1, 0, null, $timeoutSeconds, true, 'individual');
+            if ($groupResult['error'] && $indResult['error']) {
+                return null;
+            }
+            $groupTotal = (int) ($groupResult['total'] ?? 0);
+            $indTotal = (int) ($indResult['total'] ?? 0);
+
+            return $groupTotal + $indTotal;
         }
         if ($source === 'erp_sync') {
             $result = $this->getClientsFromCache(1, 0);

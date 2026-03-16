@@ -100,4 +100,16 @@ return [
         'api_token' => env('ERP_API_TOKEN', ''),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Password Reset
+    |--------------------------------------------------------------------------
+    | url: If set, forgot-password form redirects here instead of sending email.
+    | connection: DB connection for password_reset_tokens (null = default).
+    */
+    'password_reset' => [
+        'url' => env('PASSWORD_RESET_URL'),
+        'connection' => env('PASSWORD_RESET_DB_CONNECTION'),
+    ],
+
 ];

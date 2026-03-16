@@ -4,14 +4,14 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>@yield('title', 'Feedback') — Geminia Life</title>
-    <link rel="icon" type="image/svg+xml" href="{{ asset('favicon.svg') }}">
+    <link rel="icon" type="image/png" href="{{ asset('images/geminia-logo.png') }}">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --geminia-primary: #1A559E;
-            --geminia-primary-dark: #144177;
+            --geminia-primary: #1A468A;
+            --geminia-primary-dark: #133A6F;
             --geminia-bg: #f8fafc;
         }
         *, *::before, *::after { box-sizing: border-box; }
@@ -34,22 +34,22 @@
         .feedback-logo {
             width: 48px;
             height: 48px;
-            background: var(--geminia-primary);
+            flex-shrink: 0;
             border-radius: 10px;
             display: flex;
             align-items: center;
             justify-content: center;
-            color: #fff;
-            font-size: 1.5rem;
             margin-bottom: 1rem;
+            overflow: hidden;
         }
+        .feedback-logo img { width: 100%; height: 100%; object-fit: contain; }
     </style>
     @stack('head')
 </head>
 <body>
     <div class="container py-4">
         <div class="text-center mb-3">
-            <div class="feedback-logo d-inline-flex"><i class="bi bi-heart-pulse"></i></div>
+            <div class="feedback-logo d-inline-flex"><img src="{{ asset('images/geminia-logo.png') }}" alt="Geminia Life"></div>
             <h5 class="text-muted mb-0">Geminia Life Insurance</h5>
         </div>
         @if(session('error'))

@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-    <title>@yield('title', 'Dashboard') — Geminia CRM</title>
-    <link rel="icon" type="image/svg+xml" href="{{ asset('favicon.svg') }}">
+    <title>@yield('title', 'Dashboard') — Geminia Life</title>
+    <link rel="icon" type="image/png" href="{{ asset('images/geminia-logo.png') }}">
     <link rel="preconnect" href="https://cdn.jsdelivr.net">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
@@ -15,11 +15,12 @@
     @stack('head')
     <style>
         :root {
-            --geminia-primary: #1A559E;
-            --geminia-primary-dark: #144177;
-            --geminia-primary-light: rgba(26, 85, 158, 0.12);
-            --geminia-primary-muted: rgba(26, 85, 158, 0.08);
-            --geminia-sidebar: #1A559E;
+            --geminia-primary: #1A468A;
+            --geminia-primary-dark: #133A6F;
+            --geminia-accent: #33B4E3;
+            --geminia-primary-light: rgba(51, 180, 227, 0.15);
+            --geminia-primary-muted: rgba(51, 180, 227, 0.08);
+            --geminia-sidebar: #1A468A;
             --geminia-sidebar-hover: rgba(255,255,255,0.1);
             --geminia-sidebar-active: rgba(255,255,255,0.2);
             --geminia-text: #1e293b;
@@ -29,8 +30,8 @@
         }
         * { box-sizing: border-box; }
         body {
-            font-family: 'Inter', system-ui, sans-serif;
-            background: var(--geminia-bg);
+            font-family: 'Inter', 'Plus Jakarta Sans', system-ui, sans-serif;
+            background: linear-gradient(180deg, #f0f9ff 0%, var(--geminia-bg) 100%);
             min-height: 100vh;
             color: var(--geminia-text);
             -webkit-font-smoothing: antialiased;
@@ -56,14 +57,15 @@
         .app-sidebar-logo {
             width: 40px;
             height: 40px;
-            background: rgba(255,255,255,0.2);
+            flex-shrink: 0;
             border-radius: 10px;
             display: flex;
             align-items: center;
             justify-content: center;
-            color: #fff;
-            font-size: 1.25rem;
+            overflow: hidden;
+            padding: 4px;
         }
+        .app-sidebar-logo img { width: 100%; height: 100%; object-fit: contain; }
         .app-sidebar-title { font-weight: 700; font-size: 1.1rem; color: #fff; }
         .app-sidebar-sub { font-size: 0.7rem; color: rgba(255,255,255,0.7); }
         .app-sidebar-nav { flex: 1; overflow-y: auto; padding: 1rem 0.75rem; }
@@ -199,7 +201,8 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 0.95rem;
+            font-size: 0.85rem;
+            font-weight: 600;
         }
         .app-topbar-name { font-weight: 600; font-size: 0.875rem; color: var(--geminia-text); margin: 0; }
         .app-topbar-role { font-size: 0.75rem; color: var(--geminia-text-muted); margin: 0; }
@@ -273,9 +276,9 @@
     <div class="app-layout">
         <aside class="app-sidebar" id="appSidebar">
             <div class="app-sidebar-brand">
-                <div class="app-sidebar-logo"><i class="bi bi-shield-check"></i></div>
+                <div class="app-sidebar-logo"><img src="{{ asset('images/geminia-logo.png') }}" alt="Geminia Life"></div>
                 <div>
-                    <div class="app-sidebar-title">Geminia CRM</div>
+                    <div class="app-sidebar-title">Geminia Life</div>
                     <div class="app-sidebar-sub">Insurance</div>
                 </div>
             </div>
@@ -432,7 +435,7 @@
                                 <p class="app-topbar-name mb-0">{{ $currentUserName ?? 'User' }}</p>
                                 <p class="app-topbar-role mb-0">{{ $currentUserRole ?? '—' }}</p>
                             </div>
-                            <div class="app-topbar-avatar"><i class="bi bi-person-fill"></i></div>
+                            <div class="app-topbar-avatar">{{ $currentUserInitials ?? 'U' }}</div>
                         </div>
                         <ul class="dropdown-menu dropdown-menu-end shadow border-0 rounded-2 py-2" style="min-width:180px">
                             <li><a class="dropdown-item py-2" href="{{ route('settings') }}"><i class="bi bi-person me-2"></i>Profile</a></li>

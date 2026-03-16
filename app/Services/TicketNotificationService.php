@@ -26,7 +26,8 @@ class TicketNotificationService
         int $assignedToUserId,
         ?int $contactId = null,
         ?string $policyNumber = null,
-        bool $notifyContact = false
+        bool $notifyContact = false,
+        ?string $customMessageToClient = null
     ): array {
         $config = config('tickets.notify_on_creation', []);
         if (empty($config['enabled'])) {
@@ -56,9 +57,9 @@ class TicketNotificationService
             }
         }
 
-        // Notify contact (if enabled via TICKET_NOTIFY_CONTACT, has email, and not skipped)
-        // Default off: only Evans/assignee gets email; set TICKET_NOTIFY_CONTACT=true to email clients
-        if (! empty($config['notify_contact']) && $notifyContact && $contactId) {
+        // Notify contact when $notifyContact is true (form checkbox on create ticket page).
+        // Requires contact to have an email address on file.
+        if ($notifyContact && $contactId) {
             $contact = DB::connection('vtiger')->table('vtiger_contactdetails')
                 ->where('contactid', $contactId)
                 ->select('contactid', 'email', 'firstname', 'lastname')
@@ -70,7 +71,7 @@ class TicketNotificationService
             } else {
                 $contactName = trim(($contact->firstname ?? '') . ' ' . ($contact->lastname ?? '')) ?: 'Customer';
                 $subject = 'Your support request — Ticket ' . $ticketNo;
-                $body = $this->buildTicketCreatedBody($ticketId, $ticketNo, $title, $contactName, false, $policyNumber);
+                $body = $this->buildTicketCreatedBody($ticketId, $ticketNo, $title, $contactName, false, $policyNumber, $customMessageToClient);
                 if ($this->send($contact->email, $contactName, $subject, $body)) {
                     $results['contact_sent'] = true;
                 }
@@ -121,7 +122,7 @@ class TicketNotificationService
 
     protected function buildTicketAssignedBody(int $ticketId, string $ticketNo, string $title, string $recipientName): string
     {
-        $appName = config('app.name', 'Geminia CRM');
+        $appName = config('app.name', 'Geminia Life');
         $ticketUrl = rtrim(config('app.url', ''), '/') . '/tickets/' . $ticketId;
 
         return "Hello {$recipientName},\n\n"
@@ -193,9 +194,9 @@ class TicketNotificationService
         return ['sent' => $sent, 'skipped' => $skipped];
     }
 
-    protected function buildTicketCreatedBody(int $ticketId, string $ticketNo, string $title, string $recipientName, bool $isAssignee, ?string $policyNumber): string
+    protected function buildTicketCreatedBody(int $ticketId, string $ticketNo, string $title, string $recipientName, bool $isAssignee, ?string $policyNumber, ?string $customMessageToClient = null): string
     {
-        $appName = config('app.name', 'Geminia CRM');
+        $appName = config('app.name', 'Geminia Life');
         $ticketUrl = rtrim(config('app.url', ''), '/') . '/tickets/' . $ticketId;
 
         if ($isAssignee) {
@@ -208,17 +209,20 @@ class TicketNotificationService
                 . "Kind regards,\n{$appName}";
         }
 
+        $defaultMessage = 'Our team will respond as soon as possible.';
+        $bodyMessage = (trim($customMessageToClient ?? '') !== '') ? trim($customMessageToClient) : $defaultMessage;
+
         return "Hello {$recipientName},\n\n"
             . "Thank you for contacting us. We have created a support ticket for your request.\n\n"
             . "Ticket number: {$ticketNo}\n"
             . "Summary: {$title}\n\n"
-            . "Our team will respond as soon as possible.\n\n"
+            . $bodyMessage . "\n\n"
             . "Kind regards,\n{$appName}";
     }
 
     protected function buildSlaViolationBody(object $ticket, string $recipientName): string
     {
-        $appName = config('app.name', 'Geminia CRM');
+        $appName = config('app.name', 'Geminia Life');
         $hoursOver = $ticket->hours_overdue ?? 0;
         $contactName = trim(($ticket->contact_first ?? '') . ' ' . ($ticket->contact_last ?? '')) ?: 'N/A';
 
@@ -273,7 +277,7 @@ class TicketNotificationService
         }
 
         $contactName = trim(($contact->firstname ?? '') . ' ' . ($contact->lastname ?? '')) ?: 'Customer';
-        $appName = config('app.name', 'Geminia CRM');
+        $appName = config('app.name', 'Geminia Life');
         $subject = 'How was your experience? — Ticket ' . $ticketNo . ' closed';
         $body = "Hello {$contactName},\n\n"
             . "Your support request (Ticket {$ticketNo}) has been resolved and closed.\n\n"
@@ -309,7 +313,7 @@ class TicketNotificationService
         }
 
         $ratingLabel = $rating === 'happy' ? 'Happy' : 'Not satisfied';
-        $appName = config('app.name', 'Geminia CRM');
+        $appName = config('app.name', 'Geminia Life');
         $ticketUrl = rtrim(config('app.url', ''), '/') . '/tickets/' . $ticketId;
 
         $subject = "Client feedback: {$ticketNo} — {$ratingLabel}";

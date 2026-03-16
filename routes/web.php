@@ -13,6 +13,10 @@ use Illuminate\Support\Facades\Route;
 Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
+Route::get('/password/forgot', [AuthController::class, 'showForgotPassword'])->name('password.request');
+Route::post('/password/forgot', [AuthController::class, 'sendResetLink'])->name('password.email');
+Route::get('/password/reset', [AuthController::class, 'showResetForm'])->name('password.reset');
+Route::post('/password/reset', [AuthController::class, 'resetPassword'])->name('password.update');
 
 Route::get('/feedback', [\App\Http\Controllers\FeedbackController::class, 'form'])->name('feedback.form');
 Route::post('/feedback', [\App\Http\Controllers\FeedbackController::class, 'form']);
@@ -116,6 +120,10 @@ Route::get('/tools/mail-manager/{id}', [\App\Http\Controllers\MailManagerControl
 Route::get('/reports', [\App\Http\Controllers\ReportsController::class, 'index'])->name('reports');
 Route::get('/settings', fn () => redirect()->route('settings.crm'))->name('settings');
 Route::get('/settings/crm', [\App\Http\Controllers\SettingsController::class, 'crm'])->name('settings.crm');
+Route::post('/settings/users/{user}/send-reset-link', [\App\Http\Controllers\UserManagementController::class, 'sendResetLink'])->name('settings.users.send-reset-link');
+Route::get('/settings/users/{user}/edit', [\App\Http\Controllers\UserManagementController::class, 'edit'])->name('settings.users.edit');
+Route::put('/settings/users/{user}', [\App\Http\Controllers\UserManagementController::class, 'update'])->name('settings.users.update');
+Route::delete('/settings/users/{user}', [\App\Http\Controllers\UserManagementController::class, 'destroy'])->name('settings.users.destroy');
 Route::post('/settings/crm/groups', [\App\Http\Controllers\GroupsController::class, 'store'])->name('settings.groups.store');
 Route::put('/settings/crm/groups/{id}', [\App\Http\Controllers\GroupsController::class, 'update'])->name('settings.groups.update');
 Route::delete('/settings/crm/groups/{id}', [\App\Http\Controllers\GroupsController::class, 'destroy'])->name('settings.groups.destroy');
@@ -152,6 +160,9 @@ Route::get('/reports/export/all-excel', [\App\Http\Controllers\ReportsController
 Route::get('/settings/profiles', [\App\Http\Controllers\ProfileController::class, 'index'])->name('profiles.index');
 Route::get('/settings/profiles/{profile}', [\App\Http\Controllers\ProfileController::class, 'show'])->name('profiles.show');
 Route::put('/settings/profiles/{profile}', [\App\Http\Controllers\ProfileController::class, 'update'])->name('profiles.update');
+Route::post('/settings/users/{user}/send-reset-link', [\App\Http\Controllers\UserManagementController::class, 'sendResetLink'])->name('settings.users.send-reset-link');
+Route::get('/settings/users/{user}/edit', [\App\Http\Controllers\UserManagementController::class, 'edit'])->name('settings.users.edit');
+Route::put('/settings/users/{user}', [\App\Http\Controllers\UserManagementController::class, 'update'])->name('settings.users.update');
 
 Route::prefix('setup')->name('setup.')->group(function () {
     Route::get('/', [SetupController::class, 'index'])->name('index');
