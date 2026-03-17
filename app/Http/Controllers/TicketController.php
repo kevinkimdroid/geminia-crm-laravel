@@ -49,10 +49,11 @@ class TicketController extends Controller
         $isDefaultView = (!$status || trim((string) $status) === '') && (!$search || trim((string) $search) === '') && $page === 1 && !$assignedTo;
         $isStatusPage1 = $status && trim((string) $status) !== '' && (!$search || trim((string) $search) === '') && $page === 1 && !$assignedTo;
         $statusSlug = $status ? str_replace(' ', '_', trim((string) $status)) : '';
-        $cacheKey = $isDefaultView ? 'tickets_list_default' : ($isStatusPage1 ? 'tickets_list_' . $statusSlug : null);
+        $ownerSuffix = $ownerFilter !== null ? '_u' . $ownerFilter : '';
+        $cacheKey = $isDefaultView ? 'tickets_list_default' . $ownerSuffix : ($isStatusPage1 ? 'tickets_list_' . $statusSlug . $ownerSuffix : null);
 
-        if ($cacheKey && $ownerFilter === null) {
-            $ttl = $isDefaultView ? 180 : 120;
+        if ($cacheKey) {
+            $ttl = $isDefaultView ? 120 : 90;
             $cached = Cache::remember($cacheKey, $ttl, function () use ($perPage, $status, $search, $assignedTo) {
                 $items = $this->crm->getTickets($perPage, 0, $status, $search, false, $assignedTo);
                 $count = $this->crm->getTicketsCount($status, $search, $assignedTo);
@@ -811,7 +812,7 @@ class TicketController extends Controller
     {
         $q = trim((string) $request->get('q', ''));
         $limit = min(50, max(5, (int) $request->get('limit', 20)));
-        if (strlen($q) < 2) {
+        if (strlen($q) < 1) {
             return response()->json([]);
         }
         $cacheKey = 'ticket_search_contacts:' . md5($q . ':' . $limit);

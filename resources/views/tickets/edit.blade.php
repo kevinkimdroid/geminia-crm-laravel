@@ -71,15 +71,16 @@
                     <small class="text-muted">Only certain roles can close tickets.</small>
                     @endif
                 </div>
-                <div class="col-md-6 position-relative">
+                <div class="col-md-6 position-relative" id="contactSearchWrapper">
                     <label class="form-label fw-semibold">Client / Contact <span class="text-danger">*</span></label>
                     <div class="input-group">
                         <span class="input-group-text bg-white border-end-0"><i class="bi bi-search text-muted"></i></span>
-                        <input type="text" id="contactSearch" class="form-control" placeholder="Type to search clients" autocomplete="off" value="{{ old('contact_display', $contactDisplay ?? '') }}">
+                        <input type="text" id="contactSearch" class="form-control" placeholder="Type to search..." autocomplete="off" value="{{ old('contact_display', $contactDisplay ?? '') }}" aria-autocomplete="list" aria-expanded="false" aria-controls="contactDropdown" role="combobox">
                         <input type="hidden" name="contact_id" id="contactId" value="{{ old('contact_id', $ticket->contact_id ?? '') }}" required>
-                        <a href="{{ route('contacts.create') }}" class="btn btn-outline-secondary" title="Add client"><i class="bi bi-plus-lg"></i></a>
+                        <button type="button" id="contactClear" class="btn btn-outline-secondary d-none" title="Clear selection"><i class="bi bi-x-lg"></i></button>
+                        <a href="{{ route('contacts.create') }}" class="btn btn-outline-secondary" title="Add new client"><i class="bi bi-plus-lg"></i></a>
                     </div>
-                    <div id="contactDropdown" class="list-group position-absolute w-100 mt-1 shadow border rounded-2" style="max-height: 200px; overflow-y: auto; display: none; z-index: 1000; border-color:var(--geminia-border)!important;"></div>
+                    <div id="contactDropdown" class="list-group position-absolute w-100 mt-1 shadow border rounded-2" style="max-height: 220px; overflow-y: auto; display: none; z-index: 1000; border-color:var(--geminia-border)!important;" role="listbox"></div>
                     @error('contact_id')<div class="text-danger small mt-1">{{ $message }}</div>@enderror
                 </div>
                 <div class="col-md-6">
@@ -181,41 +182,146 @@
 <script id="clientsData" type="application/json">@json(collect($clients ?? [])->map(fn($c) => ['id' => $c->contactid, 'name' => trim(($c->firstname ?? '') . ' ' . ($c->lastname ?? '')) ?: 'Client #' . $c->contactid])->values())</script>
 <script>
 (function() {
-    const clients = JSON.parse(document.getElementById('clientsData').textContent || '[]');
+    const initialClients = JSON.parse(document.getElementById('clientsData').textContent || '[]');
+    let clients = initialClients.slice();
     const searchInput = document.getElementById('contactSearch');
     const contactIdInput = document.getElementById('contactId');
     const dropdown = document.getElementById('contactDropdown');
+    const clearBtn = document.getElementById('contactClear');
+    let fetchTimer;
+    let highlightedIdx = -1;
+    let currentItems = [];
 
     function escapeHtml(s) {
         const d = document.createElement('div');
         d.textContent = s;
         return d.innerHTML;
     }
-    function renderDropdown(filter) {
-        const term = (filter || '').toLowerCase();
-        const filtered = term ? clients.filter(c => c.name.toLowerCase().includes(term)) : clients.slice(0, 50);
-        dropdown.innerHTML = filtered.slice(0, 20).map(c => `<a href="#" class="list-group-item list-group-item-action" data-id="${c.id}" data-name="${escapeHtml(c.name)}">${escapeHtml(c.name)}</a>`).join('');
-        dropdown.style.display = filtered.length ? 'block' : 'none';
+    function showClearBtn(show) {
+        if (clearBtn) clearBtn.classList.toggle('d-none', !show);
+    }
+    function renderDropdown(items, isLoading, noResults) {
+        currentItems = items || [];
+        highlightedIdx = -1;
+        if (isLoading) {
+            dropdown.innerHTML = '<div class="list-group-item text-muted py-3 text-center"><span class="spinner-border spinner-border-sm me-2"></span>Searching...</div>';
+            dropdown.style.display = 'block';
+        } else if (noResults || (currentItems.length === 0 && (searchInput.value || '').trim().length >= 1)) {
+            dropdown.innerHTML = '<div class="list-group-item text-muted py-3 text-center">No contacts found. Try a different search or <a href="{{ route("contacts.create") }}">add a new client</a>.</div>';
+            dropdown.style.display = 'block';
+        } else if (currentItems.length) {
+            dropdown.innerHTML = currentItems.slice(0, 20).map((c, i) =>
+                `<a href="#" class="list-group-item list-group-item-action" data-id="${c.id}" data-name="${escapeHtml(c.name)}" role="option" data-index="${i}">${escapeHtml(c.name)}</a>`
+            ).join('');
+            dropdown.style.display = 'block';
+        } else {
+            dropdown.style.display = 'none';
+        }
+        searchInput.setAttribute('aria-expanded', dropdown.style.display === 'block');
+    }
+    function renderFromLocal() {
+        const term = (searchInput.value || '').trim().toLowerCase();
+        const filtered = term ? clients.filter(c => (c.name || '').toLowerCase().includes(term)) : clients.slice(0, 50);
+        renderDropdown(filtered);
+    }
+    function selectItem(item) {
+        if (!item) return;
+        contactIdInput.value = item.dataset.id;
+        searchInput.value = item.dataset.name;
+        dropdown.style.display = 'none';
+        searchInput.setAttribute('aria-expanded', 'false');
+        showClearBtn(true);
+    }
+    function fetchContacts() {
+        const q = searchInput.value.trim();
+        if (q.length < 2) {
+            renderFromLocal();
+            return;
+        }
+        renderDropdown(null, true);
+        fetch('{{ route("api.tickets.contacts") }}?q=' + encodeURIComponent(q) + '&limit=30', {
+            headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' },
+            credentials: 'same-origin'
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (Array.isArray(data) && data.length) renderDropdown(data);
+            else renderDropdown([], false, true);
+        })
+        .catch(() => renderFromLocal());
     }
 
-    searchInput.addEventListener('focus', () => renderDropdown(searchInput.value));
-    searchInput.addEventListener('input', () => renderDropdown(searchInput.value));
-    searchInput.addEventListener('blur', () => setTimeout(() => dropdown.style.display = 'none', 200));
+    searchInput.addEventListener('focus', function() {
+        const q = this.value.trim();
+        if (q.length >= 1) {
+            clearTimeout(fetchTimer);
+            fetchTimer = setTimeout(fetchContacts, 150);
+        } else {
+            renderFromLocal();
+        }
+    });
+    searchInput.addEventListener('input', function() {
+        const q = this.value.trim();
+        clearTimeout(fetchTimer);
+        showClearBtn(false);
+        contactIdInput.value = '';
+        if (q.length >= 1) {
+            fetchTimer = setTimeout(fetchContacts, 250);
+        } else {
+            renderFromLocal();
+        }
+    });
+    searchInput.addEventListener('keydown', function(e) {
+        if (dropdown.style.display !== 'block' || !currentItems.length) return;
+        const opts = dropdown.querySelectorAll('[data-id]');
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            highlightedIdx = Math.min(highlightedIdx + 1, opts.length - 1);
+            opts[highlightedIdx]?.scrollIntoView({ block: 'nearest' });
+            opts.forEach((o, i) => o.classList.toggle('active', i === highlightedIdx));
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            highlightedIdx = Math.max(highlightedIdx - 1, 0);
+            opts[highlightedIdx]?.scrollIntoView({ block: 'nearest' });
+            opts.forEach((o, i) => o.classList.toggle('active', i === highlightedIdx));
+        } else if (e.key === 'Enter' && highlightedIdx >= 0 && opts[highlightedIdx]) {
+            e.preventDefault();
+            selectItem(opts[highlightedIdx]);
+        } else if (e.key === 'Escape') {
+            dropdown.style.display = 'none';
+            searchInput.setAttribute('aria-expanded', 'false');
+        }
+    });
+    searchInput.addEventListener('blur', () => setTimeout(() => {
+        if (document.activeElement?.closest('#contactSearchWrapper')) return;
+        dropdown.style.display = 'none';
+        searchInput.setAttribute('aria-expanded', 'false');
+    }, 180));
 
-    dropdown.addEventListener('click', (e) => {
+    dropdown.addEventListener('mousedown', (e) => {
         const item = e.target.closest('[data-id]');
         if (item) {
             e.preventDefault();
-            contactIdInput.value = item.dataset.id;
-            searchInput.value = item.dataset.name;
-            dropdown.style.display = 'none';
+            selectItem(item);
+            showClearBtn(true);
         }
     });
+
+    if (clearBtn) {
+        clearBtn.addEventListener('click', function() {
+            contactIdInput.value = '';
+            searchInput.value = '';
+            searchInput.focus();
+            showClearBtn(false);
+            renderFromLocal();
+        });
+    }
 
     const oldId = contactIdInput.value;
     if (oldId) {
         const c = clients.find(x => String(x.id) === String(oldId));
         if (c) searchInput.value = c.name;
+        showClearBtn(true);
     }
 })();
 </script>

@@ -118,6 +118,11 @@ class SyncErpClientsCommand extends Command
 
         $this->components->info("Sync complete. Total: {$total} clients (cache total: " . DB::table('erp_clients_cache')->count() . ')');
 
+        // Invalidate caches so Clients page shows correct count
+        \Illuminate\Support\Facades\Cache::forget('erp_clients_cache_total');
+        \Illuminate\Support\Facades\Cache::forget('geminia_clients_count');
+        \Illuminate\Support\Facades\Cache::put('clients_list_version', time(), 86400);
+
         return self::SUCCESS;
     }
 

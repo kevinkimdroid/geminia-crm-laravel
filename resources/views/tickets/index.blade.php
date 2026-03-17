@@ -95,9 +95,7 @@
                     @forelse ($tickets as $ticket)
                         @php
                             $contactName = trim(($ticket->contact_first ?? '') . ' ' . ($ticket->contact_last ?? '')) ?: '—';
-                            $detailUrl = ($ticket->contact_id ?? null)
-                                ? route('contacts.show', $ticket->contact_id)
-                                : route('tickets.show', $ticket->ticketid);
+                            $ticketUrl = route('tickets.show', $ticket->ticketid);
                             // POLICY = policy_number column only. From contact cf_860/cf_856/cf_872 or "Related policy" in description.
                             // Never use contact_id — it must be policy_number only.
                             $policyNum = pick_policy_excluding_pin($ticket->cf_860 ?? null, $ticket->cf_856 ?? null, $ticket->cf_872 ?? null);
@@ -114,10 +112,10 @@
                         @endphp
                         <tr class="ticket-row" data-ticket-id="{{ $ticket->ticketid }}" data-ticket-no="{{ $ticket->ticket_no ?? 'TT' . $ticket->ticketid }}">
                             <td>
-                                <a href="{{ $detailUrl }}" class="tickets-id-link">{{ $ticket->ticket_no ?? 'TT' . $ticket->ticketid }}</a>
+                                <a href="{{ $ticketUrl }}" class="tickets-id-link">{{ $ticket->ticket_no ?? 'TT' . $ticket->ticketid }}</a>
                             </td>
                             <td>
-                                <a href="{{ $detailUrl }}" class="tickets-title-link">{{ Str::limit($ticket->title ?? 'Untitled', 40) }}</a>
+                                <a href="{{ $ticketUrl }}" class="tickets-title-link">{{ Str::limit($ticket->title ?? 'Untitled', 40) }}</a>
                             </td>
                             <td>
                                 <div class="d-flex align-items-center gap-2">
@@ -140,7 +138,7 @@
                                 @if(($ticket->status ?? '') !== 'Closed')
                                 <a href="{{ route('tickets.close.form', $ticket->ticketid) }}" class="btn btn-sm btn-link text-success p-1" title="Close"><i class="bi bi-check-circle"></i></a>
                                 @endif
-                                <a href="{{ $detailUrl }}" class="btn btn-sm btn-link text-muted p-1" title="View"><i class="bi bi-eye"></i></a>
+                                <a href="{{ $ticketUrl }}" class="btn btn-sm btn-link text-muted p-1" title="View"><i class="bi bi-eye"></i></a>
                             </td>
                         </tr>
                     @empty

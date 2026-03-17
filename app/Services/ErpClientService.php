@@ -1141,10 +1141,12 @@ class ErpClientService
                 $this->applyLifeSystemFilter($query, $system, 'product');
             }
 
-            // Cache total count when not searching (avoids repeated COUNT on large table)
-            $total = $search && trim($search) !== ''
-                ? $query->count()
-                : \Illuminate\Support\Facades\Cache::remember('erp_clients_cache_total', 300, fn () => DB::table('erp_clients_cache')->count());
+            // Use live count when searching or when filtering by system (group/individual).
+            // Otherwise cache total for performance (All view with no search).
+            $useCachedTotal = ($search === null || trim($search) === '') && $system !== 'group' && $system !== 'individual';
+            $total = $useCachedTotal
+                ? \Illuminate\Support\Facades\Cache::remember('erp_clients_cache_total', 300, fn () => DB::table('erp_clients_cache')->count())
+                : $query->count();
 
             $rows = $query->orderBy('policy_number')->orderBy('product')->offset($offset)->limit(min($limit, 100))->get();
 

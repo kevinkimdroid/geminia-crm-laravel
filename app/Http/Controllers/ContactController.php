@@ -46,11 +46,18 @@ class ContactController extends Controller
         $offset = ($page - 1) * $perPage;
 
         $ownerId = crm_owner_filter();
-        $contacts = $this->crm->getContacts($perPage, $offset, $ownerId);
-        $total = $this->crm->getContactsCount($ownerId);
+        $cacheKey = 'contacts_list_' . ($ownerId ?? 'all') . '_' . $page;
+        $ttl = 45;
 
+        $cached = Cache::remember($cacheKey, $ttl, function () use ($perPage, $offset, $ownerId) {
+            $contacts = $this->crm->getContacts($perPage, $offset, $ownerId);
+            $total = $this->crm->getContactsCount($ownerId);
+            return ['contacts' => $contacts, 'total' => $total];
+        });
+
+        $total = $cached['total'];
         $contacts = new LengthAwarePaginator(
-            $contacts instanceof Collection ? $contacts : collect($contacts),
+            $cached['contacts'] instanceof Collection ? $cached['contacts'] : collect($cached['contacts']),
             $total,
             $perPage,
             $page,
@@ -117,6 +124,7 @@ class ContactController extends Controller
             Cache::forget('geminia_contacts_count');
             Cache::forget('ticket_create_clients');
             Cache::forget('geminia_dashboard_stats');
+            $this->forgetContactsListCache($ownerId);
             \App\Events\DashboardStatsUpdated::dispatch();
             return redirect()->route('contacts.show', $id)->with('success', 'Contact created.');
         } catch (\Throwable $e) {
@@ -150,7 +158,9 @@ class ContactController extends Controller
             $campaigns = $this->crm->getCampaignsForContact($id);
         }
 
-        $followups = ContactFollowup::where('contact_id', $id)->orderByDesc('followup_date')->orderByDesc('created_at')->limit(20)->get();
+        if ($tab === 'summary') {
+            $followups = ContactFollowup::where('contact_id', $id)->orderByDesc('followup_date')->orderByDesc('created_at')->limit(20)->get();
+        }
 
         if ($tab === 'emails') {
             $emailsPage = max(1, (int) $request->get('page', 1));
@@ -234,11 +244,18 @@ class ContactController extends Controller
         $adjacent = $this->crm->getAdjacentContactIds($id, $ownerId);
         $ticketsCount = $this->crm->getTicketsForContactCount($id, null, null, $ownerId);
 
+        $deals = $activities = $comments = collect();
+        if ($tab === 'summary') {
+            $deals = $this->crm->getContactDeals($id, 5);
+            $activities = $this->crm->getContactActivities($id, 5);
+            $comments = $this->crm->getContactComments($id, 5);
+        }
+
         return view('contacts.show', [
             'contact' => $contact,
-            'deals' => $this->crm->getContactDeals($id, 5),
-            'activities' => $this->crm->getContactActivities($id, 5),
-            'comments' => $this->crm->getContactComments($id, 5),
+            'deals' => $deals,
+            'activities' => $activities,
+            'comments' => $comments,
             'activeTab' => $tab,
             'tickets' => $tickets,
             'ticketsPaginator' => $ticketsPaginator,
@@ -299,6 +316,7 @@ class ContactController extends Controller
                 'phone' => $validated['phone'] ?? '',
                 'mobile' => $validated['mobile'] ?? '',
             ]);
+            $this->forgetContactsListCache(null);
             return redirect()->route('contacts.show', $id)->with('success', 'Contact updated.');
         } catch (\Throwable $e) {
             return back()->withInput()->with('error', 'Failed to update: ' . $e->getMessage());
@@ -312,6 +330,7 @@ class ContactController extends Controller
             Cache::forget('geminia_contacts_count');
             Cache::forget('ticket_create_clients');
             Cache::forget('geminia_dashboard_stats');
+            $this->forgetContactsListCache(null);
             \App\Events\DashboardStatsUpdated::dispatch();
             return redirect()->route('contacts.index')->with('success', 'Contact deleted.');
         } catch (\Throwable $e) {
@@ -355,5 +374,17 @@ class ContactController extends Controller
             return redirect()->route('contacts.show', $contact)->with('success', 'Contact removed from campaign.');
         }
         return back()->with('error', 'Could not remove contact from campaign.');
+    }
+
+    private function forgetContactsListCache(?int $ownerId): void
+    {
+        for ($page = 1; $page <= 10; $page++) {
+            Cache::forget('contacts_list_all_' . $page);
+        }
+        if ($ownerId !== null) {
+            for ($page = 1; $page <= 10; $page++) {
+                Cache::forget('contacts_list_' . $ownerId . '_' . $page);
+            }
+        }
     }
 }

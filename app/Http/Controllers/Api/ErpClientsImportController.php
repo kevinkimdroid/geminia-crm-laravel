@@ -44,7 +44,7 @@ class ErpClientsImportController extends Controller
 
         if ($replace && count($clients) > 0) {
             DB::table('erp_clients_cache')->truncate();
-            \Illuminate\Support\Facades\Cache::forget('erp_clients_cache_total');
+            $this->invalidateClientsCaches();
         }
 
         $inserted = 0;
@@ -113,7 +113,7 @@ class ErpClientsImportController extends Controller
                     $inserted++;
                 }
             }
-            \Illuminate\Support\Facades\Cache::forget('erp_clients_cache_total');
+            $this->invalidateClientsCaches();
         }
 
         return response()->json([
@@ -124,6 +124,17 @@ class ErpClientsImportController extends Controller
             'imported' => $inserted,
             'updated' => $updated,
         ]);
+    }
+
+    /**
+     * Invalidate all clients-related caches so totals update after import.
+     */
+    private function invalidateClientsCaches(): void
+    {
+        \Illuminate\Support\Facades\Cache::forget('erp_clients_cache_total');
+        \Illuminate\Support\Facades\Cache::forget('geminia_clients_count');
+        // Bump version so clients_list_* cache keys become stale (cache miss on next request)
+        \Illuminate\Support\Facades\Cache::put('clients_list_version', time(), 86400);
     }
 
     private function parseDate(?string $value): ?string

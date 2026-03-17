@@ -166,7 +166,8 @@ class CustomerController extends Controller
             && ! $search && ! $system;
 
         if ($useErp && ! $lazyLoad) {
-            $cacheKey = 'clients_list_' . md5($source . $perPage . $offset . ($search ?? '') . ($system ?? ''));
+            $version = \Illuminate\Support\Facades\Cache::get('clients_list_version', 0);
+            $cacheKey = 'clients_list_' . $version . '_' . md5($source . $perPage . $offset . ($search ?? '') . ($system ?? ''));
             $ttl = 60;
             $skipCache = $system === 'group' && $search && strlen(trim((string) $search)) >= 2;
             $result = $skipCache ? $this->erp->getClientsForListView($perPage, $offset, $search, $system)
@@ -229,7 +230,8 @@ class CustomerController extends Controller
             && ($source !== 'erp_http' || ! empty(config('erp.clients_http_url')));
 
         if ($useErp) {
-            $cacheKey = 'clients_list_' . md5($source . $perPage . $offset . ($search ?? '') . ($system ?? ''));
+            $version = \Illuminate\Support\Facades\Cache::get('clients_list_version', 0);
+            $cacheKey = 'clients_list_' . $version . '_' . md5($source . $perPage . $offset . ($search ?? '') . ($system ?? ''));
             $ttl = 60;
             $skipCache = $system === 'group' && $search && strlen(trim((string) $search)) >= 2;
             $result = $skipCache
