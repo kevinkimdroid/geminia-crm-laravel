@@ -112,7 +112,7 @@
                             $words = array_filter(explode(' ', $contactName));
                             $initials = count($words) >= 2 ? strtoupper(substr($words[0], 0, 1) . substr(end($words), 0, 1)) : ($contactName !== '—' ? strtoupper(substr($contactName, 0, 1)) : '?');
                         @endphp
-                        <tr>
+                        <tr class="ticket-row" data-ticket-id="{{ $ticket->ticketid }}" data-ticket-no="{{ $ticket->ticket_no ?? 'TT' . $ticket->ticketid }}">
                             <td>
                                 <a href="{{ $detailUrl }}" class="tickets-id-link">{{ $ticket->ticket_no ?? 'TT' . $ticket->ticketid }}</a>
                             </td>
@@ -214,6 +214,7 @@
 .tickets-table th { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--geminia-text-muted); padding: 1rem 1.25rem; white-space: nowrap; }
 .tickets-table td { padding: 1rem 1.25rem; vertical-align: middle; }
 .tickets-table tbody tr:hover { background: var(--geminia-primary-muted); }
+.tickets-table tbody tr.ticket-row { cursor: context-menu; }
 .tickets-id-link { font-weight: 600; color: var(--geminia-primary); text-decoration: none; }
 .tickets-id-link:hover { color: var(--geminia-primary-dark); text-decoration: underline; }
 .tickets-title-link { font-weight: 500; color: var(--geminia-text); text-decoration: none; }
@@ -249,7 +250,45 @@
 .tickets-pagination .page-link { border-radius: 8px; border-color: var(--geminia-border); color: var(--geminia-text); }
 .tickets-pagination .page-link:hover { background: var(--geminia-primary-muted); border-color: var(--geminia-primary); color: var(--geminia-primary); }
 .tickets-pagination .page-item.active .page-link { background: var(--geminia-primary); border-color: var(--geminia-primary); }
+
+.ticket-context-menu {
+    position: fixed; z-index: 9999;
+    min-width: 200px; max-width: 280px; max-height: 320px;
+    background: #fff; border: 1px solid var(--geminia-border);
+    border-radius: 10px; box-shadow: 0 10px 40px rgba(0,0,0,0.15);
+    overflow: hidden;
+}
+.ticket-context-menu-header {
+    padding: 0.6rem 1rem; font-size: 0.75rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--geminia-text-muted); background: #f8fafc;
+    border-bottom: 1px solid var(--geminia-border);
+}
+.ticket-context-menu-users {
+    padding: 0.4rem; max-height: 260px; overflow-y: auto;
+}
+.ticket-context-menu-item {
+    display: block; width: 100%; text-align: left;
+    padding: 0.5rem 0.75rem; border: none; background: none;
+    font-size: 0.9rem; color: var(--geminia-text);
+    border-radius: 6px; cursor: pointer;
+    transition: background 0.15s;
+}
+.ticket-context-menu-item:hover:not(:disabled) {
+    background: var(--geminia-primary-muted); color: var(--geminia-primary);
+}
+.ticket-context-menu-item:disabled { opacity: 0.6; cursor: wait; }
+.ticket-context-menu-empty { font-size: 0.85rem; }
 </style>
+
+{{-- Right-click context menu for reassign --}}
+<div id="ticket-context-menu" class="ticket-context-menu" style="display:none">
+    <div class="ticket-context-menu-header">Reassign ticket</div>
+    <div class="ticket-context-menu-users" id="ticket-context-menu-users"></div>
+</div>
+<script>
+window.TICKET_REASSIGN_USERS = @json(collect($users ?? [])->map(fn($u) => ['id' => $u->id, 'name' => trim($u->first_name . ' ' . $u->last_name) ?: $u->user_name])->values());
+</script>
 
 @push('scripts')
 <script>
@@ -272,6 +311,70 @@
             input.select();
         }
     });
+})();
+
+(function(){
+    var menu = document.getElementById('ticket-context-menu');
+    var usersEl = document.getElementById('ticket-context-menu-users');
+    var users = window.TICKET_REASSIGN_USERS || [];
+    var currentTicketId = null;
+    var csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+
+    function hideMenu(){ menu.style.display = 'none'; currentTicketId = null; }
+    function escapeHtml(s){ var d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+    function showMenu(x, y, ticketId){
+        currentTicketId = ticketId;
+        usersEl.innerHTML = users.map(function(u){
+            return '<button type="button" class="ticket-context-menu-item" data-user-id="'+u.id+'">'+escapeHtml(u.name)+'</button>';
+        }).join('');
+        if (users.length === 0) usersEl.innerHTML = '<div class="ticket-context-menu-empty text-muted small p-2">No users available</div>';
+        menu.style.display = 'block';
+        menu.style.left = Math.min(x, window.innerWidth - 220) + 'px';
+        menu.style.top = Math.min(y, window.innerHeight - menu.offsetHeight - 10) + 'px';
+    }
+
+    document.querySelectorAll('.ticket-row').forEach(function(row){
+        row.addEventListener('contextmenu', function(e){
+            e.preventDefault();
+            var tid = row.getAttribute('data-ticket-id');
+            if (tid) showMenu(e.clientX, e.clientY, tid);
+        });
+    });
+
+    usersEl.addEventListener('click', function(e){
+        var btn = e.target.closest('.ticket-context-menu-item');
+        if (!btn || !currentTicketId) return;
+        var userId = btn.getAttribute('data-user-id');
+        var userName = btn.getAttribute('data-user-name');
+        if (!userId) return;
+        btn.disabled = true;
+        btn.textContent = 'Assigning…';
+        var formData = new FormData();
+        formData.append('assigned_to', userId);
+        formData.append('_token', csrf);
+        fetch('{{ url("/tickets") }}/' + currentTicketId + '/reassign', {
+            method: 'POST',
+            headers: {
+                'X-CSRF-TOKEN': csrf,
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: formData
+        }).then(function(r){
+            if (r.ok) {
+                hideMenu();
+                window.location.reload();
+            } else {
+                return r.json().then(function(d){ throw new Error(d.error || 'Failed'); });
+            }
+        }).catch(function(err){
+            alert(err.message || 'Failed to reassign');
+            hideMenu();
+        });
+    });
+
+    document.addEventListener('click', function(){ hideMenu(); });
+    document.addEventListener('scroll', function(){ hideMenu(); }, true);
 })();
 </script>
 @endpush

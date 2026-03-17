@@ -233,7 +233,7 @@ class TicketController extends Controller
             'returnToLead' => $fromLead ? $leadId : null,
             'returnToMailManager' => $request->filled('email_id'),
             'emailId' => $request->filled('email_id') ? (int) $request->get('email_id') : null,
-            'canCloseTickets' => $this->sla->canUserCloseThisTicket($id),
+            'canCloseTickets' => $this->sla->canUserCloseTickets($userRole),
         ]);
     }
 
