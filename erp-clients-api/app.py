@@ -193,7 +193,9 @@ def resolve_view(system):
 
 
 # When true, skip LMS_GROUP_CRM_VIEW and use individual view + filter. Set false to use group view.
-USE_GROUP_FROM_INDIVIDUAL = os.environ.get("ERP_GROUP_FROM_INDIVIDUAL_ONLY", "false").lower() in ("1", "true", "yes")
+# When ERP_GROUP_USE_GROUP_VIEW_ONLY=true, this is ignored – always use actual Group view (no Individual mix).
+USE_GROUP_USE_GROUP_VIEW_ONLY = os.environ.get("ERP_GROUP_USE_GROUP_VIEW_ONLY", "true").lower() in ("1", "true", "yes")
+USE_GROUP_FROM_INDIVIDUAL = (not USE_GROUP_USE_GROUP_VIEW_ONLY) and os.environ.get("ERP_GROUP_FROM_INDIVIDUAL_ONLY", "false").lower() in ("1", "true", "yes")
 # When true, use SELECT * for group view (discovers columns at runtime - works with any schema)
 USE_GROUP_SELECT_STAR = os.environ.get("ERP_GROUP_USE_SELECT_STAR", "true").lower() in ("1", "true", "yes")
 
@@ -680,8 +682,10 @@ def get_clients():
 
     import time
     max_retries = 3
-    use_group_fallback = is_group and os.environ.get("ERP_GROUP_FALLBACK_TO_INDIVIDUAL", "true").lower() in ("1", "true", "yes")
-    # Always try Individual when Group returns 0 for policy/search - policy may be in either view
+    _fallback_env = os.environ.get("ERP_GROUP_FALLBACK_TO_INDIVIDUAL", "false").lower() in ("1", "true", "yes")
+    # Only fall back when user searches a policy (policy may be in either view). NEVER fall back for list view
+    # – otherwise Individual policies (e.g. IL-AEP-*) get mixed into Group Life and count is wrong.
+    use_group_fallback = is_group and _fallback_env and bool(policy or search)
     use_policy_search_fallback = is_group and bool(policy or search)
     tried_fallback = [False]  # use list to allow mutation in nested scope
     policy_search_fallback = [False]  # policy search returned 0 from Group; try Individual with no product filter
