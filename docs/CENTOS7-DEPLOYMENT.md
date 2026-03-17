@@ -299,7 +299,57 @@ firewall-cmd --reload
 
 ---
 
-## 9. Quick Reference
+## 9. Contacts/Clients Page – Server Troubleshooting
+
+When the **Contacts** or **Clients** page (Group Life, Individual Life, policy search) is empty, wrong, or shows errors on the server:
+
+### 1. SELinux blocking network (most common)
+
+PHP/Apache/Nginx cannot reach the ERP API. Fix:
+
+```bash
+sudo setsebool -P httpd_can_network_connect 1
+sudo systemctl restart httpd   # or: nginx, php-fpm
+```
+
+### 2. ERP_CLIENTS_HTTP_URL
+
+- **Same server:** `ERP_CLIENTS_HTTP_URL=http://127.0.0.1:5000/clients` (prefer 127.0.0.1 over localhost)
+- **Different server:** `ERP_CLIENTS_HTTP_URL=http://erp-server-ip:5000/clients`
+- Test: `curl http://127.0.0.1:5000/clients?limit=5` from the server
+
+### 3. ERP API not running
+
+```bash
+systemctl status geminia-erp-api
+# If stopped:
+systemctl start geminia-erp-api
+```
+
+### 4. Using erp_sync (local cache)
+
+If `CLIENTS_VIEW_SOURCE=erp_sync`, the `erp_clients_cache` table must be populated. After deployment:
+
+- Run the import API: `POST /api/admin/erp-clients-import` with your clients data, or
+- Run sync: `php artisan erp:sync-clients --replace` (requires Oracle connection)
+
+### 5. Wrong count after upload
+
+The total is cached. After importing clients, run:
+
+```bash
+php artisan cache:clear
+```
+
+Or the import API will invalidate caches automatically when used.
+
+### 6. APP_URL
+
+Set `APP_URL` in `.env` to your real server URL (e.g. `https://crm.yourcompany.com`). Wrong APP_URL breaks redirects and asset links.
+
+---
+
+## 10. Quick Reference
 
 | Service           | Command / Path                                            |
 |------------------|------------------------------------------------------------|

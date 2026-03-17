@@ -135,6 +135,7 @@
                             <td><span class="text-muted small">{{ $ownerName }}</span></td>
                             <td><span class="text-muted small">{{ $ticket->createdtime ? date('d M Y', strtotime($ticket->createdtime)) : '—' }}</span></td>
                             <td class="text-end">
+                                <button type="button" class="btn btn-sm btn-link text-primary p-1 ticket-reassign-btn" title="Reassign to someone" data-ticket-id="{{ $ticket->ticketid }}"><i class="bi bi-person-plus"></i></button>
                                 @if(($ticket->status ?? '') !== 'Closed')
                                 <a href="{{ route('tickets.close.form', $ticket->ticketid) }}" class="btn btn-sm btn-link text-success p-1" title="Close"><i class="bi bi-check-circle"></i></a>
                                 @endif
@@ -262,6 +263,8 @@
     color: var(--geminia-text-muted); background: #f8fafc;
     border-bottom: 1px solid var(--geminia-border);
 }
+.ticket-context-menu-search { padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--geminia-border); }
+.ticket-context-menu-search input { font-size: 0.875rem; border-radius: 6px; }
 .ticket-context-menu-users {
     padding: 0.4rem; max-height: 260px; overflow-y: auto;
 }
@@ -282,6 +285,9 @@
 {{-- Right-click context menu for reassign --}}
 <div id="ticket-context-menu" class="ticket-context-menu" style="display:none">
     <div class="ticket-context-menu-header">Reassign ticket</div>
+    <div class="ticket-context-menu-search">
+        <input type="text" id="ticket-reassign-search" class="form-control form-control-sm" placeholder="Search person..." autocomplete="off">
+    </div>
     <div class="ticket-context-menu-users" id="ticket-context-menu-users"></div>
 </div>
 <script>
@@ -318,17 +324,39 @@ window.TICKET_REASSIGN_USERS = @json(collect($users ?? [])->map(fn($u) => ['id' 
     var currentTicketId = null;
     var csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
 
-    function hideMenu(){ menu.style.display = 'none'; currentTicketId = null; }
+    var searchInput = document.getElementById('ticket-reassign-search');
+    function hideMenu(){
+        menu.style.display = 'none';
+        currentTicketId = null;
+        if (searchInput) searchInput.value = '';
+    }
     function escapeHtml(s){ var d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+    function renderUsers(filter){
+        var term = (filter || '').trim().toLowerCase();
+        var list = term ? users.filter(function(u){ return (u.name || '').toLowerCase().includes(term); }) : users;
+        if (list.length === 0) {
+            usersEl.innerHTML = '<div class="ticket-context-menu-empty text-muted small p-2">No one found. Try a different search.</div>';
+        } else {
+            usersEl.innerHTML = list.map(function(u){
+                return '<button type="button" class="ticket-context-menu-item" data-user-id="'+u.id+'">'+escapeHtml(u.name)+'</button>';
+            }).join('');
+        }
+    }
     function showMenu(x, y, ticketId){
         currentTicketId = ticketId;
-        usersEl.innerHTML = users.map(function(u){
-            return '<button type="button" class="ticket-context-menu-item" data-user-id="'+u.id+'">'+escapeHtml(u.name)+'</button>';
-        }).join('');
-        if (users.length === 0) usersEl.innerHTML = '<div class="ticket-context-menu-empty text-muted small p-2">No users available</div>';
+        if (searchInput) { searchInput.value = ''; searchInput.placeholder = 'Search person...'; }
+        renderUsers('');
         menu.style.display = 'block';
         menu.style.left = Math.min(x, window.innerWidth - 220) + 'px';
         menu.style.top = Math.min(y, window.innerHeight - menu.offsetHeight - 10) + 'px';
+        setTimeout(function(){ if (searchInput) searchInput.focus(); }, 50);
+    }
+    if (searchInput) {
+        searchInput.addEventListener('input', function(){ renderUsers(this.value); });
+        searchInput.addEventListener('click', function(e){ e.stopPropagation(); });
+        searchInput.addEventListener('keydown', function(e){
+            if (e.key === 'Escape') { hideMenu(); e.preventDefault(); }
+        });
     }
 
     document.querySelectorAll('.ticket-row').forEach(function(row){
@@ -336,6 +364,18 @@ window.TICKET_REASSIGN_USERS = @json(collect($users ?? [])->map(fn($u) => ['id' 
             e.preventDefault();
             var tid = row.getAttribute('data-ticket-id');
             if (tid) showMenu(e.clientX, e.clientY, tid);
+        });
+    });
+
+    document.querySelectorAll('.ticket-reassign-btn').forEach(function(btn){
+        btn.addEventListener('click', function(e){
+            e.preventDefault();
+            e.stopPropagation();
+            var tid = btn.getAttribute('data-ticket-id');
+            if (tid) {
+                var rect = btn.getBoundingClientRect();
+                showMenu(rect.left, rect.bottom + 4, tid);
+            }
         });
     });
 
@@ -371,6 +411,8 @@ window.TICKET_REASSIGN_USERS = @json(collect($users ?? [])->map(fn($u) => ['id' 
         });
     });
 
+    menu.addEventListener('click', function(e){ e.stopPropagation(); });
+    menu.addEventListener('click', function(e){ e.stopPropagation(); });
     document.addEventListener('click', function(){ hideMenu(); });
     document.addEventListener('scroll', function(){ hideMenu(); }, true);
 })();
