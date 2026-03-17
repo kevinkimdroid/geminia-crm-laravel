@@ -88,6 +88,65 @@ if (! function_exists('pick_policy_excluding_pin')) {
     }
 }
 
+if (! function_exists('contact_can_access')) {
+    /**
+     * Check if current user can access a contact by ID. Admins: yes. Contact owner or group: yes.
+     * Also allow if user has tickets assigned to them for this contact.
+     */
+    function contact_can_access(int $contactId): bool
+    {
+        $user = \Illuminate\Support\Facades\Auth::guard('vtiger')->user()
+            ?? \Illuminate\Support\Facades\Auth::user();
+        if (!$user) {
+            return false;
+        }
+        try {
+            if (method_exists($user, 'isAdministrator') && $user->isAdministrator()) {
+                return true;
+            }
+        } catch (\Throwable $e) {
+            // isAdministrator may throw – treat as non-admin
+        }
+        $userId = (int) ($user->id ?? $user->getAuthIdentifier() ?? $user->getKey() ?? 0);
+        if ($userId <= 0) {
+            return false;
+        }
+        try {
+            $db = \Illuminate\Support\Facades\DB::connection('vtiger');
+            $ownerId = $db->table('vtiger_crmentity')
+                ->where('crmid', $contactId)
+                ->value('smownerid');
+            if ($ownerId !== null) {
+                if ((int) $ownerId == $userId) {
+                    return true;
+                }
+                try {
+                    if ((int) $ownerId > 0 && $db->table('vtiger_user2group')
+                        ->where('userid', $userId)
+                        ->where('groupid', (int) $ownerId)
+                        ->exists()) {
+                        return true;
+                    }
+                } catch (\Throwable $e) {
+                    // vtiger_user2group may not exist
+                }
+            }
+            // User has tickets assigned to them for this contact
+            if ($db->table('vtiger_troubletickets as t')
+                ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
+                ->where('t.contact_id', $contactId)
+                ->where('e.deleted', 0)
+                ->where('e.smownerid', $userId)
+                ->exists()) {
+                return true;
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('contact_can_access failed: ' . $e->getMessage());
+        }
+        return false;
+    }
+}
+
 if (! function_exists('crm_owner_filter')) {
     /**
      * For role-based data access: returns null if current user is Administrator (sees all),
@@ -95,27 +154,382 @@ if (! function_exists('crm_owner_filter')) {
      */
     function crm_owner_filter(): ?int
     {
-        $user = \Illuminate\Support\Facades\Auth::guard('vtiger')->user();
+        $user = \Illuminate\Support\Facades\Auth::guard('vtiger')->user()
+            ?? \Illuminate\Support\Facades\Auth::user();
         if (!$user || $user->isAdministrator()) {
             return null;
         }
-        return (int) $user->id;
+        return (int) ($user->id ?? $user->getAuthIdentifier());
+    }
+}
+
+if (! function_exists('ticket_can_access')) {
+    /**
+     * Check if current user can access a ticket by ID. Admins: yes. Others: only if assigned to them.
+     */
+    function ticket_can_access(int $ticketId): bool
+    {
+        if (config('tickets.allow_all_authenticated', false)) {
+            return \Illuminate\Support\Facades\Auth::guard('vtiger')->check()
+                || \Illuminate\Support\Facades\Auth::check();
+        }
+        $user = \Illuminate\Support\Facades\Auth::guard('vtiger')->user()
+            ?? \Illuminate\Support\Facades\Auth::user();
+        if (!$user) {
+            return false;
+        }
+        try {
+            if (method_exists($user, 'isAdministrator') && $user->isAdministrator()) {
+                return true;
+            }
+        } catch (\Throwable $e) {
+            // isAdministrator may throw if role relation fails – treat as non-admin
+        }
+        $userId = (int) ($user->id ?? $user->getAuthIdentifier() ?? $user->getKey() ?? 0);
+        if ($userId <= 0) {
+            return false;
+        }
+        try {
+            $db = \Illuminate\Support\Facades\DB::connection('vtiger');
+            $ownerId = $db->table('vtiger_crmentity')
+                ->where('crmid', $ticketId)
+                ->value('smownerid');
+            if ($ownerId === null) {
+                return false;
+            }
+            // Use loose comparison to handle string "5" vs int 5 from DB
+            if ((int) $ownerId == $userId) {
+                return true;
+            }
+            try {
+                if ($ownerId > 0 && $db->table('vtiger_user2group')
+                    ->where('userid', $userId)
+                    ->where('groupid', $ownerId)
+                    ->exists()) {
+                    return true;
+                }
+            } catch (\Throwable $e) {
+                // vtiger_user2group may not exist
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('ticket_can_access failed: ' . $e->getMessage());
+        }
+        return false;
+    }
+}
+
+if (! function_exists('contact_can_access')) {
+    /**
+     * Check if current user can access a contact by ID. Admins: yes. Owner or group: yes.
+     * Also allows if user has tickets assigned to them for this contact.
+     */
+    function contact_can_access(int $contactId): bool
+    {
+        if (config('tickets.allow_all_authenticated', false)) {
+            return \Illuminate\Support\Facades\Auth::guard('vtiger')->check()
+                || \Illuminate\Support\Facades\Auth::check();
+        }
+        $user = \Illuminate\Support\Facades\Auth::guard('vtiger')->user()
+            ?? \Illuminate\Support\Facades\Auth::user();
+        if (!$user) {
+            return false;
+        }
+        try {
+            if (method_exists($user, 'isAdministrator') && $user->isAdministrator()) {
+                return true;
+            }
+        } catch (\Throwable $e) {
+            // isAdministrator may throw – treat as non-admin
+        }
+        $userId = (int) ($user->id ?? $user->getAuthIdentifier() ?? $user->getKey() ?? 0);
+        if ($userId <= 0) {
+            return false;
+        }
+        try {
+            $db = \Illuminate\Support\Facades\DB::connection('vtiger');
+            $ownerId = $db->table('vtiger_crmentity')
+                ->where('crmid', $contactId)
+                ->value('smownerid');
+            if ($ownerId !== null && (int) $ownerId == $userId) {
+                return true;
+            }
+            if ($ownerId !== null && (int) $ownerId > 0) {
+                try {
+                    if ($db->table('vtiger_user2group')
+                        ->where('userid', $userId)
+                        ->where('groupid', (int) $ownerId)
+                        ->exists()) {
+                        return true;
+                    }
+                } catch (\Throwable $e) {
+                    // vtiger_user2group may not exist
+                }
+            }
+            // Allow if user has tickets assigned to them for this contact
+            $hasAssignedTicket = $db->table('vtiger_troubletickets as t')
+                ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
+                ->where('t.contact_id', $contactId)
+                ->where('e.deleted', 0)
+                ->where('e.smownerid', $userId)
+                ->exists();
+            if ($hasAssignedTicket) {
+                return true;
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('contact_can_access failed: ' . $e->getMessage());
+        }
+        return false;
+    }
+}
+
+if (! function_exists('contact_can_access')) {
+    /**
+     * Check if current user can access a contact by ID. Admins: yes. Contact owner or
+     * user in owner group: yes. User has tickets assigned to them for this contact: yes.
+     */
+    function contact_can_access(int $contactId): bool
+    {
+        if (config('tickets.allow_all_authenticated', false)) {
+            return \Illuminate\Support\Facades\Auth::guard('vtiger')->check()
+                || \Illuminate\Support\Facades\Auth::check();
+        }
+        $user = \Illuminate\Support\Facades\Auth::guard('vtiger')->user()
+            ?? \Illuminate\Support\Facades\Auth::user();
+        if (!$user) {
+            return false;
+        }
+        try {
+            if (method_exists($user, 'isAdministrator') && $user->isAdministrator()) {
+                return true;
+            }
+        } catch (\Throwable $e) {
+            // isAdministrator may throw – treat as non-admin
+        }
+        $userId = (int) ($user->id ?? $user->getAuthIdentifier() ?? $user->getKey() ?? 0);
+        if ($userId <= 0) {
+            return false;
+        }
+        try {
+            $db = \Illuminate\Support\Facades\DB::connection('vtiger');
+            $ownerId = $db->table('vtiger_crmentity')
+                ->where('crmid', $contactId)
+                ->whereIn('e.setype', ['Contacts', 'Contact'])
+                ->value('smownerid');
+        } catch (\Throwable $e) {
+            $ownerId = \Illuminate\Support\Facades\DB::connection('vtiger')
+                ->table('vtiger_crmentity')
+                ->where('crmid', $contactId)
+                ->value('smownerid');
+        }
+        if ($ownerId !== null && (int) $ownerId == $userId) {
+            return true;
+        }
+        if ($ownerId !== null && (int) $ownerId > 0) {
+            try {
+                if ($db->table('vtiger_user2group')
+                    ->where('userid', $userId)
+                    ->where('groupid', (int) $ownerId)
+                    ->exists()) {
+                    return true;
+                }
+            } catch (\Throwable $e) {
+                // vtiger_user2group may not exist
+            }
+        }
+        // User has tickets assigned to them for this contact
+        try {
+            $db = \Illuminate\Support\Facades\DB::connection('vtiger');
+            if ($db->table('vtiger_troubletickets as t')
+                ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
+                ->where('t.contact_id', $contactId)
+                ->where('e.deleted', 0)
+                ->where('e.smownerid', $userId)
+                ->exists()) {
+                return true;
+            }
+        } catch (\Throwable $e) {
+            // Ignore
+        }
+        return false;
+    }
+}
+
+if (! function_exists('contact_can_access')) {
+    /**
+     * Check if current user can access a contact by ID.
+     * Admins: yes. Contact owner or group: yes. User has tickets for this contact: yes.
+     */
+    function contact_can_access(int $contactId): bool
+    {
+        if (config('tickets.allow_all_authenticated', false)) {
+            return \Illuminate\Support\Facades\Auth::guard('vtiger')->check()
+                || \Illuminate\Support\Facades\Auth::check();
+        }
+        $user = \Illuminate\Support\Facades\Auth::guard('vtiger')->user()
+            ?? \Illuminate\Support\Facades\Auth::user();
+        if (!$user) {
+            return false;
+        }
+        try {
+            if (method_exists($user, 'isAdministrator') && $user->isAdministrator()) {
+                return true;
+            }
+        } catch (\Throwable $e) {
+            // isAdministrator may throw
+        }
+        $userId = (int) ($user->id ?? $user->getAuthIdentifier() ?? $user->getKey() ?? 0);
+        if ($userId <= 0) {
+            return false;
+        }
+        try {
+            $db = \Illuminate\Support\Facades\DB::connection('vtiger');
+            $ownerId = $db->table('vtiger_crmentity')
+                ->where('crmid', $contactId)
+                ->value('smownerid');
+            if ($ownerId !== null && (int) $ownerId == $userId) {
+                return true;
+            }
+            if ($ownerId !== null && (int) $ownerId > 0) {
+                try {
+                    if ($db->table('vtiger_user2group')
+                        ->where('userid', $userId)
+                        ->where('groupid', (int) $ownerId)
+                        ->exists()) {
+                        return true;
+                    }
+                } catch (\Throwable $e) {
+                    // vtiger_user2group may not exist
+                }
+            }
+            $hasAssignedTicket = $db->table('vtiger_troubletickets as t')
+                ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
+                ->where('t.contact_id', $contactId)
+                ->where('e.deleted', 0)
+                ->where('e.smownerid', $userId)
+                ->exists();
+            if ($hasAssignedTicket) {
+                return true;
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('contact_can_access failed: ' . $e->getMessage());
+        }
+        return false;
     }
 }
 
 if (! function_exists('crm_user_can_access_record')) {
     /**
      * Check if current user can access a CRM record (Contact, Lead, Deal, Ticket).
-     * Administrators can access all; others only records where smownerid matches their ID.
+     * Administrators see all. Others ONLY records assigned to them (smownerid).
+     * For tickets: assignee can view, comment, update, close, add activities.
      */
     function crm_user_can_access_record($record): bool
     {
-        $user = \Illuminate\Support\Facades\Auth::guard('vtiger')->user();
+        $user = \Illuminate\Support\Facades\Auth::guard('vtiger')->user()
+            ?? \Illuminate\Support\Facades\Auth::user();
         if (!$user || $user->isAdministrator()) {
             return true;
         }
-        $ownerId = $record->smownerid ?? $record->attributes['smownerid'] ?? null;
-        return $ownerId !== null && (int) $ownerId === (int) $user->id;
+        $userId = (int) ($user->id ?? $user->getAuthIdentifier() ?? 0);
+
+        // Get crmid for DB lookup (Ticket=ticketid, Contact=contactid, Lead=leadid, Deal=potentialid)
+        $crmid = null;
+        if (is_object($record)) {
+            $crmid = $record->ticketid ?? $record->contactid ?? $record->leadid ?? $record->potentialid ?? $record->crmid ?? (method_exists($record, 'getKey') ? $record->getKey() : null) ?? $record->id ?? null;
+        } elseif (is_array($record)) {
+            $crmid = $record['ticketid'] ?? $record['contactid'] ?? $record['leadid'] ?? $record['potentialid'] ?? $record['crmid'] ?? $record['id'] ?? null;
+        }
+
+        // TICKETS: use same visibility logic as ticket list – if it would show in their list, allow
+        $isTicket = is_object($record) && ($record instanceof \App\Models\Ticket || isset($record->ticketid));
+        $isTicket = $isTicket || (is_array($record) && isset($record['ticketid']));
+        if ($crmid !== null && $isTicket && $userId > 0) {
+            $crm = app(\App\Services\CrmService::class);
+            if ($crm->ticketVisibleToUser((int) $crmid, $userId)) {
+                return true;
+            }
+            // Group-assigned: ticket owned by group, user in group
+            try {
+                $ownerId = \Illuminate\Support\Facades\DB::connection('vtiger')
+                    ->table('vtiger_crmentity')->where('crmid', $crmid)->value('smownerid');
+                if ($ownerId !== null && (int) $ownerId > 0) {
+                    $inGroup = \Illuminate\Support\Facades\DB::connection('vtiger')
+                        ->table('vtiger_user2group')
+                        ->where('userid', $userId)
+                        ->where('groupid', (int) $ownerId)
+                        ->exists();
+                    if ($inGroup) {
+                        return true;
+                    }
+                }
+            } catch (\Throwable $e) {
+                // vtiger_user2group may not exist
+            }
+        }
+
+        // Generic: fetch smownerid from vtiger_crmentity
+        $ownerId = null;
+        if ($crmid !== null) {
+            try {
+                $row = \Illuminate\Support\Facades\DB::connection('vtiger')
+                    ->table('vtiger_crmentity')
+                    ->where('crmid', $crmid)
+                    ->value('smownerid');
+                $ownerId = $row !== null ? (int) $row : null;
+            } catch (\Throwable $e) {
+                // Fallback
+            }
+        }
+
+        // Fallback: model attributes
+        if ($ownerId === null && is_object($record)) {
+            $ownerId = $record->smownerid ?? (method_exists($record, 'getAttribute') ? $record->getAttribute('smownerid') : null);
+            $ownerId = $ownerId !== null ? (int) $ownerId : null;
+        } elseif ($ownerId === null && is_array($record)) {
+            $raw = $record['smownerid'] ?? $record['attributes']['smownerid'] ?? null;
+            $ownerId = $raw !== null ? (int) $raw : null;
+        }
+
+        if ($ownerId !== null && $ownerId === $userId) {
+            return true;
+        }
+
+        // Group ownership
+        if ($ownerId !== null && $ownerId > 0) {
+            try {
+                if (\Illuminate\Support\Facades\DB::connection('vtiger')
+                    ->table('vtiger_user2group')
+                    ->where('userid', $userId)
+                    ->where('groupid', $ownerId)
+                    ->exists()) {
+                    return true;
+                }
+            } catch (\Throwable $e) {
+                // Ignore
+            }
+        }
+
+        // CONTACTS: allow if user has tickets assigned to them for this contact
+        $isContact = is_object($record) && (isset($record->contactid) || $record instanceof \App\Models\Contact);
+        $isContact = $isContact || (is_array($record) && isset($record['contactid']));
+        if ($crmid !== null && $isContact && $userId > 0) {
+            try {
+                $hasAssignedTicket = \Illuminate\Support\Facades\DB::connection('vtiger')
+                    ->table('vtiger_troubletickets as t')
+                    ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
+                    ->where('t.contact_id', $crmid)
+                    ->where('e.deleted', 0)
+                    ->where('e.smownerid', $userId)
+                    ->exists();
+                if ($hasAssignedTicket) {
+                    return true;
+                }
+            } catch (\Throwable $e) {
+                // Ignore
+            }
+        }
+
+        return false;
     }
 }
 

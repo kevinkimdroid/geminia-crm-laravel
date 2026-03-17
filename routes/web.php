@@ -32,7 +32,7 @@ Route::post('/api/admin/erp-clients-import', [\App\Http\Controllers\Api\ErpClien
     ->middleware(['erp.sync.token', 'throttle:10,1'])
     ->name('api.admin.erp-clients-import');
 
-Route::middleware('auth')->group(function () {
+Route::middleware('auth:vtiger')->group(function () {
 Route::get('/', [DashboardController::class, 'index'])->name('dashboard');
 Route::get('/api/dashboard/clients-count', [DashboardController::class, 'clientsCount'])->name('api.dashboard.clients-count');
 Route::get('/search', [\App\Http\Controllers\SearchController::class, 'index'])->name('search');

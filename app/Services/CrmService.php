@@ -829,6 +829,29 @@ class CrmService
     }
 
     /**
+     * Check if a ticket would appear in the user's ticket list (same logic as getTickets with assignedTo).
+     * Use this for permission checks – if the ticket shows in their list, they can access it.
+     */
+    public function ticketVisibleToUser(int $ticketId, int $userId): bool
+    {
+        if ($userId <= 0) {
+            return false;
+        }
+        try {
+            return DB::connection('vtiger')
+                ->table('vtiger_troubletickets as t')
+                ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
+                ->where('t.ticketid', $ticketId)
+                ->where('e.deleted', 0)
+                ->where('e.smownerid', $userId)
+                ->exists();
+        } catch (\Throwable $e) {
+            Log::warning('CrmService::ticketVisibleToUser: ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Get all tickets for Excel export. Same filters as getTickets but full description and high limit.
      */
     public function getTicketsForExport(?string $status = null, ?string $search = null, int $limit = 50000, ?int $assignedTo = null, ?int $ownerId = null)

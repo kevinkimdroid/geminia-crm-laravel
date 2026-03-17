@@ -82,6 +82,26 @@ return [
     */
     'inactive_status' => env('TICKET_INACTIVE_STATUS', 'Inactive'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Allow All Authenticated Users (Workaround for 403)
+    |--------------------------------------------------------------------------
+    | Set TICKET_ACCESS_ALL_AUTHENTICATED=true in .env to allow any logged-in
+    | user to access any ticket. Use only as temporary workaround if assigned
+    | users get 403. Normal permission (assignee only) applies when false.
+    */
+    'allow_all_authenticated' => filter_var(env('TICKET_ACCESS_ALL_AUTHENTICATED', false), FILTER_VALIDATE_BOOLEAN),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Ticket Access – Permission Bypass
+    |--------------------------------------------------------------------------
+    | Set TICKET_ACCESS_ALL_AUTHENTICATED=true to allow any logged-in user
+    | to access any ticket (bypasses assignee check). Use as workaround if
+    | you get 403 for tickets assigned to you. Set to false for proper checks.
+    */
+    'allow_all_authenticated' => filter_var(env('TICKET_ACCESS_ALL_AUTHENTICATED', false), FILTER_VALIDATE_BOOLEAN),
+
     'auto_ticket_from_email' => [
         'enabled' => filter_var(env('TICKET_AUTO_FROM_EMAIL_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
         'assign_to_user_id' => (int) env('TICKET_AUTO_FROM_EMAIL_ASSIGN_TO', 1),
@@ -135,6 +155,16 @@ return [
     | When feedback is submitted, optionally email it to life@geminialife.co.ke
     | (or TICKET_FEEDBACK_NOTIFY_EMAIL) so the team is notified.
     */
+    /*
+    |--------------------------------------------------------------------------
+    | Ticket Access Permission
+    |--------------------------------------------------------------------------
+    | allow_all_authenticated: When true, any logged-in user can access any
+    | ticket (bypasses assignee check). Use only as a temporary workaround if
+    | you get 403 on tickets assigned to you. Set TICKET_ACCESS_ALL_AUTHENTICATED=true
+    */
+    'allow_all_authenticated' => filter_var(env('TICKET_ACCESS_ALL_AUTHENTICATED', false), FILTER_VALIDATE_BOOLEAN),
+
     'feedback_request' => [
         'enabled' => filter_var(env('TICKET_FEEDBACK_REQUEST_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
         'notify_email' => env('TICKET_FEEDBACK_NOTIFY_EMAIL', 'life@geminialife.co.ke'),

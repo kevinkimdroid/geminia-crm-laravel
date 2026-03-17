@@ -398,7 +398,7 @@ class TicketController extends Controller
         if (!$ticket) {
             return redirect()->route('tickets.index')->with('error', 'Ticket not found.');
         }
-        abort_if(!crm_user_can_access_record($ticket), 403, 'You do not have permission to access this record.');
+        abort_if(!ticket_can_access($id), 403, 'You do not have permission to access this record.');
         $feedback = null;
         if (class_exists(\App\Models\TicketFeedback::class)) {
             try {
@@ -417,7 +417,7 @@ class TicketController extends Controller
         if (!$ticket) {
             return redirect()->route('tickets.index')->with('error', 'Ticket not found.');
         }
-        abort_if(!crm_user_can_access_record($ticket), 403, 'You do not have permission to access this record.');
+        abort_if(!ticket_can_access($id), 403, 'You do not have permission to access this record.');
         if ($request->get('refresh')) {
             Cache::forget('ticket_accounts');
             Cache::forget('ticket_create_clients');
@@ -475,7 +475,7 @@ class TicketController extends Controller
         if (! $ticketObj) {
             return redirect()->route('tickets.index')->with('error', 'Ticket not found.');
         }
-        abort_if(!crm_user_can_access_record($ticketObj), 403, 'You do not have permission to access this record.');
+        abort_if(!ticket_can_access($ticket), 403, 'You do not have permission to access this record.');
         if (($ticketObj->status ?? '') === 'Closed') {
             return redirect()->route('tickets.show', $ticket)->with('info', 'Ticket is already closed.');
         }
@@ -496,7 +496,7 @@ class TicketController extends Controller
         if (! $ticketObj) {
             return redirect()->route('tickets.index')->with('error', 'Ticket not found.');
         }
-        abort_if(!crm_user_can_access_record($ticketObj), 403, 'You do not have permission to access this record.');
+        abort_if(!ticket_can_access($ticket), 403, 'You do not have permission to access this record.');
         $authUser = \Illuminate\Support\Facades\Auth::guard('vtiger')->user();
         $userRole = ($authUser && $authUser->primary_role) ? $authUser->primary_role->rolename : null;
         if (! $this->sla->canUserCloseTickets($userRole)) {
@@ -541,7 +541,7 @@ class TicketController extends Controller
         if (!$ticket) {
             return redirect()->route('tickets.index')->with('error', 'Ticket not found.');
         }
-        abort_if(!crm_user_can_access_record($ticket), 403, 'You do not have permission to access this record.');
+        abort_if(!ticket_can_access($id), 403, 'You do not have permission to access this record.');
 
         $validated = $request->validate([
             'title' => 'required|string|max:255',
@@ -895,19 +895,19 @@ class TicketController extends Controller
         return response()->json($data);
     }
 
-    public function inactivate(int $id): RedirectResponse
+    public function inactivate(int $ticket): RedirectResponse
     {
-        $ticket = $this->crm->getTicket($id);
-        if (! $ticket) {
+        $ticketObj = $this->crm->getTicket($ticket);
+        if (! $ticketObj) {
             return redirect()->route('tickets.index')->with('error', 'Ticket not found.');
         }
-        abort_if(!crm_user_can_access_record($ticket), 403, 'You do not have permission to access this record.');
+        abort_if(!ticket_can_access($ticket), 403, 'You do not have permission to access this record.');
         $inactiveStatus = config('tickets.inactive_status', 'Inactive');
-        if (($ticket->status ?? '') === $inactiveStatus) {
+        if (($ticketObj->status ?? '') === $inactiveStatus) {
             return back()->with('info', 'Ticket is already inactive.');
         }
         try {
-            \DB::connection('vtiger')->table('vtiger_troubletickets')->where('ticketid', $id)->update(['status' => $inactiveStatus]);
+            \DB::connection('vtiger')->table('vtiger_troubletickets')->where('ticketid', $ticket)->update(['status' => $inactiveStatus]);
             $this->forgetTicketListCaches();
             \App\Events\DashboardStatsUpdated::dispatch();
             return redirect()->route('tickets.index')->with('success', 'Ticket inactivated.');

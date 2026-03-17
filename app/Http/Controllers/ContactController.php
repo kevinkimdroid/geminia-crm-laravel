@@ -131,7 +131,7 @@ class ContactController extends Controller
         if (!$contact) {
             return redirect()->route('contacts.index')->with('error', 'Contact not found.');
         }
-        abort_if(!crm_user_can_access_record($contact), 403, 'You do not have permission to access this record.');
+        abort_if(!contact_can_access($id), 403, 'You do not have permission to access this record.');
         $tab = $request->get('tab', 'summary');
         $tickets = collect();
         $ticketsPaginator = null;
@@ -271,7 +271,7 @@ class ContactController extends Controller
         if (!$contact) {
             return redirect()->route('contacts.index')->with('error', 'Contact not found.');
         }
-        abort_if(!crm_user_can_access_record($contact), 403, 'You do not have permission to access this record.');
+        abort_if(!contact_can_access($id), 403, 'You do not have permission to access this record.');
         return view('contacts.edit', ['contact' => $contact]);
     }
 
@@ -281,7 +281,7 @@ class ContactController extends Controller
         if (!$contact) {
             return redirect()->route('contacts.index')->with('error', 'Contact not found.');
         }
-        abort_if(!crm_user_can_access_record($contact), 403, 'You do not have permission to access this record.');
+        abort_if(!contact_can_access($id), 403, 'You do not have permission to access this record.');
 
         $validated = $request->validate([
             'firstname' => 'required|string|max:255',
