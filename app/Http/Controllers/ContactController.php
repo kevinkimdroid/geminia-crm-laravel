@@ -139,7 +139,9 @@ class ContactController extends Controller
         if (!$contact) {
             return redirect()->route('contacts.index')->with('error', 'Contact not found.');
         }
-        abort_if(!contact_can_access($id), 403, 'You do not have permission to access this record.');
+        if (!contact_can_access($id)) {
+            return redirect()->route('contacts.index')->with('info', 'That contact is assigned to someone else. Showing your contacts.');
+        }
         $tab = $request->get('tab', 'summary');
         $tickets = collect();
         $ticketsPaginator = null;
@@ -288,7 +290,9 @@ class ContactController extends Controller
         if (!$contact) {
             return redirect()->route('contacts.index')->with('error', 'Contact not found.');
         }
-        abort_if(!contact_can_access($id), 403, 'You do not have permission to access this record.');
+        if (!contact_can_access($id)) {
+            return redirect()->route('contacts.index')->with('info', 'That contact is assigned to someone else. Showing your contacts.');
+        }
         return view('contacts.edit', ['contact' => $contact]);
     }
 
@@ -298,7 +302,9 @@ class ContactController extends Controller
         if (!$contact) {
             return redirect()->route('contacts.index')->with('error', 'Contact not found.');
         }
-        abort_if(!contact_can_access($id), 403, 'You do not have permission to access this record.');
+        if (!contact_can_access($id)) {
+            return redirect()->route('contacts.index')->with('info', 'That contact is assigned to someone else. Showing your contacts.');
+        }
 
         $validated = $request->validate([
             'firstname' => 'required|string|max:255',

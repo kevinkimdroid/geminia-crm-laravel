@@ -399,7 +399,9 @@ class TicketController extends Controller
         if (!$ticket) {
             return redirect()->route('tickets.index')->with('error', 'Ticket not found.');
         }
-        abort_if(!ticket_can_access($id), 403, 'You do not have permission to access this record.');
+        if (!ticket_can_access($id)) {
+            return redirect()->route('tickets.index')->with('info', 'That ticket is assigned to someone else. Showing your tickets.');
+        }
         $feedback = null;
         if (class_exists(\App\Models\TicketFeedback::class)) {
             try {
@@ -418,7 +420,9 @@ class TicketController extends Controller
         if (!$ticket) {
             return redirect()->route('tickets.index')->with('error', 'Ticket not found.');
         }
-        abort_if(!ticket_can_access($id), 403, 'You do not have permission to access this record.');
+        if (!ticket_can_access($id)) {
+            return redirect()->route('tickets.index')->with('info', 'That ticket is assigned to someone else. Showing your tickets.');
+        }
         if ($request->get('refresh')) {
             Cache::forget('ticket_accounts');
             Cache::forget('ticket_create_clients');
@@ -476,7 +480,9 @@ class TicketController extends Controller
         if (! $ticketObj) {
             return redirect()->route('tickets.index')->with('error', 'Ticket not found.');
         }
-        abort_if(!ticket_can_access($ticket), 403, 'You do not have permission to access this record.');
+        if (!ticket_can_access($ticket)) {
+            return redirect()->route('tickets.index')->with('info', 'That ticket is assigned to someone else. Showing your tickets.');
+        }
         if (($ticketObj->status ?? '') === 'Closed') {
             return redirect()->route('tickets.show', $ticket)->with('info', 'Ticket is already closed.');
         }
@@ -495,7 +501,9 @@ class TicketController extends Controller
         if (! $ticketObj) {
             return redirect()->route('tickets.index')->with('error', 'Ticket not found.');
         }
-        abort_if(!ticket_can_access($ticket), 403, 'You do not have permission to access this record.');
+        if (!ticket_can_access($ticket)) {
+            return redirect()->route('tickets.index')->with('info', 'That ticket is assigned to someone else. Showing your tickets.');
+        }
         if (! $this->sla->canUserCloseThisTicket($ticket)) {
             return redirect()->route('tickets.show', $ticket)->with('error', 'You do not have permission to close tickets.');
         }
@@ -538,7 +546,9 @@ class TicketController extends Controller
         if (!$ticket) {
             return redirect()->route('tickets.index')->with('error', 'Ticket not found.');
         }
-        abort_if(!ticket_can_access($id), 403, 'You do not have permission to access this record.');
+        if (!ticket_can_access($id)) {
+            return redirect()->route('tickets.index')->with('info', 'That ticket is assigned to someone else. Showing your tickets.');
+        }
 
         $validated = $request->validate([
             'title' => 'required|string|max:255',
@@ -942,7 +952,9 @@ class TicketController extends Controller
         if (! $ticketObj) {
             return redirect()->route('tickets.index')->with('error', 'Ticket not found.');
         }
-        abort_if(!ticket_can_access($ticket), 403, 'You do not have permission to access this record.');
+        if (!ticket_can_access($ticket)) {
+            return redirect()->route('tickets.index')->with('info', 'That ticket is assigned to someone else. Showing your tickets.');
+        }
         $inactiveStatus = config('tickets.inactive_status', 'Inactive');
         if (($ticketObj->status ?? '') === $inactiveStatus) {
             return back()->with('info', 'Ticket is already inactive.');

@@ -26,6 +26,12 @@
             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
     @endif
+    @if (session('info'))
+        <div class="alert alert-info alert-dismissible fade show d-flex align-items-center mb-4" role="alert">
+            <i class="bi bi-info-circle-fill me-2"></i>{{ session('info') }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    @endif
 
     {{-- Status pills --}}
     <div class="tickets-status-pills mb-4">

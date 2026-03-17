@@ -7,11 +7,19 @@ After uploading the project to your server, run:
 php artisan dashboard:clear-cache
 ```
 
-**If using ERP Clients API** (CLIENTS_VIEW_SOURCE=erp_http), restart it so the accurate-count fix takes effect:
+**If using ERP Clients API** (CLIENTS_VIEW_SOURCE=erp_http), restart it:
 
 ```bash
 systemctl restart geminia-erp-api
 ```
+
+If you see **ORA-00904: "BASE"."IPOL_POLICY_NO": invalid identifier**, add to `erp-clients-api/.env`:
+
+```
+ERP_GROUP_GROUP_BY_COLUMN=POL_POLICY_NO
+```
+
+Then restart the API again.
 
 That's it. Dashboard and Clients page will now show correct numbers.
 

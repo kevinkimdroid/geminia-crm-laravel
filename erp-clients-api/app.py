@@ -247,9 +247,10 @@ def _get_group_view_columns():
         cursor.close()
         conn.close()
         _group_view_columns_cache = cols
-        return cols if cols else {"IPOL_POLICY_NO", "POL_POLICY_NO", "CLIENT_NAME", "AUTHORIZATION_DATE", "PRODUCTION_AMT", "PROD_DESC", "AGN_NAME"}
+        return cols if cols else {"POL_POLICY_NO", "CLIENT_NAME", "AUTHORIZATION_DATE", "PRODUCTION_AMT", "PROD_DESC", "AGN_NAME"}
     except Exception:
-        return {"IPOL_POLICY_NO", "POL_POLICY_NO", "CLIENT_NAME", "AUTHORIZATION_DATE", "PRODUCTION_AMT", "PROD_DESC", "PRODUCT", "AGN_NAME"}
+        # Prefer POL_POLICY_NO – many views have it; IPOL_POLICY_NO may not exist (ORA-00904)
+        return {"POL_POLICY_NO", "CLIENT_NAME", "AUTHORIZATION_DATE", "PRODUCTION_AMT", "PROD_DESC", "PRODUCT", "AGN_NAME"}
 
 
 def _get_group_policy_column():
@@ -264,10 +265,11 @@ def _get_group_policy_column():
 
 
 def _get_group_by_column():
-    """Column for GROUP BY. Use ERP_GROUP_GROUP_BY_COLUMN or POLICY_COL_GROUP (POL_POLICY_NO)."""
-    if GROUP_BY_COL:
-        return GROUP_BY_COL
+    """Column for GROUP BY. Use ERP_GROUP_GROUP_BY_COLUMN only if it exists in the view. Fallback to POL_POLICY_NO."""
     cols = _get_group_view_columns()
+    # Validate env column exists – many views have POL_POLICY_NO but not IPOL_POLICY_NO
+    if GROUP_BY_COL and GROUP_BY_COL in cols:
+        return GROUP_BY_COL
     if POLICY_COL_GROUP in cols:
         return POLICY_COL_GROUP
     for c in GROUP_POLICY_COLS:

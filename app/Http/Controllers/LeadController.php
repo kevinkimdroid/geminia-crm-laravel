@@ -129,7 +129,9 @@ class LeadController extends Controller
         if (!$lead) {
             return redirect()->route('leads.index')->with('error', 'Lead not found.');
         }
-        abort_if(!crm_user_can_access_record($lead), 403, 'You do not have permission to access this record.');
+        if (!crm_user_can_access_record($lead)) {
+            return redirect()->route('leads.index')->with('info', 'That lead is assigned to someone else. Showing your leads.');
+        }
         return view('leads.show', ['lead' => $lead]);
     }
 
@@ -140,7 +142,9 @@ class LeadController extends Controller
         if (!$lead) {
             return redirect()->route('leads.index')->with('error', 'Lead not found.');
         }
-        abort_if(!crm_user_can_access_record($lead), 403, 'You do not have permission to access this record.');
+        if (!crm_user_can_access_record($lead)) {
+            return redirect()->route('leads.index')->with('info', 'That lead is assigned to someone else. Showing your leads.');
+        }
         return view('leads.edit', ['lead' => $lead]);
     }
 
@@ -150,7 +154,9 @@ class LeadController extends Controller
         if (!$lead) {
             return redirect()->route('leads.index')->with('error', 'Lead not found.');
         }
-        abort_if(!crm_user_can_access_record($lead), 403, 'You do not have permission to access this record.');
+        if (!crm_user_can_access_record($lead)) {
+            return redirect()->route('leads.index')->with('info', 'That lead is assigned to someone else. Showing your leads.');
+        }
 
         $validated = $request->validate([
             'firstname' => 'required|string|max:255',

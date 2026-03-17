@@ -87,7 +87,9 @@ class DealController extends Controller
         if (!$deal) {
             return redirect()->route('deals.index')->with('error', 'Deal not found.');
         }
-        abort_if(!crm_user_can_access_record($deal), 403, 'You do not have permission to access this record.');
+        if (!crm_user_can_access_record($deal)) {
+            return redirect()->route('deals.index')->with('info', 'That deal is assigned to someone else. Showing your deals.');
+        }
         return view('deals.show', ['deal' => $deal]);
     }
 
@@ -98,7 +100,9 @@ class DealController extends Controller
         if (!$deal) {
             return redirect()->route('deals.index')->with('error', 'Deal not found.');
         }
-        abort_if(!crm_user_can_access_record($deal), 403, 'You do not have permission to access this record.');
+        if (!crm_user_can_access_record($deal)) {
+            return redirect()->route('deals.index')->with('info', 'That deal is assigned to someone else. Showing your deals.');
+        }
         return view('deals.edit', ['deal' => $deal]);
     }
 
@@ -108,7 +112,9 @@ class DealController extends Controller
         if (!$deal) {
             return redirect()->route('deals.index')->with('error', 'Deal not found.');
         }
-        abort_if(!crm_user_can_access_record($deal), 403, 'You do not have permission to access this record.');
+        if (!crm_user_can_access_record($deal)) {
+            return redirect()->route('deals.index')->with('info', 'That deal is assigned to someone else. Showing your deals.');
+        }
 
         $validated = $request->validate([
             'potentialname' => 'required|string|max:255',

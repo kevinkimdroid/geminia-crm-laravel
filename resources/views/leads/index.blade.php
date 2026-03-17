@@ -25,6 +25,12 @@
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     </div>
 @endif
+@if (session('info'))
+    <div class="alert alert-info alert-dismissible fade show d-flex align-items-center" role="alert">
+        <i class="bi bi-info-circle-fill me-2"></i>{{ session('info') }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+@endif
 
 {{-- Search & Stats --}}
 <div class="row g-4 mb-4">
