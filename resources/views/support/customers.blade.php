@@ -64,7 +64,15 @@
     <div class="col-lg-4">
         <div class="clients-stat-card">
             <span class="clients-stat-value" id="clientsTotalValue">{{ number_format($total ?? 0) }}</span>
-            <span class="clients-stat-label">Total {{ ($listRoute ?? 'support.customers') === 'contacts.index' ? 'Contacts' : 'Clients' }}</span>
+            <span class="clients-stat-label">
+                @if(($system ?? '') === 'group')
+                    Total Group Life Clients
+                @elseif(($system ?? '') === 'individual')
+                    Total Individual Life Clients
+                @else
+                    Total {{ ($listRoute ?? 'support.customers') === 'contacts.index' ? 'Contacts' : 'Clients' }}
+                @endif
+            </span>
         </div>
     </div>
 </div>

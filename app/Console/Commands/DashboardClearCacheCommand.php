@@ -26,11 +26,15 @@ class DashboardClearCacheCommand extends Command
             'geminia_leads_count',
             'geminia_deals_count',
             'geminia_clients_count',
+            'erp_clients_cache_total',
         ];
 
         foreach ($keys as $key) {
             Cache::forget($key);
         }
+
+        // Bump clients list version so all clients_list_* caches become stale
+        Cache::put('clients_list_version', time(), 86400);
 
         // Clear per-user dashboard stats (geminia_dashboard_stats_{userId})
         try {

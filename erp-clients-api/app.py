@@ -731,6 +731,19 @@ def get_clients():
             if conditions:
                 where_clause = " WHERE " + " AND ".join(conditions)
 
+            # Accurate total when no search (avoids wrong estimates on Clients page)
+            accurate_total = None
+            if not search and not policy:
+                try:
+                    if is_group and USE_GROUP_AGGREGATE and actual_view == target_view:
+                        gcol = _get_group_by_column()
+                        cursor.execute(f"SELECT COUNT(DISTINCT {gcol}) FROM {actual_view}{where_clause}")
+                    else:
+                        cursor.execute(f"SELECT COUNT(*) FROM {actual_view}{where_clause}")
+                    accurate_total = cursor.fetchone()[0]
+                except Exception:
+                    pass
+
             # Use ROWNUM for Oracle 11g compatibility (OFFSET FETCH requires 12c+)
             bind["end_row"] = offset + limit
             bind["start_row"] = offset
@@ -744,6 +757,7 @@ def get_clients():
                         tried_fallback[0] = True
                         policy_search_fallback[0] = True
                         continue
+                    total = accurate_total if accurate_total is not None else total
                     resp = {"data": data, "total": total}
                     if debug_mode and len(data) == 0 and (policy or search):
                         resp["_debug"] = {
@@ -776,7 +790,7 @@ def get_clients():
                         actual_columns = []
                     data = [row_to_client(r[:len(actual_columns)], actual_columns) for r in rows]
                     est = int(os.environ.get("ERP_CLIENTS_GROUP_ESTIMATED_TOTAL", os.environ.get("ERP_CLIENTS_ESTIMATED_TOTAL", "1000")))
-                    total = est if len(data) == limit else offset + len(data)
+                    total = accurate_total if accurate_total is not None else (est if len(data) == limit else offset + len(data))
                     cursor.close()
                     conn.close()
                     # If group view returned 0 rows, fall back to individual view + filter
@@ -898,10 +912,9 @@ def get_clients():
                     rec["policy_no"] = policy
                     break
 
-            # Total count - skip slow COUNT on large views; use estimate (faster)
-            # Set ERP_CLIENTS_ESTIMATED_TOTAL to match actual LMS_INDIVIDUAL_CRM_VIEW row count
+            # Total count - use accurate total when available (no search), else estimate
             est = int(os.environ.get("ERP_CLIENTS_ESTIMATED_TOTAL", "10536"))
-            total = est if len(data) == limit else offset + len(data)
+            total = accurate_total if accurate_total is not None else (est if len(data) == limit else offset + len(data))
 
             cursor.close()
             conn.close()

@@ -166,12 +166,17 @@ class CustomerController extends Controller
             && ! $search && ! $system;
 
         if ($useErp && ! $lazyLoad) {
-            $version = \Illuminate\Support\Facades\Cache::get('clients_list_version', 0);
-            $cacheKey = 'clients_list_' . $version . '_' . md5($source . $perPage . $offset . ($search ?? '') . ($system ?? ''));
-            $ttl = 60;
-            $skipCache = $system === 'group' && $search && strlen(trim((string) $search)) >= 2;
-            $result = $skipCache ? $this->erp->getClientsForListView($perPage, $offset, $search, $system)
-                : \Illuminate\Support\Facades\Cache::remember($cacheKey, $ttl, fn () => $this->erp->getClientsForListView($perPage, $offset, $search, $system));
+            // Never cache when system filter (Group Life / Individual Life) is active – always fresh data
+            $skipCache = ($system === 'group' || $system === 'individual')
+                || ($system === 'group' && $search && strlen(trim((string) $search)) >= 2);
+            if ($skipCache) {
+                $result = $this->erp->getClientsForListView($perPage, $offset, $search, $system);
+            } else {
+                $version = \Illuminate\Support\Facades\Cache::get('clients_list_version', 0);
+                $cacheKey = 'clients_list_' . $version . '_' . md5($source . $perPage . $offset . ($search ?? '') . ($system ?? ''));
+                $ttl = 60;
+                $result = \Illuminate\Support\Facades\Cache::remember($cacheKey, $ttl, fn () => $this->erp->getClientsForListView($perPage, $offset, $search, $system));
+            }
             $customers = $result['data'];
             $total = $result['total'];
             $clientsError = $result['error'] ?? null;
@@ -230,13 +235,16 @@ class CustomerController extends Controller
             && ($source !== 'erp_http' || ! empty(config('erp.clients_http_url')));
 
         if ($useErp) {
-            $version = \Illuminate\Support\Facades\Cache::get('clients_list_version', 0);
-            $cacheKey = 'clients_list_' . $version . '_' . md5($source . $perPage . $offset . ($search ?? '') . ($system ?? ''));
-            $ttl = 60;
-            $skipCache = $system === 'group' && $search && strlen(trim((string) $search)) >= 2;
-            $result = $skipCache
-                ? $this->erp->getClientsForListView($perPage, $offset, $search, $system)
-                : \Illuminate\Support\Facades\Cache::remember($cacheKey, $ttl, fn () => $this->erp->getClientsForListView($perPage, $offset, $search, $system));
+            // Never cache when system filter (Group Life / Individual Life) is active – always fresh data
+            $skipCache = ($system === 'group' || $system === 'individual');
+            if ($skipCache) {
+                $result = $this->erp->getClientsForListView($perPage, $offset, $search, $system);
+            } else {
+                $version = \Illuminate\Support\Facades\Cache::get('clients_list_version', 0);
+                $cacheKey = 'clients_list_' . $version . '_' . md5($source . $perPage . $offset . ($search ?? '') . ($system ?? ''));
+                $ttl = 60;
+                $result = \Illuminate\Support\Facades\Cache::remember($cacheKey, $ttl, fn () => $this->erp->getClientsForListView($perPage, $offset, $search, $system));
+            }
             $customers = $result['data'];
             $total = $result['total'];
             $clientsError = $result['error'] ?? null;

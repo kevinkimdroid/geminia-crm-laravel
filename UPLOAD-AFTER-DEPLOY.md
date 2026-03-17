@@ -3,11 +3,17 @@
 After uploading the project to your server, run:
 
 ```bash
-# Clear dashboard cache so numbers refresh correctly
+# Clear dashboard and clients caches so numbers refresh correctly
 php artisan dashboard:clear-cache
 ```
 
-That's it. The dashboard will now show correct Pipeline, Leads, Active Deals, Contacts, and Clients counts.
+**If using ERP Clients API** (CLIENTS_VIEW_SOURCE=erp_http), restart it so the accurate-count fix takes effect:
+
+```bash
+systemctl restart geminia-erp-api
+```
+
+That's it. Dashboard and Clients page will now show correct numbers.
 
 ---
 
