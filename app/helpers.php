@@ -88,6 +88,37 @@ if (! function_exists('pick_policy_excluding_pin')) {
     }
 }
 
+if (! function_exists('crm_owner_filter')) {
+    /**
+     * For role-based data access: returns null if current user is Administrator (sees all),
+     * otherwise returns the current user's ID so CRM queries filter by smownerid.
+     */
+    function crm_owner_filter(): ?int
+    {
+        $user = \Illuminate\Support\Facades\Auth::guard('vtiger')->user();
+        if (!$user || $user->isAdministrator()) {
+            return null;
+        }
+        return (int) $user->id;
+    }
+}
+
+if (! function_exists('crm_user_can_access_record')) {
+    /**
+     * Check if current user can access a CRM record (Contact, Lead, Deal, Ticket).
+     * Administrators can access all; others only records where smownerid matches their ID.
+     */
+    function crm_user_can_access_record($record): bool
+    {
+        $user = \Illuminate\Support\Facades\Auth::guard('vtiger')->user();
+        if (!$user || $user->isAdministrator()) {
+            return true;
+        }
+        $ownerId = $record->smownerid ?? $record->attributes['smownerid'] ?? null;
+        return $ownerId !== null && (int) $ownerId === (int) $user->id;
+    }
+}
+
 if (! function_exists('tel_href')) {
     /**
      * Normalize phone number for tel: links. Strips 0 and 254 prefixes to avoid

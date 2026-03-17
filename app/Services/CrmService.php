@@ -16,52 +16,62 @@ use Illuminate\Support\Facades\Log;
  */
 class CrmService
 {
-    public function getTicketCountsByStatus(): array
+    public function getTicketCountsByStatus(?int $ownerId = null): array
     {
+        if ($ownerId !== null) {
+            return $this->fetchTicketCountsByStatus($ownerId);
+        }
         return Cache::remember('geminia_ticket_counts_by_status', 300, function () {
-            return $this->fetchTicketCountsByStatus();
+            return $this->fetchTicketCountsByStatus(null);
         });
     }
 
-    protected function fetchTicketCountsByStatus(): array
+    protected function fetchTicketCountsByStatus(?int $ownerId = null): array
     {
         try {
             $driver = DB::connection('vtiger')->getDriverName();
             $setypeIn = "'HelpDesk','Ticket'";
             if (in_array($driver, ['mysql', 'mariadb'], true)) {
+                $ownerClause = ($ownerId !== null && $ownerId > 0) ? "AND e.smownerid = {$ownerId} " : '';
                 $rows = DB::connection('vtiger')->select(
                     "(SELECT t.status, COUNT(*) as cnt FROM vtiger_troubletickets t " .
                     "INNER JOIN vtiger_crmentity e ON t.ticketid = e.crmid " .
                     "WHERE e.deleted = 0 AND e.setype IN ({$setypeIn}) " .
-                    "AND t.contact_id IS NOT NULL AND t.contact_id > 0 " .
+                    "AND t.contact_id IS NOT NULL AND t.contact_id > 0 {$ownerClause}" .
                     "GROUP BY t.status) " .
                     "UNION ALL " .
                     "(SELECT 'Unassigned' as status, COUNT(*) as cnt FROM vtiger_troubletickets t " .
                     "INNER JOIN vtiger_crmentity e ON t.ticketid = e.crmid " .
                     "WHERE e.deleted = 0 AND e.setype IN ({$setypeIn}) " .
-                    "AND (t.contact_id IS NULL OR t.contact_id <= 0))"
+                    "AND (t.contact_id IS NULL OR t.contact_id <= 0) {$ownerClause})"
                 );
             } else {
-                $counts = DB::connection('vtiger')
+                $queryAssigned = DB::connection('vtiger')
                     ->table('vtiger_troubletickets as t')
                     ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
                     ->where('e.deleted', 0)
                     ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
                     ->whereNotNull('t.contact_id')
-                    ->where('t.contact_id', '>', 0)
-                    ->selectRaw('t.status, count(*) as cnt')
+                    ->where('t.contact_id', '>', 0);
+                if ($ownerId !== null && $ownerId > 0) {
+                    $queryAssigned->where('e.smownerid', $ownerId);
+                }
+                $counts = $queryAssigned->selectRaw('t.status, count(*) as cnt')
                     ->groupBy('t.status')
                     ->pluck('cnt', 'status')
                     ->toArray();
-                $unassigned = DB::connection('vtiger')
+                $queryUnassigned = DB::connection('vtiger')
                     ->table('vtiger_troubletickets as t')
                     ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
                     ->where('e.deleted', 0)
                     ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
                     ->where(function ($q) {
                         $q->whereNull('t.contact_id')->orWhere('t.contact_id', '<=', 0);
-                    })
-                    ->count();
+                    });
+                if ($ownerId !== null && $ownerId > 0) {
+                    $queryUnassigned->where('e.smownerid', $ownerId);
+                }
+                $unassigned = $queryUnassigned->count();
                 $rows = collect($counts)->map(fn ($cnt, $status) => (object) ['status' => $status, 'cnt' => $cnt])->values()->all();
                 if ($unassigned > 0) {
                     $rows[] = (object) ['status' => 'Unassigned', 'cnt' => $unassigned];
@@ -82,18 +92,22 @@ class CrmService
      * Global search across contacts, leads, tickets, and deals.
      * Returns grouped results for autocomplete.
      */
-    public function globalSearch(string $term, int $limitPerType = 5): array
+    public function globalSearch(string $term, int $limitPerType = 5, ?int $ownerId = null): array
     {
         $results = [];
         $t = '%' . $term . '%';
 
         try {
             // Contacts
-            $contacts = DB::connection('vtiger')
+            $contactsQuery = DB::connection('vtiger')
                 ->table('vtiger_contactdetails as c')
                 ->join('vtiger_crmentity as e', 'c.contactid', '=', 'e.crmid')
                 ->where('e.deleted', 0)
-                ->whereIn('e.setype', ['Contacts', 'Contact'])
+                ->whereIn('e.setype', ['Contacts', 'Contact']);
+            if ($ownerId !== null && $ownerId > 0) {
+                $contactsQuery->where('e.smownerid', $ownerId);
+            }
+            $contacts = $contactsQuery
                 ->where(function ($q) use ($t) {
                     $q->where('c.firstname', 'like', $t)
                         ->orWhere('c.lastname', 'like', $t)
@@ -114,11 +128,15 @@ class CrmService
             }
 
             // Leads
-            $leads = DB::connection('vtiger')
+            $leadsQuery = DB::connection('vtiger')
                 ->table('vtiger_leaddetails as l')
                 ->join('vtiger_crmentity as e', 'l.leadid', '=', 'e.crmid')
                 ->where('e.deleted', 0)
-                ->whereIn('e.setype', ['Leads', 'Lead'])
+                ->whereIn('e.setype', ['Leads', 'Lead']);
+            if ($ownerId !== null && $ownerId > 0) {
+                $leadsQuery->where('e.smownerid', $ownerId);
+            }
+            $leads = $leadsQuery
                 ->where(function ($q) use ($t) {
                     $q->where('l.firstname', 'like', $t)
                         ->orWhere('l.lastname', 'like', $t)
@@ -144,7 +162,7 @@ class CrmService
             }
 
             // Tickets (only those with contact)
-            $tickets = DB::connection('vtiger')
+            $ticketsQuery = DB::connection('vtiger')
                 ->table('vtiger_troubletickets as t')
                 ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
                 ->leftJoin('vtiger_contactdetails as c', 't.contact_id', '=', 'c.contactid')
@@ -152,7 +170,11 @@ class CrmService
                 ->where('e.deleted', 0)
                 ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
                 ->whereNotNull('t.contact_id')
-                ->where('t.contact_id', '>', 0)
+                ->where('t.contact_id', '>', 0);
+            if ($ownerId !== null && $ownerId > 0) {
+                $ticketsQuery->where('e.smownerid', $ownerId);
+            }
+            $tickets = $ticketsQuery
                 ->where(function ($q) use ($t) {
                     $q->where('t.title', 'like', $t)
                         ->orWhere('t.ticket_no', 'like', $t)
@@ -176,11 +198,15 @@ class CrmService
             }
 
             // Deals
-            $deals = DB::connection('vtiger')
+            $dealsQuery = DB::connection('vtiger')
                 ->table('vtiger_potential as p')
                 ->join('vtiger_crmentity as e', 'p.potentialid', '=', 'e.crmid')
                 ->where('e.deleted', 0)
-                ->whereIn('e.setype', ['Potentials', 'Opportunity'])
+                ->whereIn('e.setype', ['Potentials', 'Opportunity']);
+            if ($ownerId !== null && $ownerId > 0) {
+                $dealsQuery->where('e.smownerid', $ownerId);
+            }
+            $deals = $dealsQuery
                 ->where(function ($q) use ($t) {
                     $q->where('p.potentialname', 'like', $t);
                 })
@@ -317,35 +343,41 @@ class CrmService
         }
     }
 
-    public function getContactsCount(): int
+    public function getContactsCount(?int $ownerId = null): int
     {
-        return (int) Cache::remember('geminia_contacts_count', 60, fn () => $this->fetchContactsCount());
+        if ($ownerId === null) {
+            return (int) Cache::remember('geminia_contacts_count', 60, fn () => $this->fetchContactsCount(null));
+        }
+        return $this->fetchContactsCount($ownerId);
     }
 
-    protected function fetchContactsCount(): int
+    protected function fetchContactsCount(?int $ownerId = null): int
     {
         try {
-            return DB::connection('vtiger')
+            $query = DB::connection('vtiger')
                 ->table('vtiger_contactdetails')
                 ->join('vtiger_crmentity as e', 'vtiger_contactdetails.contactid', '=', 'e.crmid')
                 ->where('e.deleted', 0)
-                ->whereIn('e.setype', ['Contacts', 'Contact'])
-                ->count();
+                ->whereIn('e.setype', ['Contacts', 'Contact']);
+            if ($ownerId !== null && $ownerId > 0) {
+                $query->where('e.smownerid', $ownerId);
+            }
+            return $query->count();
         } catch (\Throwable $e) {
             Log::warning('CrmService::fetchContactsCount: ' . $e->getMessage());
             return 0;
         }
     }
 
-    public function getLeadsCount(?string $search = null): int
+    public function getLeadsCount(?string $search = null, ?int $ownerId = null): int
     {
-        if (!$search || trim($search) === '') {
-            return (int) Cache::remember('geminia_leads_count', 60, fn () => $this->fetchLeadsCount(null));
+        if ((!$search || trim($search) === '') && $ownerId === null) {
+            return (int) Cache::remember('geminia_leads_count', 60, fn () => $this->fetchLeadsCount(null, null));
         }
-        return $this->fetchLeadsCount($search);
+        return $this->fetchLeadsCount($search, $ownerId);
     }
 
-    protected function fetchLeadsCount(?string $search): int
+    protected function fetchLeadsCount(?string $search, ?int $ownerId = null): int
     {
         try {
             $query = DB::connection('vtiger')
@@ -353,6 +385,10 @@ class CrmService
                 ->join('vtiger_crmentity as e', 'vtiger_leaddetails.leadid', '=', 'e.crmid')
                 ->where('e.deleted', 0)
                 ->whereIn('e.setype', ['Leads', 'Lead']);
+
+            if ($ownerId !== null && $ownerId > 0) {
+                $query->where('e.smownerid', $ownerId);
+            }
 
             if ($search && trim($search) !== '') {
                 $term = '%' . trim($search) . '%';
@@ -371,35 +407,44 @@ class CrmService
         }
     }
 
-    public function getDealsCount(): int
+    public function getDealsCount(?int $ownerId = null): int
     {
-        return (int) Cache::remember('geminia_deals_count', 60, fn () => $this->fetchDealsCount());
+        if ($ownerId === null) {
+            return (int) Cache::remember('geminia_deals_count', 60, fn () => $this->fetchDealsCount(null));
+        }
+        return $this->fetchDealsCount($ownerId);
     }
 
-    protected function fetchDealsCount(): int
+    protected function fetchDealsCount(?int $ownerId = null): int
     {
         try {
-            return DB::connection('vtiger')
+            $query = DB::connection('vtiger')
                 ->table('vtiger_potential')
                 ->join('vtiger_crmentity as e', 'vtiger_potential.potentialid', '=', 'e.crmid')
                 ->where('e.deleted', 0)
-                ->whereIn('e.setype', ['Potentials', 'Opportunity'])
-                ->count();
+                ->whereIn('e.setype', ['Potentials', 'Opportunity']);
+            if ($ownerId !== null && $ownerId > 0) {
+                $query->where('e.smownerid', $ownerId);
+            }
+            return $query->count();
         } catch (\Throwable $e) {
             Log::warning('CrmService::fetchDealsCount: ' . $e->getMessage());
             return 0;
         }
     }
 
-    public function getPipelineValue(): float
+    public function getPipelineValue(?int $ownerId = null): float
     {
         try {
-            $sum = DB::connection('vtiger')
+            $query = DB::connection('vtiger')
                 ->table('vtiger_potential')
                 ->join('vtiger_crmentity as e', 'vtiger_potential.potentialid', '=', 'e.crmid')
                 ->where('e.deleted', 0)
-                ->whereIn('e.setype', ['Potentials', 'Opportunity'])
-                ->sum('vtiger_potential.amount');
+                ->whereIn('e.setype', ['Potentials', 'Opportunity']);
+            if ($ownerId !== null && $ownerId > 0) {
+                $query->where('e.smownerid', $ownerId);
+            }
+            $sum = $query->sum('vtiger_potential.amount');
             return (float) $sum;
         } catch (\Throwable $e) {
             Log::warning('CrmService::getPipelineValue: ' . $e->getMessage());
@@ -410,53 +455,60 @@ class CrmService
     /**
      * Get all dashboard stats in one cached call (avoids 12+ sequential DB queries).
      */
-    public function getDashboardStats(int $cacheSeconds = 120): array
+    public function getDashboardStats(int $cacheSeconds = 120, ?int $ownerId = null): array
     {
-        return Cache::remember('geminia_dashboard_stats', $cacheSeconds, function () {
+        $cacheKey = 'geminia_dashboard_stats_' . ($ownerId ?? 'all');
+        return Cache::remember($cacheKey, $cacheSeconds, function () use ($ownerId) {
             return [
-                'ticketCounts' => $this->getTicketCountsByStatus(),
-                'contactsCount' => $this->getContactsCount(),
-                'leadsCount' => $this->getLeadsCount(),
-                'dealsCount' => $this->getDealsCount(),
-                'pipelineValue' => $this->getPipelineValue(),
-                'leadsTodayCount' => $this->getLeadsTodayCount(),
-                'openTicketsByAssignee' => $this->getOpenTicketsByAssignee(),
-                'overdueActivities' => $this->getOverdueActivities(5),
-                'upcomingTasks' => $this->getUpcomingTasks(7, 5),
-                'leadsBySource' => $this->getLeadsBySource(),
-                'dealsClosingSoon' => $this->getDealsClosingSoon(30, 8),
+                'ticketCounts' => $this->getTicketCountsByStatus($ownerId),
+                'contactsCount' => $this->getContactsCount($ownerId),
+                'leadsCount' => $this->getLeadsCount(null, $ownerId),
+                'dealsCount' => $this->getDealsCount($ownerId),
+                'pipelineValue' => $this->getPipelineValue($ownerId),
+                'leadsTodayCount' => $this->getLeadsTodayCount($ownerId),
+                'openTicketsByAssignee' => $this->getOpenTicketsByAssignee($ownerId),
+                'overdueActivities' => $this->getOverdueActivities(5, $ownerId),
+                'upcomingTasks' => $this->getUpcomingTasks(7, 5, $ownerId),
+                'leadsBySource' => $this->getLeadsBySource($ownerId),
+                'dealsClosingSoon' => $this->getDealsClosingSoon(30, 8, $ownerId),
             ];
         });
     }
 
-    public function getLeadsTodayCount(): int
+    public function getLeadsTodayCount(?int $ownerId = null): int
     {
         try {
             $today = now()->format('Y-m-d');
-            return DB::connection('vtiger')
+            $query = DB::connection('vtiger')
                 ->table('vtiger_leaddetails')
                 ->join('vtiger_crmentity as e', 'vtiger_leaddetails.leadid', '=', 'e.crmid')
                 ->where('e.deleted', 0)
                 ->whereIn('e.setype', ['Leads', 'Lead'])
-                ->whereRaw('DATE(e.createdtime) = ?', [$today])
-                ->count();
+                ->whereRaw('DATE(e.createdtime) = ?', [$today]);
+            if ($ownerId !== null && $ownerId > 0) {
+                $query->where('e.smownerid', $ownerId);
+            }
+            return $query->count();
         } catch (\Throwable $e) {
             Log::warning('CrmService::getLeadsTodayCount: ' . $e->getMessage());
             return 0;
         }
     }
 
-    public function getOpenTicketsByAssignee(): array
+    public function getOpenTicketsByAssignee(?int $ownerId = null): array
     {
         try {
-            $rows = DB::connection('vtiger')
+            $query = DB::connection('vtiger')
                 ->table('vtiger_troubletickets as t')
                 ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
                 ->leftJoin('vtiger_users as u', 'e.smownerid', '=', 'u.id')
                 ->where('e.deleted', 0)
                 ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
-                ->whereIn('t.status', ['Open', 'In Progress', 'Wait For Response'])
-                ->select('e.smownerid', 'u.first_name', 'u.last_name', 'u.user_name')
+                ->whereIn('t.status', ['Open', 'In Progress', 'Wait For Response']);
+            if ($ownerId !== null && $ownerId > 0) {
+                $query->where('e.smownerid', $ownerId);
+            }
+            $rows = $query->select('e.smownerid', 'u.first_name', 'u.last_name', 'u.user_name')
                 ->get();
             $byAssignee = [];
             foreach ($rows as $r) {
@@ -471,18 +523,21 @@ class CrmService
         }
     }
 
-    public function getOverdueActivities(int $limit = 10): array
+    public function getOverdueActivities(int $limit = 10, ?int $ownerId = null): array
     {
         try {
             $today = now()->format('Y-m-d');
-            $rows = DB::connection('vtiger')
+            $query = DB::connection('vtiger')
                 ->table('vtiger_activity')
                 ->join('vtiger_crmentity as e', 'vtiger_activity.activityid', '=', 'e.crmid')
                 ->where('e.deleted', 0)
                 ->where('vtiger_activity.activitytype', 'Task')
                 ->where('vtiger_activity.status', '!=', 'Completed')
-                ->whereRaw('vtiger_activity.date_start < ?', [$today])
-                ->select('vtiger_activity.activityid', 'vtiger_activity.subject', 'vtiger_activity.date_start', 'vtiger_activity.due_date')
+                ->whereRaw('vtiger_activity.date_start < ?', [$today]);
+            if ($ownerId !== null && $ownerId > 0) {
+                $query->where('e.smownerid', $ownerId);
+            }
+            $rows = $query->select('vtiger_activity.activityid', 'vtiger_activity.subject', 'vtiger_activity.date_start', 'vtiger_activity.due_date')
                 ->orderBy('vtiger_activity.due_date')
                 ->limit($limit)
                 ->get();
@@ -500,20 +555,23 @@ class CrmService
     /**
      * Get upcoming tasks due in the next N days (for reminders).
      */
-    public function getUpcomingTasks(int $days = 7, int $limit = 5): array
+    public function getUpcomingTasks(int $days = 7, int $limit = 5, ?int $ownerId = null): array
     {
         try {
             $today = now()->format('Y-m-d');
             $end = now()->addDays($days)->format('Y-m-d');
-            $rows = DB::connection('vtiger')
+            $query = DB::connection('vtiger')
                 ->table('vtiger_activity')
                 ->join('vtiger_crmentity as e', 'vtiger_activity.activityid', '=', 'e.crmid')
                 ->where('e.deleted', 0)
                 ->where('vtiger_activity.activitytype', 'Task')
                 ->where('vtiger_activity.status', '!=', 'Completed')
                 ->whereNotNull('vtiger_activity.due_date')
-                ->whereBetween('vtiger_activity.due_date', [$today, $end])
-                ->select('vtiger_activity.activityid', 'vtiger_activity.subject', 'vtiger_activity.due_date')
+                ->whereBetween('vtiger_activity.due_date', [$today, $end]);
+            if ($ownerId !== null && $ownerId > 0) {
+                $query->where('e.smownerid', $ownerId);
+            }
+            $rows = $query->select('vtiger_activity.activityid', 'vtiger_activity.subject', 'vtiger_activity.due_date')
                 ->orderBy('vtiger_activity.due_date')
                 ->limit($limit)
                 ->get();
@@ -528,11 +586,14 @@ class CrmService
         }
     }
 
-    public function getContacts(int $limit = 50, int $offset = 0)
+    public function getContacts(int $limit = 50, int $offset = 0, ?int $ownerId = null)
     {
         try {
-            return Contact::listQuery()
-                ->orderByDesc('e.createdtime')
+            $query = Contact::listQuery();
+            if ($ownerId !== null) {
+                $query->where('e.smownerid', $ownerId);
+            }
+            return $query->orderByDesc('e.createdtime')
                 ->offset($offset)
                 ->limit($limit)
                 ->get();
@@ -545,7 +606,7 @@ class CrmService
     /**
      * Get customers (contacts) with owner info for Support > Customers view.
      */
-    public function getCustomers(int $limit = 50, int $offset = 0, ?string $search = null)
+    public function getCustomers(int $limit = 50, int $offset = 0, ?string $search = null, ?int $ownerId = null)
     {
         try {
             $query = DB::connection('vtiger')
@@ -553,7 +614,11 @@ class CrmService
                 ->join('vtiger_crmentity as e', 'c.contactid', '=', 'e.crmid')
                 ->leftJoin('vtiger_users as u', 'e.smownerid', '=', 'u.id')
                 ->where('e.deleted', 0)
-                ->whereIn('e.setype', ['Contacts', 'Contact'])
+                ->whereIn('e.setype', ['Contacts', 'Contact']);
+            if ($ownerId !== null) {
+                $query->where('e.smownerid', $ownerId);
+            }
+            $query
                 ->select(
                     'c.contactid',
                     'c.firstname',
@@ -616,7 +681,7 @@ class CrmService
         return $c ? trim(($c->firstname ?? '') . ' ' . ($c->lastname ?? '')) : '';
     }
 
-    public function getCustomersCount(?string $search = null): int
+    public function getCustomersCount(?string $search = null, ?int $ownerId = null): int
     {
         try {
             $query = DB::connection('vtiger')
@@ -624,6 +689,9 @@ class CrmService
                 ->join('vtiger_crmentity as e', 'c.contactid', '=', 'e.crmid')
                 ->where('e.deleted', 0)
                 ->whereIn('e.setype', ['Contacts', 'Contact']);
+            if ($ownerId !== null) {
+                $query->where('e.smownerid', $ownerId);
+            }
 
             if ($search && trim($search) !== '') {
                 $term = '%' . trim($search) . '%';
@@ -642,10 +710,13 @@ class CrmService
         }
     }
 
-    public function getLeads(int $limit = 50, int $offset = 0, ?string $search = null)
+    public function getLeads(int $limit = 50, int $offset = 0, ?string $search = null, ?int $ownerId = null)
     {
         try {
             $query = Lead::listQuery();
+            if ($ownerId !== null && $ownerId > 0) {
+                $query->where('e.smownerid', $ownerId);
+            }
             if ($search && trim($search) !== '') {
                 $term = '%' . trim($search) . '%';
                 $query->where(function ($q) use ($term) {
@@ -665,7 +736,7 @@ class CrmService
         }
     }
 
-    public function getTickets(int $limit = 50, int $offset = 0, ?string $status = null, ?string $search = null, bool $fullDescription = false, ?int $assignedTo = null)
+    public function getTickets(int $limit = 50, int $offset = 0, ?string $status = null, ?string $search = null, bool $fullDescription = false, ?int $assignedTo = null, ?int $ownerId = null)
     {
         try {
             $driver = DB::connection('vtiger')->getDriverName();
@@ -726,8 +797,9 @@ class CrmService
                 $query->where('t.status', $status);
             }
 
-            if ($assignedTo !== null && $assignedTo > 0) {
-                $query->where('e.smownerid', $assignedTo);
+            $effectiveAssignee = $ownerId ?? $assignedTo;
+            if ($effectiveAssignee !== null && $effectiveAssignee > 0) {
+                $query->where('e.smownerid', $effectiveAssignee);
             }
 
             if ($search && trim($search) !== '') {
@@ -759,9 +831,9 @@ class CrmService
     /**
      * Get all tickets for Excel export. Same filters as getTickets but full description and high limit.
      */
-    public function getTicketsForExport(?string $status = null, ?string $search = null, int $limit = 50000, ?int $assignedTo = null)
+    public function getTicketsForExport(?string $status = null, ?string $search = null, int $limit = 50000, ?int $assignedTo = null, ?int $ownerId = null)
     {
-        return $this->getTickets($limit, 0, $status, $search, true, $assignedTo);
+        return $this->getTickets($limit, 0, $status, $search, true, $assignedTo, $ownerId);
     }
 
     public function getTicketsCount(?string $status = null, ?string $search = null, ?int $assignedTo = null): int
@@ -826,16 +898,20 @@ class CrmService
     /**
      * Get tickets for a specific contact (client).
      */
-    public function getTicketsForContact(int $contactId, int $limit = 200)
+    public function getTicketsForContact(int $contactId, int $limit = 200, ?int $ownerId = null)
     {
         try {
-            return DB::connection('vtiger')
+            $query = DB::connection('vtiger')
                 ->table('vtiger_troubletickets as t')
                 ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
                 ->leftJoin('vtiger_contactdetails as c', 't.contact_id', '=', 'c.contactid')
                 ->where('e.deleted', 0)
                 ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
-                ->where('t.contact_id', $contactId)
+                ->where('t.contact_id', $contactId);
+            if ($ownerId !== null && $ownerId > 0) {
+                $query->where('e.smownerid', $ownerId);
+            }
+            return $query
                 ->select('t.ticketid', 't.title', 't.ticket_no', 't.status')
                 ->orderByDesc('e.createdtime')
                 ->limit($limit)
@@ -904,7 +980,7 @@ class CrmService
     /**
      * Get count of tickets for a specific contact with optional filters.
      */
-    public function getTicketsForContactCount(int $contactId, ?string $status = null, ?string $search = null): int
+    public function getTicketsForContactCount(int $contactId, ?string $status = null, ?string $search = null, ?int $ownerId = null): int
     {
         try {
             $query = DB::connection('vtiger')
@@ -913,6 +989,10 @@ class CrmService
                 ->where('e.deleted', 0)
                 ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
                 ->where('t.contact_id', $contactId);
+
+            if ($ownerId !== null && $ownerId > 0) {
+                $query->where('e.smownerid', $ownerId);
+            }
 
             if ($status && trim($status) !== '') {
                 $query->where('t.status', $status);
@@ -937,7 +1017,7 @@ class CrmService
     /**
      * Get previous and next contact IDs for navigation (ordered by contactid).
      */
-    public function getAdjacentContactIds(int $contactId): array
+    public function getAdjacentContactIds(int $contactId, ?int $ownerId = null): array
     {
         try {
             $base = DB::connection('vtiger')
@@ -945,6 +1025,10 @@ class CrmService
                 ->join('vtiger_crmentity as e', 'c.contactid', '=', 'e.crmid')
                 ->where('e.deleted', 0)
                 ->whereIn('e.setype', ['Contacts', 'Contact']);
+
+            if ($ownerId !== null && $ownerId > 0) {
+                $base->where('e.smownerid', $ownerId);
+            }
 
             $prev = (clone $base)->where('c.contactid', '<', $contactId)->orderByDesc('c.contactid')->value('c.contactid');
             $next = (clone $base)->where('c.contactid', '>', $contactId)->orderBy('c.contactid')->value('c.contactid');
@@ -959,10 +1043,14 @@ class CrmService
         }
     }
 
-    public function getDeals(int $limit = 50, int $offset = 0)
+    public function getDeals(int $limit = 50, int $offset = 0, ?int $ownerId = null)
     {
         try {
-            return Deal::listQuery()
+            $query = Deal::listQuery();
+            if ($ownerId !== null && $ownerId > 0) {
+                $query->where('e.smownerid', $ownerId);
+            }
+            return $query
                 ->orderByDesc('e.createdtime')
                 ->offset($offset)
                 ->limit($limit)
@@ -1150,7 +1238,7 @@ class CrmService
      * When ticketId is set, only returns activities related to that ticket.
      * When both are set, returns activities related to both.
      */
-    public function getActivities(int $limit = 50, int $offset = 0, ?string $activityType = null, ?string $status = null, ?string $search = null, ?int $contactId = null, ?int $ticketId = null)
+    public function getActivities(int $limit = 50, int $offset = 0, ?string $activityType = null, ?string $status = null, ?string $search = null, ?int $contactId = null, ?int $ticketId = null, ?int $ownerId = null)
     {
         try {
             $activityIds = null;
@@ -1196,6 +1284,10 @@ class CrmService
 
             if ($activityIds !== null) {
                 $query->whereIn('a.activityid', $activityIds);
+            }
+
+            if ($ownerId !== null && $ownerId > 0) {
+                $query->where('e.smownerid', $ownerId);
             }
 
             if ($activityType && in_array($activityType, ['Task', 'Event', 'Meeting', 'Call'])) {

@@ -45,8 +45,9 @@ class ContactController extends Controller
         $page = max(1, (int) $request->get('page', 1));
         $offset = ($page - 1) * $perPage;
 
-        $contacts = $this->crm->getContacts($perPage, $offset);
-        $total = $this->crm->getContactsCount();
+        $ownerId = crm_owner_filter();
+        $contacts = $this->crm->getContacts($perPage, $offset, $ownerId);
+        $total = $this->crm->getContactsCount($ownerId);
 
         $contacts = new LengthAwarePaginator(
             $contacts instanceof Collection ? $contacts : collect($contacts),
@@ -130,6 +131,7 @@ class ContactController extends Controller
         if (!$contact) {
             return redirect()->route('contacts.index')->with('error', 'Contact not found.');
         }
+        abort_if(!crm_user_can_access_record($contact), 403, 'You do not have permission to access this record.');
         $tab = $request->get('tab', 'summary');
         $tickets = collect();
         $ticketsPaginator = null;
@@ -215,8 +217,9 @@ class ContactController extends Controller
             $ticketStatus = $request->get('list');
             $ticketSearch = $request->get('search');
 
-            $tickets = $this->crm->getTicketsForContactPaginated($id, $perPage, $offset, $ticketStatus, $ticketSearch);
-            $total = $this->crm->getTicketsForContactCount($id, $ticketStatus, $ticketSearch);
+            $ownerId = crm_owner_filter();
+            $tickets = $this->crm->getTicketsForContactPaginated($id, $perPage, $offset, $ticketStatus, $ticketSearch, $ownerId);
+            $total = $this->crm->getTicketsForContactCount($id, $ticketStatus, $ticketSearch, $ownerId);
 
             $ticketsPaginator = new LengthAwarePaginator(
                 $tickets instanceof Collection ? $tickets : collect($tickets),
@@ -227,8 +230,9 @@ class ContactController extends Controller
             );
         }
 
-        $adjacent = $this->crm->getAdjacentContactIds($id);
-        $ticketsCount = $this->crm->getTicketsForContactCount($id);
+        $ownerId = crm_owner_filter();
+        $adjacent = $this->crm->getAdjacentContactIds($id, $ownerId);
+        $ticketsCount = $this->crm->getTicketsForContactCount($id, null, null, $ownerId);
 
         return view('contacts.show', [
             'contact' => $contact,
@@ -267,6 +271,7 @@ class ContactController extends Controller
         if (!$contact) {
             return redirect()->route('contacts.index')->with('error', 'Contact not found.');
         }
+        abort_if(!crm_user_can_access_record($contact), 403, 'You do not have permission to access this record.');
         return view('contacts.edit', ['contact' => $contact]);
     }
 
@@ -276,6 +281,7 @@ class ContactController extends Controller
         if (!$contact) {
             return redirect()->route('contacts.index')->with('error', 'Contact not found.');
         }
+        abort_if(!crm_user_can_access_record($contact), 403, 'You do not have permission to access this record.');
 
         $validated = $request->validate([
             'firstname' => 'required|string|max:255',

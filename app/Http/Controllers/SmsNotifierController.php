@@ -30,7 +30,7 @@ class SmsNotifierController extends Controller
             }
         }
 
-        $customers = $presetContact ? collect([$presetContact]) : $crm->getCustomers(100, 0);
+        $customers = $presetContact ? collect([$presetContact]) : $crm->getCustomers(100, 0, null, crm_owner_filter());
         return view('support.sms-notifier', [
             'customers' => $customers,
             'smsConfigured' => $sms->isConfigured(),

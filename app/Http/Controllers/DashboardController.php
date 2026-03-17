@@ -26,7 +26,8 @@ class DashboardController extends Controller
 
     public function index(): View
     {
-        $stats = $this->crm->getDashboardStats(120);
+        $ownerId = crm_owner_filter();
+        $stats = $this->crm->getDashboardStats(120, $ownerId);
 
         // Clients count: don't block on slow ERP API — load via AJAX for fast first paint
         $source = config('erp.clients_view_source', 'crm');

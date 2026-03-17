@@ -31,9 +31,10 @@ class ActivityController extends Controller
         $perPage = 25;
         $offset = ($page - 1) * $perPage;
 
+        $ownerId = crm_owner_filter();
         $activities = collect();
         if ($contactId || $ticketId) {
-            $activities = $this->crm->getActivities($perPage, $offset, $activityType, $status, $search, $contactId, $ticketId);
+            $activities = $this->crm->getActivities($perPage, $offset, $activityType, $status, $search, $contactId, $ticketId, $ownerId);
         }
 
         try {
@@ -41,8 +42,8 @@ class ActivityController extends Controller
         } catch (\Throwable $e) {
             $users = collect();
         }
-        $contacts = $this->crm->getContacts(200, 0);
-        $tickets = $contactId ? $this->crm->getTicketsForContact($contactId) : collect();
+        $contacts = $this->crm->getContacts(200, 0, $ownerId);
+        $tickets = $contactId ? $this->crm->getTicketsForContact($contactId, 200, $ownerId) : collect();
 
         return view('activities.index', [
             'activities' => $activities,
@@ -61,7 +62,7 @@ class ActivityController extends Controller
     {
         $type = $request->get('type', 'Event');
         $relatedTo = $request->get('related_to');
-        $contacts = $this->crm->getContacts(200, 0);
+        $contacts = $this->crm->getContacts(200, 0, crm_owner_filter());
         return view('activities.create', ['type' => $type, 'contacts' => $contacts, 'relatedTo' => $relatedTo]);
     }
 
@@ -106,7 +107,7 @@ class ActivityController extends Controller
 
     public function ticketsForContact(int $contact): JsonResponse
     {
-        $tickets = $this->crm->getTicketsForContact($contact);
+        $tickets = $this->crm->getTicketsForContact($contact, 200, crm_owner_filter());
         return response()->json($tickets);
     }
 }

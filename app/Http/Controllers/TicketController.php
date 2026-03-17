@@ -40,7 +40,8 @@ class TicketController extends Controller
     {
         $status = $request->get('list');
         $search = $request->get('search');
-        $assignedTo = $request->filled('assigned_to') ? (int) $request->get('assigned_to') : null;
+        $ownerFilter = crm_owner_filter();
+        $assignedTo = $ownerFilter ?? ($request->filled('assigned_to') ? (int) $request->get('assigned_to') : null);
         $page = max(1, (int) $request->get('page', 1));
         $perPage = max(10, min(100, (int) ($request->get('per_page') ?: 25)));
         $offset = ($page - 1) * $perPage;
@@ -50,7 +51,7 @@ class TicketController extends Controller
         $statusSlug = $status ? str_replace(' ', '_', trim((string) $status)) : '';
         $cacheKey = $isDefaultView ? 'tickets_list_default' : ($isStatusPage1 ? 'tickets_list_' . $statusSlug : null);
 
-        if ($cacheKey) {
+        if ($cacheKey && $ownerFilter === null) {
             $ttl = $isDefaultView ? 180 : 120;
             $cached = Cache::remember($cacheKey, $ttl, function () use ($perPage, $status, $search, $assignedTo) {
                 $items = $this->crm->getTickets($perPage, 0, $status, $search, false, $assignedTo);
@@ -64,7 +65,7 @@ class TicketController extends Controller
             $total = $this->crm->getTicketsCount($status, $search, $assignedTo);
         }
 
-        $ticketCounts = $this->crm->getTicketCountsByStatus();
+        $ticketCounts = $this->crm->getTicketCountsByStatus($ownerFilter);
         $users = Cache::remember('ticket_assign_users', 300, fn () => $this->crm->getActiveUsers());
 
         $tickets = new LengthAwarePaginator(
@@ -90,7 +91,7 @@ class TicketController extends Controller
     {
         $status = $request->get('list');
         $search = $request->get('search');
-        $assignedTo = $request->filled('assigned_to') ? (int) $request->get('assigned_to') : null;
+        $assignedTo = crm_owner_filter() ?? ($request->filled('assigned_to') ? (int) $request->get('assigned_to') : null);
 
         $tickets = $this->crm->getTicketsForExport($status, $search, 50000, $assignedTo);
 
@@ -180,7 +181,7 @@ class TicketController extends Controller
         if ($fromServeClient && $contactId) {
             $clients = collect([$crm->getContactById($contactId)])->filter();
         } else {
-            $clients = Cache::remember('ticket_create_clients', 120, fn () => $crm->getCustomers(30, 0));
+            $clients = Cache::remember('ticket_create_clients_' . (crm_owner_filter() ?? 'all'), 120, fn () => $crm->getCustomers(30, 0, null, crm_owner_filter()));
         }
         $contactDisplay = '';
 
@@ -397,6 +398,7 @@ class TicketController extends Controller
         if (!$ticket) {
             return redirect()->route('tickets.index')->with('error', 'Ticket not found.');
         }
+        abort_if(!crm_user_can_access_record($ticket), 403, 'You do not have permission to access this record.');
         $feedback = null;
         if (class_exists(\App\Models\TicketFeedback::class)) {
             try {
@@ -415,12 +417,13 @@ class TicketController extends Controller
         if (!$ticket) {
             return redirect()->route('tickets.index')->with('error', 'Ticket not found.');
         }
+        abort_if(!crm_user_can_access_record($ticket), 403, 'You do not have permission to access this record.');
         if ($request->get('refresh')) {
             Cache::forget('ticket_accounts');
             Cache::forget('ticket_create_clients');
         }
         $crm = app(CrmService::class);
-        $clients = Cache::remember('ticket_create_clients', 120, fn () => $crm->getCustomers(30, 0));
+        $clients = Cache::remember('ticket_create_clients_' . (crm_owner_filter() ?? 'all'), 120, fn () => $crm->getCustomers(30, 0, null, crm_owner_filter()));
         $contactDisplay = '';
         if ($ticket->contact_id ?? null) {
             $client = $clients->firstWhere('contactid', $ticket->contact_id);
@@ -472,6 +475,7 @@ class TicketController extends Controller
         if (! $ticketObj) {
             return redirect()->route('tickets.index')->with('error', 'Ticket not found.');
         }
+        abort_if(!crm_user_can_access_record($ticketObj), 403, 'You do not have permission to access this record.');
         if (($ticketObj->status ?? '') === 'Closed') {
             return redirect()->route('tickets.show', $ticket)->with('info', 'Ticket is already closed.');
         }
@@ -492,6 +496,7 @@ class TicketController extends Controller
         if (! $ticketObj) {
             return redirect()->route('tickets.index')->with('error', 'Ticket not found.');
         }
+        abort_if(!crm_user_can_access_record($ticketObj), 403, 'You do not have permission to access this record.');
         $authUser = \Illuminate\Support\Facades\Auth::guard('vtiger')->user();
         $userRole = ($authUser && $authUser->primary_role) ? $authUser->primary_role->rolename : null;
         if (! $this->sla->canUserCloseTickets($userRole)) {
@@ -536,6 +541,7 @@ class TicketController extends Controller
         if (!$ticket) {
             return redirect()->route('tickets.index')->with('error', 'Ticket not found.');
         }
+        abort_if(!crm_user_can_access_record($ticket), 403, 'You do not have permission to access this record.');
 
         $validated = $request->validate([
             'title' => 'required|string|max:255',
@@ -774,7 +780,7 @@ class TicketController extends Controller
             $results = [];
 
             // CRM contacts
-            $customers = $this->crm->getCustomers((int) ceil($limit / 2), 0, $q);
+            $customers = $this->crm->getCustomers((int) ceil($limit / 2), 0, $q, crm_owner_filter());
             foreach ($customers as $c) {
                 $id = (int) $c->contactid;
                 if (! isset($seen[$id])) {
@@ -895,6 +901,7 @@ class TicketController extends Controller
         if (! $ticket) {
             return redirect()->route('tickets.index')->with('error', 'Ticket not found.');
         }
+        abort_if(!crm_user_can_access_record($ticket), 403, 'You do not have permission to access this record.');
         $inactiveStatus = config('tickets.inactive_status', 'Inactive');
         if (($ticket->status ?? '') === $inactiveStatus) {
             return back()->with('info', 'Ticket is already inactive.');

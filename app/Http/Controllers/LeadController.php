@@ -29,8 +29,9 @@ class LeadController extends Controller
         $page = max(1, (int) $request->get('page', 1));
         $offset = ($page - 1) * $perPage;
 
-        $leads = $this->crm->getLeads($perPage, $offset, $search);
-        $total = $this->crm->getLeadsCount($search);
+        $ownerId = crm_owner_filter();
+        $leads = $this->crm->getLeads($perPage, $offset, $search, $ownerId);
+        $total = $this->crm->getLeadsCount($search, $ownerId);
 
         $leads = new LengthAwarePaginator(
             $leads instanceof Collection ? $leads : collect($leads),
@@ -128,6 +129,7 @@ class LeadController extends Controller
         if (!$lead) {
             return redirect()->route('leads.index')->with('error', 'Lead not found.');
         }
+        abort_if(!crm_user_can_access_record($lead), 403, 'You do not have permission to access this record.');
         return view('leads.show', ['lead' => $lead]);
     }
 
@@ -138,6 +140,7 @@ class LeadController extends Controller
         if (!$lead) {
             return redirect()->route('leads.index')->with('error', 'Lead not found.');
         }
+        abort_if(!crm_user_can_access_record($lead), 403, 'You do not have permission to access this record.');
         return view('leads.edit', ['lead' => $lead]);
     }
 
@@ -147,6 +150,7 @@ class LeadController extends Controller
         if (!$lead) {
             return redirect()->route('leads.index')->with('error', 'Lead not found.');
         }
+        abort_if(!crm_user_can_access_record($lead), 403, 'You do not have permission to access this record.');
 
         $validated = $request->validate([
             'firstname' => 'required|string|max:255',

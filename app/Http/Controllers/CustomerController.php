@@ -175,16 +175,18 @@ class CustomerController extends Controller
             $total = $result['total'];
             $clientsError = $result['error'] ?? null;
             if ($clientsError && $customers->isEmpty()) {
-                $customers = $this->crm->getCustomers($perPage, $offset, $search);
-                $total = $this->crm->getCustomersCount($search);
+                $ownerId = crm_owner_filter();
+                $customers = $this->crm->getCustomers($perPage, $offset, $search, $ownerId);
+                $total = $this->crm->getCustomersCount($search, $ownerId);
                 $clientsError = $clientsError . ' Showing CRM contacts below (if any).';
             }
         } elseif ($lazyLoad) {
             $customers = collect();
             $total = 0;
         } else {
-            $customers = $this->crm->getCustomers($perPage, $offset, $search);
-            $total = $this->crm->getCustomersCount($search);
+            $ownerId = crm_owner_filter();
+            $customers = $this->crm->getCustomers($perPage, $offset, $search, $ownerId);
+            $total = $this->crm->getCustomersCount($search, $ownerId);
         }
 
         $customers = new LengthAwarePaginator(
@@ -237,12 +239,14 @@ class CustomerController extends Controller
             $total = $result['total'];
             $clientsError = $result['error'] ?? null;
             if ($clientsError && $customers->isEmpty()) {
-                $customers = $this->crm->getCustomers($perPage, $offset, $search);
-                $total = $this->crm->getCustomersCount($search);
+                $ownerId = crm_owner_filter();
+                $customers = $this->crm->getCustomers($perPage, $offset, $search, $ownerId);
+                $total = $this->crm->getCustomersCount($search, $ownerId);
             }
         } else {
-            $customers = $this->crm->getCustomers($perPage, $offset, $search);
-            $total = $this->crm->getCustomersCount($search);
+            $ownerId = crm_owner_filter();
+            $customers = $this->crm->getCustomers($perPage, $offset, $search, $ownerId);
+            $total = $this->crm->getCustomersCount($search, $ownerId);
             $clientsError = null;
         }
 

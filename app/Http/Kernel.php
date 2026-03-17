@@ -59,5 +59,6 @@ class Kernel extends HttpKernel
         'verified' => \Illuminate\Auth\Middleware\EnsureEmailIsVerified::class,
         'erp.api.token' => \App\Http\Middleware\ValidateErpApiToken::class,
         'erp.sync.token' => \App\Http\Middleware\ValidateErpSyncToken::class,
+        'admin' => \App\Http\Middleware\EnsureAdministrator::class,
     ];
 }

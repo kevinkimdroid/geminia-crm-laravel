@@ -57,7 +57,7 @@ class ServeClientController extends Controller
                 $searchError = $erpResult['error'] ?? null;
 
                 try {
-                    $customers = $this->crm->getCustomers(20, 0, $searchTerm);
+                    $customers = $this->crm->getCustomers(20, 0, $searchTerm, crm_owner_filter());
                     foreach ($customers as $c) {
                         $crmContacts[] = [
                             'contactid' => $c->contactid,
@@ -119,7 +119,7 @@ class ServeClientController extends Controller
 
         if ($fetchCrm) {
             try {
-                $customers = $this->crm->getCustomers(20, 0, $term);
+                $customers = $this->crm->getCustomers(20, 0, $term, crm_owner_filter());
                 foreach ($customers as $c) {
                     $crmContacts[] = [
                         'contactid' => $c->contactid,

@@ -118,6 +118,8 @@ Route::post('/tools/mail-manager/fetch', [\App\Http\Controllers\MailManagerContr
 Route::get('/tools/mail-manager/{id}/create-ticket', [\App\Http\Controllers\MailManagerController::class, 'createTicketFromEmail'])->name('tools.mail-manager.create-ticket');
 Route::get('/tools/mail-manager/{id}', [\App\Http\Controllers\MailManagerController::class, 'show'])->name('tools.mail-manager.show');
 Route::get('/reports', [\App\Http\Controllers\ReportsController::class, 'index'])->name('reports');
+
+Route::middleware('admin')->group(function () {
 Route::get('/settings', fn () => redirect()->route('settings.crm'))->name('settings');
 Route::get('/settings/crm', [\App\Http\Controllers\SettingsController::class, 'crm'])->name('settings.crm');
 Route::post('/settings/users/{user}/send-reset-link', [\App\Http\Controllers\UserManagementController::class, 'sendResetLink'])->name('settings.users.send-reset-link');
@@ -146,6 +148,7 @@ Route::post('/settings/crm/ticket-sla/departments/update', [\App\Http\Controller
 Route::delete('/settings/crm/ticket-sla/departments/{department}', [\App\Http\Controllers\TicketSlaController::class, 'deleteDepartmentTat'])->name('settings.ticket-sla.delete-department');
 Route::post('/settings/modules/toggle', [\App\Http\Controllers\ModuleController::class, 'toggle'])->name('settings.modules.toggle');
 Route::get('/settings/layout-editor', [\App\Http\Controllers\LayoutEditorController::class, 'index'])->name('settings.layout-editor');
+});
 Route::get('/settings/layout-editor/module/{tabid}', [\App\Http\Controllers\LayoutEditorController::class, 'show'])->name('settings.layout-editor.show')->where('tabid', '[0-9]+');
 Route::post('/settings/layout-editor/field', [\App\Http\Controllers\LayoutEditorController::class, 'updateField'])->name('settings.layout-editor.field.update');
 Route::get('/reports/sla-broken', [\App\Http\Controllers\ReportsController::class, 'slaBroken'])->name('reports.sla-broken');
@@ -162,9 +165,9 @@ Route::get('/settings/profiles/{profile}', [\App\Http\Controllers\ProfileControl
 Route::put('/settings/profiles/{profile}', [\App\Http\Controllers\ProfileController::class, 'update'])->name('profiles.update');
 Route::post('/settings/users/{user}/send-reset-link', [\App\Http\Controllers\UserManagementController::class, 'sendResetLink'])->name('settings.users.send-reset-link');
 Route::get('/settings/users/{user}/edit', [\App\Http\Controllers\UserManagementController::class, 'edit'])->name('settings.users.edit');
-Route::put('/settings/users/{user}', [\App\Http\Controllers\UserManagementController::class, 'update'])->name('settings.users.update');
+Route::put('/settings/profiles/{profile}', [\App\Http\Controllers\ProfileController::class, 'update'])->name('profiles.update');
 
-Route::prefix('setup')->name('setup.')->group(function () {
+Route::middleware('admin')->prefix('setup')->name('setup.')->group(function () {
     Route::get('/', [SetupController::class, 'index'])->name('index');
     Route::get('/users', [SetupController::class, 'users'])->name('users');
     Route::post('/users/role', [SetupController::class, 'updateUserRole'])->name('users.update-role');

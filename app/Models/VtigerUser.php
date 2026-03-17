@@ -48,6 +48,15 @@ class VtigerUser extends Authenticatable
     }
 
     /**
+     * Check if this user has the Administrator role.
+     */
+    public function isAdministrator(): bool
+    {
+        $role = $this->primary_role;
+        return $role && strcasecmp($role->rolename ?? '', 'Administrator') === 0;
+    }
+
+    /**
      * Verify Vtiger password (MD5 or crypt).
      */
     public static function verifyPassword(string $plain, string $hashed): bool
@@ -140,6 +149,8 @@ class VtigerUser extends Authenticatable
                     $allowed[] = $appKey;
                 }
             }
+            // Non-Administrator: exclude settings (only admins can access)
+            $allowed = array_values(array_diff($allowed, ['settings', 'settings.crm', 'settings.manage-users']));
             return $allowed;
         } catch (\Throwable $e) {
             return $allKeys;

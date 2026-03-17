@@ -28,7 +28,7 @@ class SearchController extends Controller
         }
 
         $limit = (int) $request->get('limit', 10);
-        $results = $this->crm->globalSearch($q, $limit);
+        $results = $this->crm->globalSearch($q, $limit, crm_owner_filter());
 
         return response()->json(['results' => $results]);
     }

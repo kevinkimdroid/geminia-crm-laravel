@@ -27,8 +27,9 @@ class DealController extends Controller
         $page = max(1, (int) $request->get('page', 1));
         $offset = ($page - 1) * $perPage;
 
-        $deals = $this->crm->getDeals($perPage, $offset);
-        $total = $this->crm->getDealsCount();
+        $ownerId = crm_owner_filter();
+        $deals = $this->crm->getDeals($perPage, $offset, $ownerId);
+        $total = $this->crm->getDealsCount($ownerId);
 
         $deals = new LengthAwarePaginator(
             $deals instanceof Collection ? $deals : collect($deals),
@@ -38,7 +39,8 @@ class DealController extends Controller
             ['path' => $request->url(), 'query' => $request->query()]
         );
 
-        $pipelineValue = Cache::remember('geminia_pipeline_value', 90, fn () => $this->crm->getPipelineValue());
+        $pipelineCacheKey = $ownerId !== null ? 'geminia_pipeline_value_' . $ownerId : 'geminia_pipeline_value';
+        $pipelineValue = Cache::remember($pipelineCacheKey, 90, fn () => $this->crm->getPipelineValue($ownerId));
 
         return view('deals.index', [
             'deals' => $deals,
@@ -85,6 +87,7 @@ class DealController extends Controller
         if (!$deal) {
             return redirect()->route('deals.index')->with('error', 'Deal not found.');
         }
+        abort_if(!crm_user_can_access_record($deal), 403, 'You do not have permission to access this record.');
         return view('deals.show', ['deal' => $deal]);
     }
 
@@ -95,6 +98,7 @@ class DealController extends Controller
         if (!$deal) {
             return redirect()->route('deals.index')->with('error', 'Deal not found.');
         }
+        abort_if(!crm_user_can_access_record($deal), 403, 'You do not have permission to access this record.');
         return view('deals.edit', ['deal' => $deal]);
     }
 
@@ -104,6 +108,7 @@ class DealController extends Controller
         if (!$deal) {
             return redirect()->route('deals.index')->with('error', 'Deal not found.');
         }
+        abort_if(!crm_user_can_access_record($deal), 403, 'You do not have permission to access this record.');
 
         $validated = $request->validate([
             'potentialname' => 'required|string|max:255',
