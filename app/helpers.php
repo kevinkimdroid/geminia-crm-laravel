@@ -165,56 +165,13 @@ if (! function_exists('crm_owner_filter')) {
 
 if (! function_exists('ticket_can_access')) {
     /**
-     * Check if current user can access a ticket by ID. Admins: yes. Others: only if assigned to them.
+     * Check if current user can access a ticket by ID.
+     * Returns true – ticket routes are already behind auth:vtiger middleware.
+     * No per-ticket permission check; all logged-in users can edit/reassign any ticket.
      */
     function ticket_can_access(int $ticketId): bool
     {
-        if (config('tickets.allow_all_authenticated', false)) {
-            return \Illuminate\Support\Facades\Auth::guard('vtiger')->check()
-                || \Illuminate\Support\Facades\Auth::check();
-        }
-        $user = \Illuminate\Support\Facades\Auth::guard('vtiger')->user()
-            ?? \Illuminate\Support\Facades\Auth::user();
-        if (!$user) {
-            return false;
-        }
-        try {
-            if (method_exists($user, 'isAdministrator') && $user->isAdministrator()) {
-                return true;
-            }
-        } catch (\Throwable $e) {
-            // isAdministrator may throw if role relation fails – treat as non-admin
-        }
-        $userId = (int) ($user->id ?? $user->getAuthIdentifier() ?? $user->getKey() ?? 0);
-        if ($userId <= 0) {
-            return false;
-        }
-        try {
-            $db = \Illuminate\Support\Facades\DB::connection('vtiger');
-            $ownerId = $db->table('vtiger_crmentity')
-                ->where('crmid', $ticketId)
-                ->value('smownerid');
-            if ($ownerId === null) {
-                return false;
-            }
-            // Use loose comparison to handle string "5" vs int 5 from DB
-            if ((int) $ownerId == $userId) {
-                return true;
-            }
-            try {
-                if ($ownerId > 0 && $db->table('vtiger_user2group')
-                    ->where('userid', $userId)
-                    ->where('groupid', $ownerId)
-                    ->exists()) {
-                    return true;
-                }
-            } catch (\Throwable $e) {
-                // vtiger_user2group may not exist
-            }
-        } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning('ticket_can_access failed: ' . $e->getMessage());
-        }
-        return false;
+        return true;
     }
 }
 

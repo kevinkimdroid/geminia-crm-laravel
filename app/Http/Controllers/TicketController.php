@@ -233,7 +233,7 @@ class TicketController extends Controller
             'returnToLead' => $fromLead ? $leadId : null,
             'returnToMailManager' => $request->filled('email_id'),
             'emailId' => $request->filled('email_id') ? (int) $request->get('email_id') : null,
-            'canCloseTickets' => $this->sla->canUserCloseTickets($userRole),
+            'canCloseTickets' => $this->sla->canUserCloseThisTicket($id),
         ]);
     }
 
@@ -462,7 +462,7 @@ class TicketController extends Controller
             'accounts' => $accounts,
             'users' => $users,
             'presetOrganizationId' => $effectiveOrgId,
-            'canCloseTickets' => $this->sla->canUserCloseTickets($userRole),
+            'canCloseTickets' => $this->sla->canUserCloseThisTicket($id),
         ]);
     }
 
@@ -479,9 +479,7 @@ class TicketController extends Controller
         if (($ticketObj->status ?? '') === 'Closed') {
             return redirect()->route('tickets.show', $ticket)->with('info', 'Ticket is already closed.');
         }
-        $authUser = \Illuminate\Support\Facades\Auth::guard('vtiger')->user();
-        $userRole = ($authUser && $authUser->primary_role) ? $authUser->primary_role->rolename : null;
-        if (! $this->sla->canUserCloseTickets($userRole)) {
+        if (! $this->sla->canUserCloseThisTicket($ticket)) {
             return redirect()->route('tickets.show', $ticket)->with('error', 'You do not have permission to close tickets.');
         }
         return view('tickets.close', ['ticket' => $ticketObj]);
@@ -497,9 +495,7 @@ class TicketController extends Controller
             return redirect()->route('tickets.index')->with('error', 'Ticket not found.');
         }
         abort_if(!ticket_can_access($ticket), 403, 'You do not have permission to access this record.');
-        $authUser = \Illuminate\Support\Facades\Auth::guard('vtiger')->user();
-        $userRole = ($authUser && $authUser->primary_role) ? $authUser->primary_role->rolename : null;
-        if (! $this->sla->canUserCloseTickets($userRole)) {
+        if (! $this->sla->canUserCloseThisTicket($ticket)) {
             return redirect()->route('tickets.show', $ticket)->with('error', 'You do not have permission to close tickets.');
         }
         $solution = trim((string) $request->get('solution', ''));
@@ -562,9 +558,7 @@ class TicketController extends Controller
 
         $newStatus = $validated['status'] ?? $ticket->status;
         if ($newStatus === 'Closed') {
-            $authUser = \Illuminate\Support\Facades\Auth::guard('vtiger')->user();
-            $userRole = ($authUser && $authUser->primary_role) ? $authUser->primary_role->rolename : null;
-            if (!$this->sla->canUserCloseTickets($userRole)) {
+            if (!$this->sla->canUserCloseThisTicket($id)) {
                 return back()->withInput()->with('error', 'You do not have permission to close tickets.');
             }
             $solution = trim($validated['solution'] ?? $ticket->solution ?? '');
@@ -660,6 +654,52 @@ class TicketController extends Controller
             return redirect()->route('tickets.show', $id)->with('success', 'Ticket updated.');
         } catch (\Throwable $e) {
             return back()->withInput()->with('error', 'Failed to update: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Quick reassign ticket (right-click menu). Updates smownerid only.
+     */
+    public function reassign(Request $request, int $ticket): RedirectResponse|JsonResponse
+    {
+        $ticketObj = $this->crm->getTicket($ticket);
+        if (! $ticketObj) {
+            return $request->wantsJson()
+                ? response()->json(['error' => 'Ticket not found.'], 404)
+                : redirect()->route('tickets.index')->with('error', 'Ticket not found.');
+        }
+        $assignedTo = (int) $request->get('assigned_to', 0);
+        if ($assignedTo <= 0) {
+            return $request->wantsJson()
+                ? response()->json(['error' => 'Invalid assignee.'], 422)
+                : back()->with('error', 'Please select a user to assign.');
+        }
+        try {
+            \DB::connection('vtiger')->table('vtiger_crmentity')->where('crmid', $ticket)->update([
+                'smownerid' => $assignedTo,
+                'modifiedtime' => now()->format('Y-m-d H:i:s'),
+                'modifiedby' => (int) (\Illuminate\Support\Facades\Auth::guard('vtiger')->id() ?? \Illuminate\Support\Facades\Auth::id() ?? 1),
+            ]);
+            $this->forgetTicketListCaches();
+            \App\Events\DashboardStatsUpdated::dispatch();
+            try {
+                app(\App\Services\TicketNotificationService::class)->sendTicketAssignedNotification(
+                    $ticket,
+                    $ticketObj->ticket_no ?? 'TT' . $ticket,
+                    $ticketObj->title ?? '',
+                    $assignedTo
+                );
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('Ticket reassignment notification failed', ['error' => $e->getMessage()]);
+            }
+            if ($request->wantsJson()) {
+                return response()->json(['success' => true, 'message' => 'Ticket reassigned.']);
+            }
+            return back()->with('success', 'Ticket reassigned.');
+        } catch (\Throwable $e) {
+            return $request->wantsJson()
+                ? response()->json(['error' => $e->getMessage()], 500)
+                : back()->with('error', 'Failed to reassign: ' . $e->getMessage());
         }
     }
 

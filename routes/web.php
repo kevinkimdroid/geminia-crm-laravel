@@ -49,6 +49,7 @@ Route::get('/tickets/export', [TicketController::class, 'export'])->name('ticket
 Route::get('/tickets/{ticket}/close', [TicketController::class, 'showCloseForm'])->name('tickets.close.form');
 Route::post('/tickets/{ticket}/close', [TicketController::class, 'quickClose'])->name('tickets.close');
 Route::post('/tickets/{ticket}/inactivate', [TicketController::class, 'inactivate'])->name('tickets.inactivate');
+Route::post('/tickets/{ticket}/reassign', [TicketController::class, 'reassign'])->name('tickets.reassign');
 Route::resource('tickets', TicketController::class)->except(['destroy']);
 Route::get('/api/tickets/contacts', [TicketController::class, 'searchContacts'])->name('api.tickets.contacts');
 Route::get('/api/tickets/products', [TicketController::class, 'searchProducts'])->name('api.tickets.products');

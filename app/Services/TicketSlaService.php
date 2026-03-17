@@ -40,6 +40,33 @@ class TicketSlaService
     }
 
     /**
+     * Check if the current user can close a specific ticket.
+     * Allows: users whose role can close, OR the ticket assignee.
+     */
+    public function canUserCloseThisTicket(int $ticketId): bool
+    {
+        $user = \Illuminate\Support\Facades\Auth::guard('vtiger')->user()
+            ?? \Illuminate\Support\Facades\Auth::user();
+        if (!$user) {
+            return false;
+        }
+        $userRole = $user->primary_role ?? null;
+        $roleName = $userRole?->rolename ?? null;
+        if ($roleName && $this->canUserCloseTickets($roleName)) {
+            return true;
+        }
+        $userId = (int) ($user->id ?? $user->getAuthIdentifier() ?? 0);
+        if ($userId <= 0) {
+            return false;
+        }
+        $ownerId = \Illuminate\Support\Facades\DB::connection('vtiger')
+            ->table('vtiger_crmentity')
+            ->where('crmid', $ticketId)
+            ->value('smownerid');
+        return $ownerId !== null && (int) $ownerId == $userId;
+    }
+
+    /**
      * Get TAT (hours) for a department/category.
      */
     public function getTatForDepartment(?string $department): int
