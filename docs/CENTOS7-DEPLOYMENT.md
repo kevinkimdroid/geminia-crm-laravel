@@ -349,7 +349,45 @@ Set `APP_URL` in `.env` to your real server URL (e.g. `https://crm.yourcompany.c
 
 ---
 
-## 10. Quick Reference
+## 10. Dashboard Numbers Wrong (Pipeline 0, Leads 0, etc.)
+
+When the dashboard shows zeros for Pipeline Value, Leads, Active Deals, or wrong counts for Contacts/Clients:
+
+### 1. Show organization-wide stats
+
+By default, non-admins see only their own records. To show company-wide totals for everyone, add to `.env`:
+
+```
+DASHBOARD_SHOW_ALL_STATS=true
+```
+
+Then clear the dashboard cache:
+
+```bash
+php artisan dashboard:clear-cache
+```
+
+### 2. Clear dashboard cache
+
+After config changes or data imports:
+
+```bash
+php artisan dashboard:clear-cache
+```
+
+To clear all application cache:
+
+```bash
+php artisan dashboard:clear-cache --all
+```
+
+### 3. Vtiger tables
+
+Dashboard stats come from the Vtiger DB: `vtiger_potential` (deals), `vtiger_leaddetails` (leads), `vtiger_contactdetails` (contacts). Ensure the `vtiger` DB connection in `.env` points to the correct database and that these tables exist.
+
+---
+
+## 11. Quick Reference
 
 | Service           | Command / Path                                            |
 |------------------|------------------------------------------------------------|
@@ -357,11 +395,12 @@ Set `APP_URL` in `.env` to your real server URL (e.g. `https://crm.yourcompany.c
 | PHP-FPM          | `systemctl start php81-php-fpm`                           |
 | Queue worker     | `systemctl start geminia-crm-queue`                       |
 | ERP API (optional)| `systemctl start geminia-erp-api`                        |
+| Dashboard cache  | `php artisan dashboard:clear-cache`                        |
 | Logs             | `tail -f storage/logs/laravel.log`                        |
 
 ---
 
-## 10. Pre-built files in the repo
+## 12. Pre-built files in the repo
 
 - `deploy/systemd/geminia-crm-queue.service` – queue worker
 - `deploy/systemd/geminia-erp-api.service` – ERP API
