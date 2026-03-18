@@ -32,10 +32,10 @@
             <i class="bi bi-chat-dots me-1"></i> Send SMS
         </a>
         @endif
-        @if(($ticket->status ?? '') !== 'Closed')
-        <a href="{{ route('tickets.close.form', $ticket->ticketid) }}" class="btn btn-sm btn-success">
+        @if(($ticket->status ?? '') !== 'Closed' && ($canCloseTickets ?? true))
+        <button type="button" class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#closeTicketModal">
             <i class="bi bi-check-circle me-1"></i> Close Ticket
-        </a>
+        </button>
         @endif
         @if(($ticket->status ?? '') !== 'Inactive')
         <form action="{{ route('tickets.inactivate', $ticket->ticketid) }}" method="POST" onsubmit="return confirm('Inactivate this ticket? It will no longer appear in active lists.');" class="d-inline">
@@ -87,10 +87,14 @@
             <h6 class="text-uppercase small fw-bold mb-4" style="color:var(--geminia-primary);letter-spacing:0.08em">Ticket Resolution</h6>
             <div class="ticket-description">{{ nl2br(e(preg_replace("/\n{2,}/", "\n", $ticket->solution ?? ''))) }}</div>
         </div>
-        @elseif(($ticket->status ?? '') !== 'Closed')
+        @elseif(($ticket->status ?? '') !== 'Closed' && ($canCloseTickets ?? true))
         <div class="app-card p-4 mt-4 border border-success">
             <p class="text-muted small mb-2"><i class="bi bi-info-circle me-1"></i>Add a solution and change status to Closed to resolve this ticket.</p>
-            <a href="{{ route('tickets.close.form', $ticket->ticketid) }}" class="btn btn-sm btn-success"><i class="bi bi-check-circle me-1"></i> Close Ticket</a>
+            <button type="button" class="btn btn-sm btn-success" data-bs-toggle="modal" data-bs-target="#closeTicketModal"><i class="bi bi-check-circle me-1"></i> Close Ticket</button>
+        </div>
+        @elseif(($ticket->status ?? '') !== 'Closed' && !($canCloseTickets ?? true))
+        <div class="app-card p-4 mt-4 border border-warning">
+            <p class="text-muted small mb-0"><i class="bi bi-lock me-1"></i>Only certain roles or the ticket assignee can close this ticket.</p>
         </div>
         @endif
         @if(($ticket->status ?? '') === 'Closed' && ($feedback ?? null))
@@ -169,4 +173,29 @@
 .btn-outline-danger { border-color: #fecaca; color: #dc2626; }
 .btn-outline-danger:hover { background: #fef2f2; border-color: #dc2626; color: #dc2626; }
 </style>
+
+@if(($ticket->status ?? '') !== 'Closed' && ($canCloseTickets ?? true))
+<div class="modal fade" id="closeTicketModal" tabindex="-1" aria-labelledby="closeTicketModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="closeTicketModalLabel"><i class="bi bi-check-circle text-success me-2"></i>Close Ticket</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form method="POST" action="{{ route('tickets.close', $ticket->ticketid) }}">
+                @csrf
+                <div class="modal-body">
+                    <p class="text-muted small mb-3">Add a brief resolution (or leave blank to use "Closed").</p>
+                    <label class="form-label fw-semibold">Solution <span class="text-muted fw-normal">(optional)</span></label>
+                    <textarea name="solution" class="form-control" rows="3" placeholder="e.g. Issue resolved, customer satisfied" autofocus>{{ old('solution') }}</textarea>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-success"><i class="bi bi-check-lg me-1"></i> Close Ticket</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+@endif
 @endsection

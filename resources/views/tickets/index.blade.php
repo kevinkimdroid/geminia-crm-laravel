@@ -143,7 +143,7 @@
                             <td class="text-end">
                                 <button type="button" class="btn btn-sm btn-link text-primary p-1 ticket-reassign-btn" title="Reassign to someone" data-ticket-id="{{ $ticket->ticketid }}"><i class="bi bi-person-plus"></i></button>
                                 @if(($ticket->status ?? '') !== 'Closed')
-                                <a href="{{ route('tickets.close.form', $ticket->ticketid) }}" class="btn btn-sm btn-link text-success p-1" title="Close"><i class="bi bi-check-circle"></i></a>
+                                <button type="button" class="btn btn-sm btn-link text-success p-1 ticket-close-btn" title="Close" data-ticket-id="{{ $ticket->ticketid }}"><i class="bi bi-check-circle"></i></button>
                                 @endif
                                 <a href="{{ $ticketUrl }}" class="btn btn-sm btn-link text-muted p-1" title="View"><i class="bi bi-eye"></i></a>
                             </td>
@@ -288,6 +288,31 @@
 .ticket-context-menu-empty { font-size: 0.85rem; }
 </style>
 
+{{-- Inline close ticket modal --}}
+<div class="modal fade" id="closeTicketModal" tabindex="-1" aria-labelledby="closeTicketModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="closeTicketModalLabel"><i class="bi bi-check-circle text-success me-2"></i>Close Ticket</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="closeTicketForm" method="POST" action="">
+                @csrf
+                <input type="hidden" name="redirect" value="{{ url()->full() }}">
+                <div class="modal-body">
+                    <p class="text-muted small mb-3">Add a brief resolution (or leave blank to use "Closed").</p>
+                    <label class="form-label fw-semibold">Solution <span class="text-muted fw-normal">(optional)</span></label>
+                    <textarea name="solution" class="form-control" rows="3" placeholder="e.g. Issue resolved, customer satisfied"></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-success"><i class="bi bi-check-lg me-1"></i> Close Ticket</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 {{-- Right-click context menu for reassign --}}
 <div id="ticket-context-menu" class="ticket-context-menu" style="display:none">
     <div class="ticket-context-menu-header">Reassign ticket</div>
@@ -302,6 +327,33 @@ window.TICKET_REASSIGN_USERS = @json(collect($users ?? [])->map(fn($u) => ['id' 
 
 @push('scripts')
 <script>
+(function(){
+    function initCloseModal(){
+        var closeModal = document.getElementById('closeTicketModal');
+        var closeForm = document.getElementById('closeTicketForm');
+        var closeSolution = closeForm && closeForm.querySelector('textarea[name="solution"]');
+        var baseTicketsUrl = '{{ url("/tickets") }}';
+        if (!closeModal || !closeForm) return;
+        document.querySelectorAll('.ticket-close-btn').forEach(function(btn){
+            btn.addEventListener('click', function(){
+                var tid = btn.getAttribute('data-ticket-id');
+                if (!tid) return;
+                closeForm.action = baseTicketsUrl + '/' + tid + '/close';
+                if (closeSolution) closeSolution.value = '';
+                if (typeof bootstrap !== 'undefined') {
+                    var m = bootstrap.Modal.getOrCreateInstance(closeModal) || new bootstrap.Modal(closeModal);
+                    m.show();
+                }
+            });
+        });
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initCloseModal);
+    } else {
+        initCloseModal();
+    }
+})();
+
 (function(){
     var form = document.getElementById('tickets-search-form');
     var input = document.getElementById('tickets-search-input');

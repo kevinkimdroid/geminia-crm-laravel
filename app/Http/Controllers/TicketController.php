@@ -410,7 +410,11 @@ class TicketController extends Controller
                 // Table may not exist yet
             }
         }
-        return view('tickets.show', ['ticket' => $ticket, 'feedback' => $feedback]);
+        return view('tickets.show', [
+            'ticket' => $ticket,
+            'feedback' => $feedback,
+            'canCloseTickets' => $this->sla->canUserCloseThisTicket($id),
+        ]);
     }
 
     /** @return View|RedirectResponse */
@@ -505,14 +509,19 @@ class TicketController extends Controller
             return redirect()->route('tickets.index')->with('info', 'That ticket is assigned to someone else. Showing your tickets.');
         }
         if (! $this->sla->canUserCloseThisTicket($ticket)) {
-            return redirect()->route('tickets.show', $ticket)->with('error', 'You do not have permission to close tickets.');
+            $redirect = $request->get('redirect');
+            $target = ($redirect && \Illuminate\Support\Str::startsWith($redirect, url('/')))
+                ? redirect($redirect) : redirect()->route('tickets.show', $ticket);
+            return $target->with('error', 'You do not have permission to close tickets.');
         }
         $solution = trim((string) $request->get('solution', ''));
         if ($solution === '') {
             $solution = 'Closed';
         }
+        $authUser = \Illuminate\Support\Facades\Auth::guard('vtiger')->user()
+            ?? \Illuminate\Support\Facades\Auth::user();
         try {
-            $userId = $authUser ? (int) $authUser->id : 1;
+            $userId = $authUser ? (int) ($authUser->id ?? $authUser->getAuthIdentifier()) : 1;
             \DB::connection('vtiger')->table('vtiger_troubletickets')->where('ticketid', $ticket)->update(['status' => 'Closed']);
             $existingDesc = \DB::connection('vtiger')->table('vtiger_crmentity')->where('crmid', $ticket)->value('description') ?? '';
             $fullDesc = trim($existingDesc . "\n\n--- Resolution ---\n" . $solution);
@@ -534,6 +543,10 @@ class TicketController extends Controller
                 }
             }
 
+            $redirect = $request->get('redirect');
+            if ($redirect && \Illuminate\Support\Str::startsWith($redirect, url('/'))) {
+                return redirect($redirect)->with('success', 'Ticket closed.');
+            }
             return redirect()->route('tickets.show', $ticket)->with('success', 'Ticket closed.');
         } catch (\Throwable $e) {
             return redirect()->route('tickets.show', $ticket)->with('error', 'Failed to close: ' . $e->getMessage());
