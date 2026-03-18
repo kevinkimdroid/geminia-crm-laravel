@@ -1,5 +1,39 @@
 <?php
 
+if (! function_exists('ticket_categories')) {
+    /**
+     * Get all ticket categories from the CRM (vtiger) merged with config defaults.
+     * Cached for 5 minutes to avoid repeated DB queries.
+     */
+    function ticket_categories(): array
+    {
+        return \Illuminate\Support\Facades\Cache::remember('ticket_categories_from_crm', 300, function () {
+            try {
+                return app(\App\Services\CrmService::class)->getTicketCategoriesFromCrm();
+            } catch (\Throwable $e) {
+                return config('tickets.categories', []);
+            }
+        });
+    }
+}
+
+if (! function_exists('ticket_sources')) {
+    /**
+     * Get all ticket sources from the CRM (vtiger).
+     * Cached for 5 minutes to avoid repeated DB queries.
+     */
+    function ticket_sources(): array
+    {
+        return \Illuminate\Support\Facades\Cache::remember('ticket_sources_from_crm', 300, function () {
+            try {
+                return app(\App\Services\CrmService::class)->getTicketSourcesFromCrm();
+            } catch (\Throwable $e) {
+                return ['CRM', 'Email', 'Web', 'Phone'];
+            }
+        });
+    }
+}
+
 if (! function_exists('looks_like_kra_pin')) {
     /**
      * Return true if value looks like Kenya KRA PIN (e.g. A0006812561Y, P051234567X).

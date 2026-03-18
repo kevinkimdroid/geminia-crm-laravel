@@ -48,6 +48,19 @@ class ReportsAllExport implements WithMultipleSheets
             'Pipeline by Stage' => new PipelineByStageExport(
                 collect($this->crm->getPipelineByStage())->map(fn ($d, $stage) => [$stage, $d['count'], $d['amount']])->values()->toArray()
             ),
+            'Reassignment Audit' => new ReassignmentAuditExport(
+                \App\Models\TicketReassignment::orderByDesc('created_at')
+                    ->limit(2000)
+                    ->get()
+                    ->map(fn ($r) => [
+                        'TT' . $r->ticket_id,
+                        $r->from_user_name ?? 'Unassigned',
+                        $r->to_user_name ?? '—',
+                        $r->reassigned_by_name ?? '—',
+                        $r->created_at?->format('Y-m-d H:i:s') ?? '',
+                    ])
+                    ->toArray()
+            ),
         ];
     }
 }

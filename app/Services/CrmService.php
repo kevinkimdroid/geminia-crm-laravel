@@ -1609,6 +1609,117 @@ class CrmService
     }
 
     /**
+     * Get all ticket categories from the CRM (vtiger).
+     * Fetches distinct category values from vtiger_troubletickets.
+     * Merged with config defaults so configured categories not yet used in tickets are included.
+     */
+    public function getTicketCategoriesFromCrm(): array
+    {
+        try {
+            $fromTickets = DB::connection('vtiger')
+                ->table('vtiger_troubletickets as t')
+                ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
+                ->where('e.deleted', 0)
+                ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
+                ->whereNotNull('t.category')
+                ->whereRaw('TRIM(t.category) != ?', [''])
+                ->distinct()
+                ->pluck('t.category')
+                ->map(fn ($c) => trim((string) $c))
+                ->filter()
+                ->values()
+                ->toArray();
+
+            // Try vtiger picklist if it exists (category picklist for HelpDesk)
+            $fromPicklist = [];
+            try {
+                $picklistTables = ['vtiger_picklistdetails', 'vtiger_helpdesk_category'];
+                foreach ($picklistTables as $tbl) {
+                    if (! DB::connection('vtiger')->getSchemaBuilder()->hasTable($tbl)) {
+                        continue;
+                    }
+                    if ($tbl === 'vtiger_picklistdetails') {
+                        $fieldRow = DB::connection('vtiger')->table('vtiger_field')
+                            ->where('tablename', 'vtiger_troubletickets')
+                            ->where('columnname', 'category')
+                            ->first();
+                        if ($fieldRow && ! empty($fieldRow->picklistid ?? null)) {
+                            $fromPicklist = DB::connection('vtiger')
+                                ->table('vtiger_picklistdetails')
+                                ->where('picklistid', $fieldRow->picklistid)
+                                ->orderBy('sortorderid')
+                                ->pluck('picklist_value')
+                                ->map(fn ($v) => trim((string) $v))
+                                ->filter()
+                                ->values()
+                                ->toArray();
+                            break;
+                        }
+                    } elseif ($tbl === 'vtiger_helpdesk_category') {
+                        $fromPicklist = DB::connection('vtiger')
+                            ->table($tbl)
+                            ->orderBy('sortorderid')
+                            ->pluck('category')
+                            ->map(fn ($v) => trim((string) $v))
+                            ->filter()
+                            ->values()
+                            ->toArray();
+                        break;
+                    }
+                }
+            } catch (\Throwable $e) {
+                // Picklist tables may not exist or have different schema
+            }
+
+            $configCats = config('tickets.categories', []);
+            $all = collect($fromPicklist)
+                ->merge($fromTickets)
+                ->merge($configCats)
+                ->unique()
+                ->filter(fn ($v) => trim((string) $v) !== '')
+                ->map(fn ($v) => trim((string) $v))
+                ->values()
+                ->toArray();
+
+            return array_values(array_unique($all));
+        } catch (\Throwable $e) {
+            Log::warning('CrmService::getTicketCategoriesFromCrm: ' . $e->getMessage());
+            return config('tickets.categories', []);
+        }
+    }
+
+    /**
+     * Get all ticket sources from the CRM (vtiger).
+     * Fetches distinct source values from vtiger_crmentity for HelpDesk/Ticket records.
+     */
+    public function getTicketSourcesFromCrm(): array
+    {
+        try {
+            $fromCrm = DB::connection('vtiger')
+                ->table('vtiger_crmentity as e')
+                ->join('vtiger_troubletickets as t', 't.ticketid', '=', 'e.crmid')
+                ->where('e.deleted', 0)
+                ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
+                ->whereNotNull('e.source')
+                ->whereRaw('TRIM(e.source) != ?', [''])
+                ->distinct()
+                ->pluck('e.source')
+                ->map(fn ($s) => trim((string) $s))
+                ->filter()
+                ->values()
+                ->toArray();
+
+            $configSources = ['CRM', 'Email', 'Web', 'Phone', 'WALK IN', 'EMAIL', 'SMS', 'ONLINE CHAT', 'PORTAL', 'TWITTER', 'FACEBOOK', 'WHATSAPP', 'Call', 'USSD', 'Agent'];
+            $all = collect($fromCrm)->merge($configSources)->unique()->filter(fn ($v) => trim((string) $v) !== '')->map(fn ($v) => trim((string) $v))->values()->toArray();
+
+            return array_values(array_unique($all));
+        } catch (\Throwable $e) {
+            Log::warning('CrmService::getTicketSourcesFromCrm: ' . $e->getMessage());
+            return ['CRM', 'Email', 'Web', 'Phone', 'Call', 'USSD', 'Agent'];
+        }
+    }
+
+    /**
      * Get tickets grouped by category for reports.
      */
     public function getTicketsByCategory(): array

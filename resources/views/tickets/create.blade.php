@@ -91,8 +91,8 @@
                 <div class="col-md-6">
                     <label class="form-label fw-semibold">Category</label>
                     <select name="category" class="form-select">
-                        <option value="">Other</option>
-                        @foreach(config('tickets.categories') as $cat)
+                        <option value="">Select an Option</option>
+                        @foreach(ticket_categories() as $cat)
                         <option value="{{ $cat }}" {{ old('category') == $cat ? 'selected' : '' }}>{{ $cat }}</option>
                         @endforeach
                     </select>
@@ -119,13 +119,24 @@
 
     <input type="hidden" name="status" value="Open">
     <input type="hidden" name="priority" value="Normal">
-    <input type="hidden" name="ticket_source" value="{{ ($fromServeClient ?? false) ? 'Phone' : (($fromMailManager ?? false) ? 'Email' : 'CRM') }}">
+    @php
+        $presetSource = ($fromServeClient ?? false) ? 'Phone' : (($fromMailManager ?? false) ? 'Email' : 'CRM');
+    @endphp
 
-    {{-- More options: Product Line, Policy, Severity (always visible) --}}
+    {{-- More options: Product Line, Policy, Severity, Ticket Source --}}
     <div class="app-card mb-4">
         <div class="p-4">
-            <p class="small fw-semibold text-muted mb-3">Product Line, Policy, Severity</p>
+            <p class="small fw-semibold text-muted mb-3">Product Line, Policy, Severity, Ticket Source</p>
             <div class="row g-4">
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold">Ticket Source</label>
+                    <select name="ticket_source" class="form-select">
+                        <option value="">Select an Option</option>
+                        @foreach(ticket_sources() as $src)
+                        <option value="{{ $src }}" {{ old('ticket_source', $presetSource ?? '') == $src ? 'selected' : '' }}>{{ $src }}</option>
+                        @endforeach
+                    </select>
+                </div>
                 <div class="col-md-6">
                     <label class="form-label fw-semibold">Product Line / Account</label>
                     <select name="organization_id" id="organizationSelect" class="form-select">

@@ -50,6 +50,7 @@ Route::get('/tickets/{ticket}/close', [TicketController::class, 'showCloseForm']
 Route::post('/tickets/{ticket}/close', [TicketController::class, 'quickClose'])->name('tickets.close');
 Route::post('/tickets/{ticket}/inactivate', [TicketController::class, 'inactivate'])->name('tickets.inactivate');
 Route::post('/tickets/{ticket}/reassign', [TicketController::class, 'reassign'])->name('tickets.reassign');
+Route::post('/tickets/{ticket}/comments', [TicketController::class, 'storeComment'])->name('tickets.comments.store');
 Route::resource('tickets', TicketController::class)->except(['destroy']);
 Route::get('/api/tickets/contacts', [TicketController::class, 'searchContacts'])->name('api.tickets.contacts');
 Route::get('/api/tickets/products', [TicketController::class, 'searchProducts'])->name('api.tickets.products');
@@ -156,6 +157,8 @@ Route::get('/reports/sla-broken', [\App\Http\Controllers\ReportsController::clas
 Route::get('/reports/ticket-aging', [\App\Http\Controllers\ReportsController::class, 'ticketAging'])->name('reports.ticket-aging');
 Route::get('/reports/contacts-summary', [\App\Http\Controllers\ReportsController::class, 'contactsSummary'])->name('reports.contacts-summary');
 Route::get('/reports/calls-summary', [\App\Http\Controllers\ReportsController::class, 'callsSummary'])->name('reports.calls-summary');
+Route::get('/reports/reassignment-audit', [\App\Http\Controllers\ReportsController::class, 'reassignmentAudit'])->name('reports.reassignment-audit');
+Route::get('/reports/export/reassignment-audit', [\App\Http\Controllers\ReportsController::class, 'exportReassignmentAudit'])->name('reports.export.reassignment-audit');
 Route::get('/reports/export/sla-broken', [\App\Http\Controllers\ReportsController::class, 'exportSlaBroken'])->name('reports.export.sla-broken');
 Route::get('/reports/export/ticket-aging', [\App\Http\Controllers\ReportsController::class, 'exportTicketAging'])->name('reports.export.ticket-aging');
 Route::get('/reports/export/sales-by-person', [\App\Http\Controllers\ReportsController::class, 'exportSalesByPerson'])->name('reports.export.sales-by-person');

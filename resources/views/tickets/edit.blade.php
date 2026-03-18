@@ -104,7 +104,7 @@
                     <label class="form-label fw-semibold">Category</label>
                     <select name="category" class="form-select">
                         <option value="">Select an Option</option>
-                        @foreach(config('tickets.categories') as $cat)
+                        @foreach(ticket_categories() as $cat)
                         <option value="{{ $cat }}" {{ old('category', $ticket->category) == $cat ? 'selected' : '' }}>{{ $cat }}</option>
                         @endforeach
                     </select>
@@ -113,10 +113,9 @@
                     <label class="form-label fw-semibold">Ticket Source</label>
                     <select name="ticket_source" class="form-select">
                         <option value="">Select an Option</option>
-                        <option value="CRM" {{ old('ticket_source', $ticket->source ?? '') == 'CRM' ? 'selected' : '' }}>CRM</option>
-                        <option value="Email" {{ old('ticket_source', $ticket->source ?? '') == 'Email' ? 'selected' : '' }}>Email</option>
-                        <option value="Web" {{ old('ticket_source', $ticket->source ?? '') == 'Web' ? 'selected' : '' }}>Web</option>
-                        <option value="Phone" {{ old('ticket_source', $ticket->source ?? '') == 'Phone' ? 'selected' : '' }}>Phone</option>
+                        @foreach(ticket_sources() as $src)
+                        <option value="{{ $src }}" {{ old('ticket_source', $ticket->source ?? '') == $src ? 'selected' : '' }}>{{ $src }}</option>
+                        @endforeach
                     </select>
                 </div>
                 <div class="col-md-6">

@@ -177,6 +177,19 @@
         </a>
     </div>
     <div class="col-lg-4">
+        <a href="{{ route('reports.reassignment-audit') }}" class="text-decoration-none">
+            <div class="card reports-card h-100">
+                <div class="card-body p-4">
+                    <div class="card-header-custom d-flex align-items-center justify-content-between mb-3">
+                        <h6>Reassignment Audit</h6>
+                        <i class="bi bi-arrow-right text-muted"></i>
+                    </div>
+                    <p class="text-muted small mb-0">Audit trail of ticket reassignments.</p>
+                </div>
+            </div>
+        </a>
+    </div>
+    <div class="col-lg-4">
         <a href="{{ route('reports.contacts-summary') }}" class="text-decoration-none">
             <div class="card reports-card h-100">
                 <div class="card-body p-4">
@@ -246,11 +259,13 @@
                     <span class="text-muted small">|</span>
                     <a href="{{ route('reports.export.sla-broken', ['format' => 'xlsx']) }}" class="btn btn-outline-secondary btn-sm"><i class="bi bi-download me-1"></i>Broken SLA (.xlsx)</a>
                     <a href="{{ route('reports.export.ticket-aging', ['format' => 'xlsx']) }}" class="btn btn-outline-secondary btn-sm"><i class="bi bi-download me-1"></i>Ticket Aging (.xlsx)</a>
+                    <a href="{{ route('reports.export.reassignment-audit', ['format' => 'xlsx']) }}" class="btn btn-outline-secondary btn-sm"><i class="bi bi-download me-1"></i>Reassignment Audit (.xlsx)</a>
                     <a href="{{ route('reports.export.sales-by-person', ['format' => 'xlsx']) }}" class="btn btn-outline-secondary btn-sm"><i class="bi bi-download me-1"></i>Sales by Person (.xlsx)</a>
                     <a href="{{ route('reports.export.pipeline-by-stage', ['format' => 'xlsx']) }}" class="btn btn-outline-secondary btn-sm"><i class="bi bi-download me-1"></i>Pipeline (.xlsx)</a>
                     <span class="text-muted small">|</span>
                     <a href="{{ route('reports.export.sla-broken') }}" class="btn btn-outline-secondary btn-sm" title="CSV">Broken SLA (.csv)</a>
                     <a href="{{ route('reports.export.ticket-aging') }}" class="btn btn-outline-secondary btn-sm" title="CSV">Ticket Aging (.csv)</a>
+                    <a href="{{ route('reports.export.reassignment-audit') }}" class="btn btn-outline-secondary btn-sm" title="CSV">Reassignment Audit (.csv)</a>
                     <a href="{{ route('reports.export.sales-by-person') }}" class="btn btn-outline-secondary btn-sm" title="CSV">Sales (.csv)</a>
                     <a href="{{ route('reports.export.pipeline-by-stage') }}" class="btn btn-outline-secondary btn-sm" title="CSV">Pipeline (.csv)</a>
                 </div>

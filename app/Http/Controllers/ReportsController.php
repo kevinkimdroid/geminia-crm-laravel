@@ -49,6 +49,36 @@ class ReportsController
         return view('reports.calls-summary', $data);
     }
 
+    public function reassignmentAudit(Request $request): View
+    {
+        $limit = min(1000, max(50, (int) $request->get('limit', 200)));
+        $reassignments = \App\Models\TicketReassignment::with([])
+            ->orderByDesc('created_at')
+            ->limit($limit)
+            ->get();
+        return view('reports.reassignment-audit', [
+            'reassignments' => $reassignments,
+            'limit' => $limit,
+        ]);
+    }
+
+    public function exportReassignmentAudit(Request $request)
+    {
+        $limit = min(10000, max(50, (int) $request->get('limit', 1000)));
+        $reassignments = \App\Models\TicketReassignment::orderByDesc('created_at')->limit($limit)->get();
+        $rows = $reassignments->map(fn ($r) => [
+            'TT' . $r->ticket_id,
+            $r->from_user_name ?? 'Unassigned',
+            $r->to_user_name ?? '—',
+            $r->reassigned_by_name ?? '—',
+            $r->created_at?->format('Y-m-d H:i:s') ?? '',
+        ])->toArray();
+        if ($request->get('format') === 'xlsx') {
+            return Excel::download(new \App\Exports\ReassignmentAuditExport($rows), 'ticket-reassignment-audit-' . date('Y-m-d') . '.xlsx');
+        }
+        return $this->csvResponse($rows, ['Ticket', 'From', 'To', 'Reassigned By', 'Date & Time'], 'ticket-reassignment-audit');
+    }
+
     public function exportSlaBroken(TicketSlaService $sla, Request $request)
     {
         $tickets = $sla->getBrokenSlaTickets(500);

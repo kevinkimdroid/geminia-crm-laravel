@@ -410,11 +410,64 @@ class TicketController extends Controller
                 // Table may not exist yet
             }
         }
+        $comments = collect();
+        if (class_exists(\App\Models\TicketComment::class)) {
+            try {
+                $comments = \App\Models\TicketComment::where('ticket_id', $id)->orderByDesc('created_at')->get();
+            } catch (\Throwable $e) {
+                // Table may not exist yet
+            }
+        }
+        $reassignments = collect();
+        if (class_exists(\App\Models\TicketReassignment::class)) {
+            try {
+                $reassignments = \App\Models\TicketReassignment::where('ticket_id', $id)->orderBy('created_at')->get();
+            } catch (\Throwable $e) {
+                // Table may not exist yet
+            }
+        }
         return view('tickets.show', [
             'ticket' => $ticket,
             'feedback' => $feedback,
+            'comments' => $comments,
+            'reassignments' => $reassignments,
             'canCloseTickets' => $this->sla->canUserCloseThisTicket($id),
         ]);
+    }
+
+    /** Store a comment on a ticket. */
+    public function storeComment(Request $request, int $ticket): RedirectResponse
+    {
+        $ticketObj = $this->crm->getTicket($ticket);
+        if (! $ticketObj) {
+            return redirect()->route('tickets.index')->with('error', 'Ticket not found.');
+        }
+        if (! ticket_can_access($ticket)) {
+            return redirect()->route('tickets.index')->with('info', 'That ticket is assigned to someone else.');
+        }
+        $validated = $request->validate([
+            'body' => 'required|string|max:10000',
+        ]);
+        $authUser = \Illuminate\Support\Facades\Auth::guard('vtiger')->user()
+            ?? \Illuminate\Support\Facades\Auth::user();
+        $authorName = 'Unknown';
+        $userId = null;
+        if ($authUser) {
+            $userId = (int) ($authUser->id ?? $authUser->getAuthIdentifier());
+            $authorName = trim(($authUser->first_name ?? '') . ' ' . ($authUser->last_name ?? ''))
+                ?: ($authUser->user_name ?? 'User');
+        }
+        try {
+            \App\Models\TicketComment::create([
+                'ticket_id' => $ticket,
+                'user_id' => $userId,
+                'author_name' => $authorName,
+                'body' => $validated['body'],
+            ]);
+            return redirect()->route('tickets.show', $ticket)->with('success', 'Comment added.');
+        } catch (\Throwable $e) {
+            return redirect()->route('tickets.show', $ticket)->with('error', 'Failed to add comment: ' . $e->getMessage());
+        }
     }
 
     /** @return View|RedirectResponse */
@@ -649,8 +702,10 @@ class TicketController extends Controller
             $this->forgetTicketListCaches();
             \App\Events\DashboardStatsUpdated::dispatch();
 
-            // Notify new assignee when ticket is reassigned
-            if ($newOwnerId !== null && (int) ($ticket->smownerid ?? 0) !== $newOwnerId) {
+            // Notify new assignee when ticket is reassigned and log reassignment trail
+            $prevOwnerId = (int) ($ticket->smownerid ?? 0);
+            if ($newOwnerId !== null && $prevOwnerId !== $newOwnerId) {
+                $this->logTicketReassignment($id, $prevOwnerId, $newOwnerId, $userId);
                 try {
                     app(\App\Services\TicketNotificationService::class)->sendTicketAssignedNotification(
                         $id,
@@ -699,11 +754,16 @@ class TicketController extends Controller
                 : back()->with('error', 'Please select a user to assign.');
         }
         try {
+            $fromOwnerId = (int) ($ticketObj->smownerid ?? 0);
+            $reassignedBy = (int) (\Illuminate\Support\Facades\Auth::guard('vtiger')->id() ?? \Illuminate\Support\Facades\Auth::id() ?? 1);
             \DB::connection('vtiger')->table('vtiger_crmentity')->where('crmid', $ticket)->update([
                 'smownerid' => $assignedTo,
                 'modifiedtime' => now()->format('Y-m-d H:i:s'),
-                'modifiedby' => (int) (\Illuminate\Support\Facades\Auth::guard('vtiger')->id() ?? \Illuminate\Support\Facades\Auth::id() ?? 1),
+                'modifiedby' => $reassignedBy,
             ]);
+            if ($fromOwnerId !== $assignedTo) {
+                $this->logTicketReassignment($ticket, $fromOwnerId, $assignedTo, $reassignedBy);
+            }
             $this->forgetTicketListCaches();
             \App\Events\DashboardStatsUpdated::dispatch();
             try {
@@ -724,6 +784,35 @@ class TicketController extends Controller
             return $request->wantsJson()
                 ? response()->json(['error' => $e->getMessage()], 500)
                 : back()->with('error', 'Failed to reassign: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Log a ticket reassignment for the trail.
+     */
+    private function logTicketReassignment(int $ticketId, int $fromUserId, int $toUserId, int $reassignedByUserId): void
+    {
+        try {
+            $userIds = array_filter(array_unique([$fromUserId, $toUserId, $reassignedByUserId]));
+            $userNames = $userIds
+                ? \DB::connection('vtiger')->table('vtiger_users')->whereIn('id', $userIds)->get()->keyBy('id')
+                : collect();
+            $name = function ($id) use ($userNames) {
+                if (!$id) return '—';
+                $u = $userNames->get($id);
+                return $u ? (trim(($u->first_name ?? '') . ' ' . ($u->last_name ?? '')) ?: ($u->user_name ?? 'User ' . $id)) : ('User ' . $id);
+            };
+            \App\Models\TicketReassignment::create([
+                'ticket_id' => $ticketId,
+                'from_user_id' => $fromUserId ?: null,
+                'from_user_name' => $fromUserId ? $name($fromUserId) : 'Unassigned',
+                'to_user_id' => $toUserId,
+                'to_user_name' => $name($toUserId),
+                'reassigned_by_user_id' => $reassignedByUserId ?: null,
+                'reassigned_by_name' => $reassignedByUserId ? $name($reassignedByUserId) : null,
+            ]);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Ticket reassignment log failed', ['error' => $e->getMessage(), 'ticket' => $ticketId]);
         }
     }
 
