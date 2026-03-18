@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\VtigerRole;
+use App\Services\TicketSlaImportService;
 use App\Services\TicketSlaService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -77,5 +78,38 @@ class TicketSlaController extends Controller
             return redirect()->route('settings.crm', ['section' => 'ticket-sla'])->with('success', $msg);
         }
         return redirect()->route('settings.crm', ['section' => 'ticket-sla'])->with('info', 'All ticket categories already have department TAT configured.');
+    }
+
+    /**
+     * Import department TATs from Excel. Expects sheets per department with "Defined Time frame" column.
+     */
+    public function importFromExcel(Request $request): RedirectResponse
+    {
+        $request->validate([
+            'file' => 'required|file|mimes:xlsx,xls|max:10240',
+        ]);
+
+        $path = $request->file('file')->getRealPath();
+        $import = app(TicketSlaImportService::class)->importFromFile($path);
+
+        if (!empty($import['errors'])) {
+            return redirect()->route('settings.crm', ['section' => 'ticket-sla'])
+                ->with('error', 'Import failed: ' . implode(' ', $import['errors']));
+        }
+
+        $imported = $import['imported'] ?? [];
+        $skipped = $import['skipped'] ?? [];
+
+        if (empty($imported)) {
+            return redirect()->route('settings.crm', ['section' => 'ticket-sla'])
+                ->with('info', 'No departments could be imported. ' . (!empty($skipped) ? 'Skipped: ' . implode(', ', $skipped) : ''));
+        }
+
+        $summary = count($imported) . ' department(s) imported: ' . implode(', ', array_map(fn ($r) => $r['department'] . ' (' . $r['tat_hours'] . 'h)', $imported));
+        if (!empty($skipped)) {
+            $summary .= '. Skipped: ' . implode(', ', $skipped);
+        }
+        return redirect()->route('settings.crm', ['section' => 'ticket-sla'])
+            ->with('success', $summary);
     }
 }

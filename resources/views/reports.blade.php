@@ -3,13 +3,76 @@
 @section('title', 'Reports')
 
 @section('content')
-<div class="page-header d-flex flex-wrap justify-content-between align-items-start gap-3">
+<div class="page-header d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
     <div>
         <h1 class="page-title">Reports</h1>
-        <p class="page-subtitle">Analytics and business intelligence.</p>
+        <p class="page-subtitle mb-0">Analytics, audit reports, and business intelligence.</p>
+    </div>
+    <div class="text-muted small">
+        <i class="bi bi-clock me-1"></i>Page loaded: {{ now()->format('l, F j, Y g:i A') }}
     </div>
 </div>
 
+{{-- Audit & Compliance — primary section for auditors --}}
+<div class="reports-section mb-4">
+    <h5 class="reports-section-title mb-3">
+        <i class="bi bi-shield-check text-primary me-2"></i>Audit &amp; Compliance
+    </h5>
+    <div class="row g-3">
+        <div class="col-lg-4">
+            <a href="{{ route('reports.sla-broken') }}" class="text-decoration-none">
+                <div class="card reports-audit-card h-100">
+                    <div class="card-body p-4">
+                        <div class="d-flex align-items-center justify-content-between mb-2">
+                            <span class="badge bg-primary bg-opacity-10 text-primary">SLA</span>
+                            <i class="bi bi-arrow-right text-muted"></i>
+                        </div>
+                        <h6 class="card-title mb-2">Broken SLA Report</h6>
+                        <p class="text-muted small mb-0">Tickets that exceeded their department TAT.</p>
+                    </div>
+                </div>
+            </a>
+        </div>
+        <div class="col-lg-4">
+            <a href="{{ route('reports.ticket-aging') }}" class="text-decoration-none">
+                <div class="card reports-audit-card h-100">
+                    <div class="card-body p-4">
+                        <div class="d-flex align-items-center justify-content-between mb-2">
+                            <span class="badge bg-primary bg-opacity-10 text-primary">Aging</span>
+                            <i class="bi bi-arrow-right text-muted"></i>
+                        </div>
+                        <h6 class="card-title mb-2">Ticket Aging Report</h6>
+                        <p class="text-muted small mb-0">Open tickets older than 7+ days.</p>
+                    </div>
+                </div>
+            </a>
+        </div>
+        <div class="col-lg-4">
+            <a href="{{ route('reports.reassignment-audit') }}" class="text-decoration-none">
+                <div class="card reports-audit-card h-100">
+                    <div class="card-body p-4">
+                        <div class="d-flex align-items-center justify-content-between mb-2">
+                            <span class="badge bg-primary bg-opacity-10 text-primary">Audit trail</span>
+                            <i class="bi bi-arrow-right text-muted"></i>
+                        </div>
+                        <h6 class="card-title mb-2">Reassignment Audit</h6>
+                        <p class="text-muted small mb-0">Audit trail of ticket reassignments.</p>
+                    </div>
+                </div>
+            </a>
+        </div>
+    </div>
+    <div class="d-flex flex-wrap gap-2 mt-2">
+        <a href="{{ route('reports.export.sla-broken', ['format' => 'xlsx']) }}" class="btn btn-outline-primary btn-sm"><i class="bi bi-file-earmark-spreadsheet me-1"></i>Broken SLA</a>
+        <a href="{{ route('reports.export.ticket-aging', ['format' => 'xlsx']) }}" class="btn btn-outline-primary btn-sm"><i class="bi bi-file-earmark-spreadsheet me-1"></i>Ticket Aging</a>
+        <a href="{{ route('reports.export.reassignment-audit', ['format' => 'xlsx']) }}" class="btn btn-outline-primary btn-sm"><i class="bi bi-file-earmark-spreadsheet me-1"></i>Reassignment Audit</a>
+    </div>
+</div>
+
+{{-- Sales & Pipeline --}}
+<h5 class="reports-section-title mb-3">
+    <i class="bi bi-graph-up-arrow text-primary me-2"></i>Sales &amp; Pipeline
+</h5>
 <div class="row g-4">
     <div class="col-lg-4">
         <div class="card reports-card h-100">
@@ -107,18 +170,38 @@
         </div>
     </div>
     <div class="col-lg-4">
-        <a href="{{ route('reports.sla-broken') }}" class="text-decoration-none">
+        <a href="{{ route('reports.contacts-summary') }}" class="text-decoration-none">
             <div class="card reports-card h-100">
                 <div class="card-body p-4">
                     <div class="card-header-custom d-flex align-items-center justify-content-between mb-3">
-                        <h6>Broken SLA Report</h6>
+                        <h6>Contacts Summary</h6>
                         <i class="bi bi-arrow-right text-muted"></i>
                     </div>
-                    <p class="text-muted small mb-0">Tickets that exceeded their department TAT.</p>
+                    <p class="text-muted small mb-0">Total and new contacts overview.</p>
                 </div>
             </div>
         </a>
     </div>
+    <div class="col-lg-4">
+        <a href="{{ route('reports.calls-summary') }}" class="text-decoration-none">
+            <div class="card reports-card h-100">
+                <div class="card-body p-4">
+                    <div class="card-header-custom d-flex align-items-center justify-content-between mb-3">
+                        <h6>Calls Summary</h6>
+                        <i class="bi bi-arrow-right text-muted"></i>
+                    </div>
+                    <p class="text-muted small mb-0">PBX call volume and duration.</p>
+                </div>
+            </div>
+        </a>
+    </div>
+</div>
+
+{{-- Support & Overview --}}
+<h5 class="reports-section-title mb-3 mt-4">
+    <i class="bi bi-ticket-perforated text-primary me-2"></i>Support &amp; Overview
+</h5>
+<div class="row g-4">
     <div class="col-lg-6">
         <div class="card reports-card h-100">
             <div class="card-body p-4">
@@ -162,58 +245,6 @@
                 @endif
             </div>
         </div>
-    </div>
-    <div class="col-lg-4">
-        <a href="{{ route('reports.ticket-aging') }}" class="text-decoration-none">
-            <div class="card reports-card h-100">
-                <div class="card-body p-4">
-                    <div class="card-header-custom d-flex align-items-center justify-content-between mb-3">
-                        <h6>Ticket Aging Report</h6>
-                        <i class="bi bi-arrow-right text-muted"></i>
-                    </div>
-                    <p class="text-muted small mb-0">Open tickets older than 7+ days.</p>
-                </div>
-            </div>
-        </a>
-    </div>
-    <div class="col-lg-4">
-        <a href="{{ route('reports.reassignment-audit') }}" class="text-decoration-none">
-            <div class="card reports-card h-100">
-                <div class="card-body p-4">
-                    <div class="card-header-custom d-flex align-items-center justify-content-between mb-3">
-                        <h6>Reassignment Audit</h6>
-                        <i class="bi bi-arrow-right text-muted"></i>
-                    </div>
-                    <p class="text-muted small mb-0">Audit trail of ticket reassignments.</p>
-                </div>
-            </div>
-        </a>
-    </div>
-    <div class="col-lg-4">
-        <a href="{{ route('reports.contacts-summary') }}" class="text-decoration-none">
-            <div class="card reports-card h-100">
-                <div class="card-body p-4">
-                    <div class="card-header-custom d-flex align-items-center justify-content-between mb-3">
-                        <h6>Contacts Summary</h6>
-                        <i class="bi bi-arrow-right text-muted"></i>
-                    </div>
-                    <p class="text-muted small mb-0">Total and new contacts overview.</p>
-                </div>
-            </div>
-        </a>
-    </div>
-    <div class="col-lg-4">
-        <a href="{{ route('reports.calls-summary') }}" class="text-decoration-none">
-            <div class="card reports-card h-100">
-                <div class="card-body p-4">
-                    <div class="card-header-custom d-flex align-items-center justify-content-between mb-3">
-                        <h6>Calls Summary</h6>
-                        <i class="bi bi-arrow-right text-muted"></i>
-                    </div>
-                    <p class="text-muted small mb-0">PBX call volume and duration.</p>
-                </div>
-            </div>
-        </a>
     </div>
     <div class="col-12">
         <h5 class="mb-3">Analytics Charts</h5>
@@ -279,6 +310,13 @@
 .reports-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(14, 67, 133, 0.1); }
 .reports-stat-value { font-size: 1.75rem; font-weight: 700; color: var(--primary, #0E4385); }
 .reports-export-card { background: rgba(14, 67, 133, 0.04); border-radius: 16px; }
+.reports-section-title { font-weight: 600; color: var(--geminia-text, #1e293b); font-size: 1rem; }
+.reports-audit-card {
+    border-radius: 14px; border: 1px solid rgba(26, 74, 138, 0.12);
+    transition: transform .2s, box-shadow .2s; background: #fff;
+}
+.reports-audit-card:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(26, 74, 138, 0.12); }
+.reports-audit-card .card-title { font-weight: 600; color: var(--geminia-text); }
 </style>
 
 @push('head')

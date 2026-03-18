@@ -20,7 +20,7 @@ class SlaBrokenExport implements FromArray, WithHeadings, WithStyles
 
     public function headings(): array
     {
-        return ['Ticket', 'Title', 'Department', 'Status', 'Contact', 'Created', 'TAT (h)', 'Hours Overdue'];
+        return ['Ticket', 'Title', 'Department', 'Status', 'Assigned to', 'User Dept', 'Contact', 'Created', 'Due by', 'Resolved at', 'TAT (h)', 'Hours Overdue'];
     }
 
     public function styles(Worksheet $sheet): array

@@ -222,43 +222,6 @@ class PbxController extends Controller
         ]);
     }
 
-    /**
-     * Merge claimed recipients into call list. Overrides user_name when a claim exists.
-     *
-     * @param  \Illuminate\Contracts\Pagination\LengthAwarePaginator  $calls
-     */
-    protected function mergeClaimedRecipients($calls, string $source): void
-    {
-        $items = $calls->items();
-        if (empty($items)) {
-            return;
-        }
-
-        $callIds = [];
-        foreach ($items as $call) {
-            $id = $call->id ?? (is_object($call) ? ($call->getAttribute('id') ?? null) : null);
-            if ($id) {
-                $callIds[] = (int) $id;
-            }
-        }
-        if (empty($callIds)) {
-            return;
-        }
-
-        $claims = PbxCallRecipient::where('call_source', $source)
-            ->whereIn('call_id', $callIds)
-            ->get()
-            ->keyBy('call_id');
-
-        foreach ($items as $call) {
-            $id = $call->id ?? (is_object($call) ? ($call->getAttribute('id') ?? null) : null);
-            if ($id && $claims->has($id)) {
-                $claim = $claims->get($id);
-                $call->user_name = $claim->received_by_user_name;
-            }
-        }
-    }
-
     protected function toCallDto(object $row, bool $fromVtiger): object
     {
         $recordingUrl = $row->recording_url ?? null;
@@ -672,41 +635,5 @@ class PbxController extends Controller
                 $call->received_by_user_id = $claim->received_by_user_id;
             }
         }
-    }
-
-    /**
-     * Allow the logged-in user to claim they received a call.
-     * Shows who actually received the call when PBX/vTiger mapping is wrong or empty.
-     */
-    public function claim(Request $request)
-    {
-        $validated = $request->validate([
-            'call_id' => 'required|integer|min:1',
-            'source' => 'required|in:vtiger,local',
-        ]);
-
-        $user = $request->user();
-        if (! $user) {
-            return response()->json(['success' => false, 'message' => 'You must be logged in to claim a call.'], 401);
-        }
-
-        $userName = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) ?: $user->user_name ?? 'Agent';
-
-        PbxCallRecipient::updateOrCreate(
-            [
-                'call_source' => $validated['source'],
-                'call_id' => (int) $validated['call_id'],
-            ],
-            [
-                'received_by_user_id' => $user->id,
-                'received_by_user_name' => $userName,
-            ]
-        );
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Call marked as received by you.',
-            'user_name' => $userName,
-        ]);
     }
 }

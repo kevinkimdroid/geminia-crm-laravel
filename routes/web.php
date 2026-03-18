@@ -127,6 +127,13 @@ Route::get('/settings/crm', [\App\Http\Controllers\SettingsController::class, 'c
 Route::post('/settings/users/{user}/send-reset-link', [\App\Http\Controllers\UserManagementController::class, 'sendResetLink'])->name('settings.users.send-reset-link');
 Route::get('/settings/users/{user}/edit', [\App\Http\Controllers\UserManagementController::class, 'edit'])->name('settings.users.edit');
 Route::put('/settings/users/{user}', [\App\Http\Controllers\UserManagementController::class, 'update'])->name('settings.users.update');
+Route::put('/settings/users/{user}/department', [\App\Http\Controllers\UserManagementController::class, 'updateDepartment'])->name('settings.users.update-department');
+Route::get('/settings/users/{user}/offboard', [\App\Http\Controllers\UserManagementController::class, 'offboard'])->name('settings.users.offboard');
+Route::post('/settings/users/{user}/offboard', [\App\Http\Controllers\UserManagementController::class, 'offboardSubmit'])->name('settings.users.offboard.submit');
+Route::post('/settings/users/{user}/reactivate', [\App\Http\Controllers\UserManagementController::class, 'reactivate'])->name('settings.users.reactivate');
+Route::post('/settings/departments', [\App\Http\Controllers\DepartmentController::class, 'store'])->name('settings.departments.store');
+Route::put('/settings/departments/{department}', [\App\Http\Controllers\DepartmentController::class, 'update'])->name('settings.departments.update');
+Route::delete('/settings/departments/{department}', [\App\Http\Controllers\DepartmentController::class, 'destroy'])->name('settings.departments.destroy');
 Route::delete('/settings/users/{user}', [\App\Http\Controllers\UserManagementController::class, 'destroy'])->name('settings.users.destroy');
 Route::post('/settings/crm/groups', [\App\Http\Controllers\GroupsController::class, 'store'])->name('settings.groups.store');
 Route::put('/settings/crm/groups/{id}', [\App\Http\Controllers\GroupsController::class, 'update'])->name('settings.groups.update');
@@ -146,6 +153,7 @@ Route::delete('/settings/crm/pbx-extension-mapping/{mapping}', [\App\Http\Contro
 Route::post('/settings/crm/ticket-sla/roles', [\App\Http\Controllers\TicketSlaController::class, 'updateRoles'])->name('settings.ticket-sla.update-roles');
 Route::post('/settings/crm/ticket-sla/departments', [\App\Http\Controllers\TicketSlaController::class, 'addDepartmentTat'])->name('settings.ticket-sla.add-department');
 Route::post('/settings/crm/ticket-sla/sync-categories', [\App\Http\Controllers\TicketSlaController::class, 'syncFromCategories'])->name('settings.ticket-sla.sync-categories');
+Route::post('/settings/crm/ticket-sla/import', [\App\Http\Controllers\TicketSlaController::class, 'importFromExcel'])->name('settings.ticket-sla.import');
 Route::post('/settings/crm/ticket-sla/departments/update', [\App\Http\Controllers\TicketSlaController::class, 'updateDepartmentTat'])->name('settings.ticket-sla.update-department');
 Route::delete('/settings/crm/ticket-sla/departments/{department}', [\App\Http\Controllers\TicketSlaController::class, 'deleteDepartmentTat'])->name('settings.ticket-sla.delete-department');
 Route::post('/settings/modules/toggle', [\App\Http\Controllers\ModuleController::class, 'toggle'])->name('settings.modules.toggle');

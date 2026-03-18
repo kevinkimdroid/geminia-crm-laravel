@@ -1763,7 +1763,7 @@ class CrmService
                 ->leftJoin('vtiger_users as u', 'e.smownerid', '=', 'u.id')
                 ->where('e.deleted', 0)
                 ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
-                ->whereIn('t.status', ['Open', 'In Progress', 'Wait For Response'])
+                ->whereNotIn('t.status', ['Closed', 'Resolved', config('tickets.inactive_status', 'Inactive')])
                 ->whereRaw('e.createdtime < ?', [$cutoff])
                 ->select(
                     't.ticketid',
@@ -1773,6 +1773,7 @@ class CrmService
                     't.category',
                     't.priority',
                     'e.createdtime',
+                    'e.smownerid',
                     'c.firstname',
                     'c.lastname',
                     'u.first_name as owner_first',

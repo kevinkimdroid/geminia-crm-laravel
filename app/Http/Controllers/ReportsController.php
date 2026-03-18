@@ -8,6 +8,7 @@ use App\Exports\SlaBrokenExport;
 use App\Exports\TicketAgingExport;
 use App\Services\CrmService;
 use App\Services\TicketSlaService;
+use App\Services\UserDepartmentService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Response;
 use Illuminate\View\View;
@@ -20,16 +21,26 @@ class ReportsController
         return view('reports', $crm->getReportsIndexData(120));
     }
 
-    public function slaBroken(TicketSlaService $sla): View
+    public function slaBroken(TicketSlaService $sla, UserDepartmentService $userDept): View
     {
         $tickets = $sla->getBrokenSlaTickets(100);
+        $userIds = $tickets->pluck('smownerid')->filter()->unique()->values()->all();
+        $departments = $userDept->getDepartmentsForUsers($userIds);
+        $tickets = $tickets->map(fn ($t) => (object) array_merge((array) $t, [
+            'owner_department' => isset($t->smownerid) ? ($departments[$t->smownerid] ?? null) : null,
+        ]));
         return view('reports.sla-broken', ['tickets' => $tickets]);
     }
 
-    public function ticketAging(CrmService $crm, Request $request): View
+    public function ticketAging(CrmService $crm, Request $request, UserDepartmentService $userDept): View
     {
         $days = (int) $request->get('days', 7);
         $tickets = $crm->getTicketAgingReport($days, 200);
+        $userIds = $tickets->pluck('smownerid')->filter()->unique()->values()->all();
+        $departments = $userDept->getDepartmentsForUsers($userIds);
+        $tickets = $tickets->map(fn ($t) => (object) array_merge((array) $t, [
+            'owner_department' => isset($t->smownerid) ? ($departments[$t->smownerid] ?? null) : null,
+        ]));
         return view('reports.ticket-aging', [
             'tickets' => $tickets,
             'days' => $days,
@@ -49,59 +60,77 @@ class ReportsController
         return view('reports.calls-summary', $data);
     }
 
-    public function reassignmentAudit(Request $request): View
+    public function reassignmentAudit(Request $request, UserDepartmentService $userDept): View
     {
         $limit = min(1000, max(50, (int) $request->get('limit', 200)));
         $reassignments = \App\Models\TicketReassignment::with([])
             ->orderByDesc('created_at')
             ->limit($limit)
             ->get();
+        $userIds = collect($reassignments->pluck('from_user_id')->merge($reassignments->pluck('to_user_id')))->filter()->unique()->values()->all();
+        $departments = $userDept->getDepartmentsForUsers($userIds);
+        $reassignments = $reassignments->map(fn ($r) => (object) array_merge($r->toArray(), [
+            'from_user_department' => $r->from_user_id ? ($departments[$r->from_user_id] ?? null) : null,
+            'to_user_department' => $r->to_user_id ? ($departments[$r->to_user_id] ?? null) : null,
+        ]));
         return view('reports.reassignment-audit', [
             'reassignments' => $reassignments,
             'limit' => $limit,
         ]);
     }
 
-    public function exportReassignmentAudit(Request $request)
+    public function exportReassignmentAudit(Request $request, UserDepartmentService $userDept)
     {
         $limit = min(10000, max(50, (int) $request->get('limit', 1000)));
         $reassignments = \App\Models\TicketReassignment::orderByDesc('created_at')->limit($limit)->get();
+        $userIds = collect($reassignments->pluck('from_user_id')->merge($reassignments->pluck('to_user_id')))->filter()->unique()->values()->all();
+        $departments = $userDept->getDepartmentsForUsers($userIds);
         $rows = $reassignments->map(fn ($r) => [
             'TT' . $r->ticket_id,
             $r->from_user_name ?? 'Unassigned',
+            $departments[$r->from_user_id ?? 0] ?? '',
             $r->to_user_name ?? '—',
+            $departments[$r->to_user_id ?? 0] ?? '',
             $r->reassigned_by_name ?? '—',
             $r->created_at?->format('Y-m-d H:i:s') ?? '',
         ])->toArray();
         if ($request->get('format') === 'xlsx') {
             return Excel::download(new \App\Exports\ReassignmentAuditExport($rows), 'ticket-reassignment-audit-' . date('Y-m-d') . '.xlsx');
         }
-        return $this->csvResponse($rows, ['Ticket', 'From', 'To', 'Reassigned By', 'Date & Time'], 'ticket-reassignment-audit');
+        return $this->csvResponse($rows, ['Ticket', 'From', 'From Dept', 'To', 'To Dept', 'Reassigned By', 'Date & Time'], 'ticket-reassignment-audit');
     }
 
-    public function exportSlaBroken(TicketSlaService $sla, Request $request)
+    public function exportSlaBroken(TicketSlaService $sla, UserDepartmentService $userDept, Request $request)
     {
         $tickets = $sla->getBrokenSlaTickets(500);
+        $userIds = $tickets->pluck('smownerid')->filter()->unique()->values()->all();
+        $departments = $userDept->getDepartmentsForUsers($userIds);
         $rows = $tickets->map(fn ($t) => [
             $t->ticket_no ?? 'TT' . $t->ticketid,
             $t->title ?? '',
             $t->category ?? 'General',
             $t->status ?? '',
+            trim(($t->owner_first ?? '') . ' ' . ($t->owner_last ?? '')) ?: 'Unassigned',
+            $departments[$t->smownerid ?? 0] ?? '',
             trim(($t->contact_first ?? '') . ' ' . ($t->contact_last ?? '')) ?: '',
             $t->createdtime ?? '',
+            isset($t->due_at) ? $t->due_at->format('Y-m-d H:i:s') : '',
+            ($t->status ?? '') === 'Closed' && isset($t->breached_at) ? $t->breached_at->format('Y-m-d H:i:s') : 'Still open',
             $t->tat_hours ?? 24,
             $t->hours_overdue ?? 0,
         ])->toArray();
         if ($request->get('format') === 'xlsx') {
             return Excel::download(new SlaBrokenExport($rows), 'broken-sla-report-' . date('Y-m-d') . '.xlsx');
         }
-        return $this->csvResponse($rows, ['Ticket', 'Title', 'Department', 'Status', 'Contact', 'Created', 'TAT (h)', 'Hours Overdue'], 'broken-sla-report');
+        return $this->csvResponse($rows, ['Ticket', 'Title', 'Department', 'Status', 'Assigned to', 'User Dept', 'Contact', 'Created', 'Due by', 'Resolved at', 'TAT (h)', 'Hours Overdue'], 'broken-sla-report');
     }
 
-    public function exportTicketAging(CrmService $crm, Request $request)
+    public function exportTicketAging(CrmService $crm, UserDepartmentService $userDept, Request $request)
     {
         $days = (int) $request->get('days', 7);
         $tickets = $crm->getTicketAgingReport($days, 500);
+        $userIds = $tickets->pluck('smownerid')->filter()->unique()->values()->all();
+        $departments = $userDept->getDepartmentsForUsers($userIds);
         $rows = $tickets->map(fn ($t) => [
             $t->ticket_no ?? 'TT' . $t->ticketid,
             $t->title ?? '',
@@ -110,12 +139,13 @@ class ReportsController
             trim(($t->firstname ?? '') . ' ' . ($t->lastname ?? '')) ?: '',
             $t->createdtime ?? '',
             trim(($t->owner_first ?? '') . ' ' . ($t->owner_last ?? '')) ?: 'Unassigned',
+            $departments[$t->smownerid ?? 0] ?? '',
         ])->toArray();
         $filename = 'ticket-aging-' . $days . 'd-' . date('Y-m-d');
         if ($request->get('format') === 'xlsx') {
             return Excel::download(new TicketAgingExport($rows), $filename . '.xlsx');
         }
-        return $this->csvResponse($rows, ['Ticket', 'Title', 'Status', 'Category', 'Contact', 'Created', 'Assigned To'], 'ticket-aging-' . $days . 'd');
+        return $this->csvResponse($rows, ['Ticket', 'Title', 'Status', 'Category', 'Contact', 'Created', 'Assigned To', 'User Dept'], 'ticket-aging-' . $days . 'd');
     }
 
     public function exportSalesByPerson(CrmService $crm, Request $request)

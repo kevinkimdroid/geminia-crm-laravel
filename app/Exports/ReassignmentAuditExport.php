@@ -20,7 +20,7 @@ class ReassignmentAuditExport implements FromArray, WithHeadings, WithStyles
 
     public function headings(): array
     {
-        return ['Ticket', 'From', 'To', 'Reassigned By', 'Date & Time'];
+        return ['Ticket', 'From', 'From Dept', 'To', 'To Dept', 'Reassigned By', 'Date & Time'];
     }
 
     public function styles(Worksheet $sheet): array

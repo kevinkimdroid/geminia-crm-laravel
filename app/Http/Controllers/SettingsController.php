@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Department;
 use App\Models\VtigerProfile;
 use App\Models\VtigerRole;
 use App\Models\VtigerTab;
@@ -14,13 +15,20 @@ class SettingsController extends Controller
 {
     public function crm(Request $request): View
     {
-        $section = $request->get('section', 'users');
+        $section = $request->get('section', 'overview');
 
         $data = ['section' => $section];
 
         if ($section === 'users') {
-            $usersQuery = VtigerUser::on('vtiger')
-                ->where('status', 'Active');
+            $statusFilter = $request->get('status', 'active');
+            $usersQuery = VtigerUser::on('vtiger');
+            if ($statusFilter === 'inactive') {
+                $usersQuery->where('status', 'Inactive');
+            } elseif ($statusFilter === 'all') {
+                // Show both
+            } else {
+                $usersQuery->where('status', 'Active');
+            }
             $search = trim((string) $request->get('search', ''));
             if ($search !== '') {
                 $term = '%' . $search . '%';
@@ -40,7 +48,17 @@ class SettingsController extends Controller
                     ->toArray();
                 $usersQuery->whereIn('id', $userIdsWithRole ?: [0]);
             }
-            $data['users'] = $usersQuery->orderBy('first_name')->orderBy('last_name')->get();
+            $users = $usersQuery->orderBy('first_name')->orderBy('last_name')->get();
+            $deptFilter = trim((string) $request->get('department', ''));
+            if ($deptFilter !== '') {
+                $depts = app(\App\Services\UserDepartmentService::class)->getDepartmentsForUsers($users->pluck('id')->all());
+                $users = $users->filter(fn ($u) => ($depts[$u->id] ?? '') === $deptFilter)->values();
+            }
+            $data['usersStatusFilter'] = $statusFilter;
+            $data['usersDeptFilter'] = $deptFilter;
+            $data['users'] = $users;
+            $data['userDepartments'] = app(\App\Services\UserDepartmentService::class)->getDepartmentsForUsers($users->pluck('id')->all());
+            $data['departmentsList'] = app(\App\Services\UserDepartmentService::class)->getDepartmentsList();
             $data['usersSearch'] = $search;
             $data['usersRoleFilter'] = $roleFilter ?? '';
             $data['userRoles'] = DB::connection('vtiger')
@@ -48,6 +66,13 @@ class SettingsController extends Controller
                 ->pluck('roleid', 'userid')
                 ->toArray();
             $data['roles'] = VtigerRole::on('vtiger')->orderBy('rolename')->get();
+        } elseif ($section === 'departments') {
+            $data['departments'] = Department::orderBy('sort_order')->orderBy('name')->get();
+            $data['userCounts'] = DB::table('user_departments')->selectRaw('department, count(*) as cnt')->groupBy('department')->pluck('cnt', 'department')->toArray();
+            $editId = $request->get('edit');
+            if ($editId) {
+                $data['editDepartment'] = Department::find($editId);
+            }
         } elseif ($section === 'roles') {
             $data['roles'] = VtigerRole::on('vtiger')
                 ->orderBy('rolename')

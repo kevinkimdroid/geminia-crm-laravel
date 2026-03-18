@@ -3,12 +3,46 @@
         <h5 class="fw-bold mb-1">Ticket SLA & TAT</h5>
         <p class="text-muted small mb-0">SLA is per department. Ticket <strong>Category</strong> = <strong>Department</strong>. Set TAT (hours) for each department. Used for SLA breach reporting.</p>
     </div>
-    <form action="{{ route('settings.ticket-sla.sync-categories') }}" method="POST" class="d-inline">
-        @csrf
-        <button type="submit" class="btn btn-outline-primary btn-sm">
-            <i class="bi bi-arrow-repeat me-1"></i> Sync from ticket categories
+    <div class="d-flex flex-wrap gap-2">
+        <form action="{{ route('settings.ticket-sla.sync-categories') }}" method="POST" class="d-inline">
+            @csrf
+            <button type="submit" class="btn btn-outline-primary btn-sm">
+                <i class="bi bi-arrow-repeat me-1"></i> Sync from ticket categories
+            </button>
+        </form>
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#importExcelModal">
+            <i class="bi bi-file-earmark-spreadsheet me-1"></i> Import from Excel
         </button>
-    </form>
+    </div>
+</div>
+
+{{-- Import from Excel Modal --}}
+<div class="modal fade" id="importExcelModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form action="{{ route('settings.ticket-sla.import') }}" method="POST" enctype="multipart/form-data">
+                @csrf
+                <div class="modal-header">
+                    <h5 class="modal-title">Import TAT from Excel</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small mb-3">Upload an Excel file with one sheet per department. Each sheet should have a <strong>Defined Time frame</strong> column (e.g. "1 day", "5 days", "24 Hours"). The shortest TAT per department will be used.</p>
+                    <div class="mb-0">
+                        <label class="form-label fw-semibold">Excel file <span class="text-danger">*</span></label>
+                        <input type="file" name="file" class="form-control" accept=".xlsx,.xls" required>
+                        <small class="text-muted">.xlsx or .xls, max 10 MB</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-upload me-1"></i> Import
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
 </div>
 
 @if(!empty($categoriesWithoutTat))
@@ -30,6 +64,12 @@
 @if (session('info'))
     <div class="alert alert-info alert-dismissible fade show d-flex align-items-center" role="alert">
         <i class="bi bi-info-circle-fill me-2"></i>{{ session('info') }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+@endif
+@if (session('error'))
+    <div class="alert alert-danger alert-dismissible fade show d-flex align-items-center" role="alert">
+        <i class="bi bi-exclamation-triangle-fill me-2"></i>{{ session('error') }}
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     </div>
 @endif

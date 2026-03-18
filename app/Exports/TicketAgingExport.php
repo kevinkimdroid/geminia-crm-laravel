@@ -20,7 +20,7 @@ class TicketAgingExport implements FromArray, WithHeadings, WithStyles
 
     public function headings(): array
     {
-        return ['Ticket', 'Title', 'Status', 'Category', 'Contact', 'Created', 'Assigned To'];
+        return ['Ticket', 'Title', 'Status', 'Category', 'Contact', 'Created', 'Assigned To', 'User Dept'];
     }
 
     public function styles(Worksheet $sheet): array
