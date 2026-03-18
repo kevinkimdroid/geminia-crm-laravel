@@ -3,179 +3,423 @@
 @section('title', 'PBX Manager')
 
 @section('content')
-<div class="page-header d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
-    <div>
-        <h1 class="page-title mb-1">Call Logs</h1>
-        <p class="page-subtitle mb-0 text-muted">View call history and recordings</p>
-    </div>
-    <div class="d-flex flex-wrap gap-2 align-items-center">
-        @auth
-        <button type="button" class="btn btn-outline-secondary btn-sm pbx-claim-latest-btn" title="I received the most recent unclaimed call">
-            <i class="bi bi-person-check me-1"></i>I received the last call
-        </button>
-        @endauth
-        @if($pbxCanCall ?? false)
-        <button type="button" class="btn btn-success btn-sm pbx-make-call-btn" data-number="" data-customer="">
-            <i class="bi bi-telephone-outbound-fill me-1"></i>Make Call
-        </button>
-        @endif
-        @if(($pbxSource ?? '') !== 'vtiger')
-        <form action="{{ route('tools.pbx-manager.fetch') }}" method="POST" class="d-inline">
-            @csrf
-            <button type="submit" class="btn btn-primary btn-sm">
-                <i class="bi bi-download me-1"></i>Fetch Calls
-            </button>
-        </form>
-        @else
-        <span class="badge bg-success bg-opacity-10 text-success px-2 py-1">Connected to CRM</span>
-        @endif
-    </div>
-</div>
+<div class="pbx-page">
+    @if (session('success'))
+        <div class="alert alert-success alert-dismissible fade show d-flex align-items-center mb-4" role="alert">
+            <i class="bi bi-check-circle-fill me-2"></i>{{ session('success') }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    @endif
+    @if (session('error'))
+        <div class="alert alert-danger alert-dismissible fade show d-flex align-items-center mb-4" role="alert">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>{{ session('error') }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    @endif
 
-@if (session('success'))
-    <div class="alert alert-success alert-dismissible fade show d-flex align-items-center mb-4" role="alert">
-        <i class="bi bi-check-circle-fill me-2"></i>{{ session('success') }}
-        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-    </div>
-@endif
-@if (session('error'))
-    <div class="alert alert-danger alert-dismissible fade show d-flex align-items-center mb-4" role="alert">
-        <i class="bi bi-exclamation-triangle-fill me-2"></i>{{ session('error') }}
-        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-    </div>
-@endif
-
-<div class="row g-4">
-    {{-- Left sidebar --}}
-    <div class="col-lg-3">
-        <div class="card pbx-sidebar-card">
-            <div class="card-body p-3">
-                <h6 class="text-uppercase small fw-semibold text-muted mb-2">View</h6>
-                <div class="list-group list-group-flush">
-                    <a href="{{ route('tools.pbx-manager') }}" class="list-group-item list-group-item-action py-2 rounded {{ !$currentList ? 'active' : '' }}">All</a>
-                    <a href="{{ route('tools.pbx-manager', ['list' => 'Completed Calls']) }}" class="list-group-item list-group-item-action py-2 rounded {{ $currentList === 'Completed Calls' ? 'active' : '' }}">Completed</a>
-                    <a href="{{ route('tools.pbx-manager', ['list' => 'No Response Calls']) }}" class="list-group-item list-group-item-action py-2 rounded {{ $currentList === 'No Response Calls' ? 'active' : '' }}">No Response</a>
-                </div>
+    {{-- Main card - unified professional layout --}}
+    <div class="pbx-card">
+        {{-- Card header: title + actions --}}
+        <div class="pbx-card-header">
+            <div class="pbx-card-title-group">
+                <h1 class="pbx-card-title">Call Logs</h1>
+                <p class="pbx-card-subtitle">View call history and recordings</p>
+            </div>
+            <div class="pbx-card-actions">
+                @auth
+                <button type="button" class="pbx-btn pbx-btn-ghost pbx-claim-latest-btn" title="I received the most recent unclaimed call">
+                    <i class="bi bi-person-check"></i>I received the last call
+                </button>
+                @endauth
+                @if($pbxCanCall ?? false)
+                <button type="button" class="pbx-btn pbx-btn-primary pbx-make-call-btn" data-number="" data-customer="">
+                    <i class="bi bi-telephone-outbound-fill"></i>Make Call
+                </button>
+                @endif
+                @if(($pbxSource ?? '') !== 'vtiger')
+                <form action="{{ route('tools.pbx-manager.fetch') }}" method="POST" class="d-inline">
+                    @csrf
+                    <button type="submit" class="pbx-btn pbx-btn-ghost">
+                        <i class="bi bi-download"></i>Fetch Calls
+                    </button>
+                </form>
+                @else
+                <span class="pbx-status-indicator">
+                    <span class="pbx-status-dot"></span>Connected to CRM
+                </span>
+                @endif
             </div>
         </div>
-    </div>
 
-    {{-- Main table --}}
-    <div class="col-lg-9">
-        <div class="card pbx-table-card">
-            <div class="card-body p-0">
-                <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 p-3 border-bottom">
-                    <form action="{{ route('tools.pbx-manager') }}" method="GET" class="d-flex align-items-center">
-                        @if($currentList)<input type="hidden" name="list" value="{{ $currentList }}">@endif
-                        <input type="text" name="search" class="form-control form-control-sm" placeholder="Search calls..." value="{{ request('search') }}" style="width: 220px;">
-                        <button type="submit" class="btn btn-sm btn-outline-secondary ms-2"><i class="bi bi-search"></i></button>
-                    </form>
-                    @if ($calls->total() > 0)
-                        <span class="text-muted small">{{ $calls->firstItem() }} to {{ $calls->lastItem() }} of {{ $calls->total() }}</span>
-                    @endif
+        {{-- Filters + Search toolbar --}}
+        <div class="pbx-toolbar">
+            <nav class="pbx-filters">
+                <a href="{{ route('tools.pbx-manager') }}" class="pbx-filter-tab {{ !$currentList ? 'active' : '' }}">All</a>
+                <a href="{{ route('tools.pbx-manager', ['list' => 'Received Calls']) }}" class="pbx-filter-tab {{ $currentList === 'Received Calls' ? 'active' : '' }}">Received</a>
+                <a href="{{ route('tools.pbx-manager', ['list' => 'Completed Calls']) }}" class="pbx-filter-tab {{ $currentList === 'Completed Calls' ? 'active' : '' }}">Completed</a>
+                <a href="{{ route('tools.pbx-manager', ['list' => 'No Response Calls']) }}" class="pbx-filter-tab {{ $currentList === 'No Response Calls' ? 'active' : '' }}">No Response</a>
+            </nav>
+            <form action="{{ route('tools.pbx-manager') }}" method="GET" class="pbx-search">
+                @if($currentList)<input type="hidden" name="list" value="{{ $currentList }}">@endif
+                <div class="pbx-search-inner">
+                    <i class="bi bi-search pbx-search-icon"></i>
+                    <input type="text" name="search" class="pbx-search-input" placeholder="Search calls..." value="{{ request('search') }}">
                 </div>
+                <button type="submit" class="pbx-btn pbx-btn-ghost pbx-search-submit"><i class="bi bi-search"></i></button>
+            </form>
+            @if ($calls->total() > 0)
+                <span class="pbx-result-count">{{ $calls->firstItem() }}-{{ $calls->lastItem() }} of {{ number_format($calls->total()) }}</span>
+            @endif
+        </div>
 
-                <div class="table-responsive">
-                    <table class="table table-hover align-middle pbx-table mb-0">
-                        <thead>
-                            <tr>
-                                <th class="pbx-th">Status</th>
-                                <th class="pbx-th">Direction</th>
-                                <th class="pbx-th">Number</th>
-                                <th class="pbx-th d-none d-lg-table-cell">Reason</th>
-                                <th class="pbx-th d-none d-xl-table-cell">Customer</th>
-                                <th class="pbx-th">User</th>
-                                <th class="pbx-th">Recording</th>
-                                <th class="pbx-th">Duration</th>
-                                <th class="pbx-th">Time</th>
-                            </tr>
-                        </thead>
-                        <tbody>
+        {{-- Table --}}
+        <div class="table-responsive pbx-table-wrap">
+            <table class="pbx-table">
+                <thead>
+                    <tr>
+                        <th>Status</th>
+                        <th>Direction</th>
+                        <th>Number</th>
+                        <th class="d-none d-lg-table-cell">Reason</th>
+                        <th class="d-none d-xl-table-cell">Customer</th>
+                        <th>User</th>
+                        <th>Recording</th>
+                        <th>Duration</th>
+                        <th>Time</th>
+                    </tr>
+                </thead>
+                <tbody>
                             @forelse ($calls as $call)
                                 <tr>
                                     <td>
-                                        <span class="badge pbx-badge pbx-badge-{{ Str::slug($call->call_status ?? '') }}">
+                                        <span class="pbx-badge pbx-badge-{{ Str::slug($call->call_status ?? '') }}">
                                             {{ $call->call_status ?? '—' }}
                                         </span>
                                     </td>
-                                    <td>{{ $call->direction ?? '—' }}</td>
+                                    <td>
+                                        <span class="pbx-direction pbx-direction-{{ strtolower($call->direction ?? 'unknown') }}">
+                                            {{ $call->direction ?? '—' }}
+                                        </span>
+                                    </td>
                                     <td>
                                         @if(!empty($call->customer_number))
-                                        <a href="tel:{{ tel_href($call->customer_number) }}" class="btn btn-sm btn-link p-0 text-primary text-decoration-none" title="Call (opens MicroSIP)">
-                                            <i class="bi bi-telephone-outbound me-1"></i>
+                                        <a href="tel:{{ tel_href($call->customer_number) }}" class="pbx-number-link" title="Call">
+                                            <i class="bi bi-telephone-outbound"></i>
                                         </a>
                                         @endif
-                                        {{ $call->customer_number ?? '—' }}
+                                        <span class="pbx-number">{{ $call->customer_number ?? '—' }}</span>
                                     </td>
-                                    <td class="text-muted small d-none d-lg-table-cell">{{ Str::limit($call->reason_for_calling ?? '—', 20) }}</td>
+                                    <td class="d-none d-lg-table-cell pbx-cell-muted">{{ Str::limit($call->reason_for_calling ?? '—', 20) }}</td>
                                     <td class="d-none d-xl-table-cell">{{ Str::limit($call->customer_name ?? '—', 15) }}</td>
                                     <td>
                                         <span class="pbx-user-display">{{ $call->user_name ?? '—' }}</span>
                                         @auth
-                                        <button type="button" class="btn btn-link btn-sm p-0 ms-1 text-muted pbx-claim-btn" data-call-id="{{ $call->id }}" data-source="{{ $pbxSource ?? 'vtiger' }}" title="I received this call">
+                                        <button type="button" class="pbx-claim-btn" data-call-id="{{ $call->id }}" data-source="{{ $pbxSource ?? 'vtiger' }}" title="I received this call">
                                             <i class="bi bi-person-plus"></i>
                                         </button>
                                         @endauth
                                     </td>
                                     <td>
-                                        @php $hasDuration = ($call->duration_sec ?? 0) > 0; @endphp
-                                        @if($hasDuration && (($call->from_vtiger ?? false) && !empty($call->id)))
-                                            <button type="button" class="btn btn-sm btn-outline-secondary pbx-play-btn" data-recording-url="{{ route('tools.pbx-manager.recording.vtiger', $call->id) }}" data-call-info="{{ $call->customer_number ?? '' }} - {{ optional($call->start_time)->format('d/m H:i') ?: '' }}">
-                                                <i class="bi bi-play-fill me-1"></i>Listen
-                                            </button>
-                                        @elseif($hasDuration && !empty($call->recording_url))
-                                            <button type="button" class="btn btn-sm btn-outline-secondary pbx-play-btn" data-recording-url="{{ route('tools.pbx-manager.recording', $call) }}" data-call-info="{{ $call->customer_number ?? '' }} - {{ optional($call->start_time)->format('d/m H:i') ?: '' }}">
-                                                <i class="bi bi-play-fill me-1"></i>Listen
-                                            </button>
-                                        @elseif($hasDuration && method_exists($call, 'hasRecording') && $call->hasRecording())
-                                            <button type="button" class="btn btn-sm btn-outline-secondary pbx-play-btn" data-recording-url="{{ route('tools.pbx-manager.recording', $call) }}" data-call-info="{{ $call->customer_number ?? '' }} - {{ optional($call->start_time)->format('d/m H:i') ?: '' }}">
-                                                <i class="bi bi-play-fill me-1"></i>Listen
-                                            </button>
+                                        @php
+                                            $recordingRoute = null;
+                                            if (($call->from_vtiger ?? false) && !empty($call->id)) {
+                                                $recordingRoute = route('tools.pbx-manager.recording.vtiger', $call->id);
+                                            } elseif (method_exists($call, 'hasRecording') && $call->hasRecording()) {
+                                                $recordingRoute = route('tools.pbx-manager.recording', $call);
+                                            } elseif (!empty($call->recording_url)) {
+                                                $recordingRoute = route('tools.pbx-manager.recording', $call);
+                                            }
+                                        @endphp
+                                        @if($recordingRoute)
+                                            <div class="pbx-recording-cell" data-recording-url="{{ $recordingRoute }}">
+                                                <audio class="pbx-inline-audio" controls preload="none" title="Play recording">
+                                                    <source src="{{ $recordingRoute }}" type="audio/mpeg">
+                                                    Your browser does not support audio playback.
+                                                </audio>
+                                                <button type="button" class="pbx-play-btn pbx-play-modal-btn" data-recording-url="{{ $recordingRoute }}" data-call-info="{{ $call->customer_number ?? '' }} - {{ optional($call->start_time)->format('d/m H:i') ?: '' }}" title="Open in player">
+                                                    <i class="bi bi-box-arrow-up-right"></i>
+                                                </button>
+                                            </div>
                                         @else
-                                            <span class="text-muted small">—</span>
+                                            <span class="pbx-cell-muted">—</span>
                                         @endif
                                     </td>
-                                    <td>{{ $call->duration_sec ?? 0 }}</td>
-                                    <td class="text-nowrap">{{ optional($call->start_time)->format('d-m-Y h:i A') ?: '—' }}</td>
+                                    <td><span class="pbx-duration">{{ $call->duration_sec ?? 0 }}s</span></td>
+                                    <td class="pbx-time">{{ optional($call->start_time)->format('d M Y, h:i A') ?: '—' }}</td>
                                 </tr>
                             @empty
                                 <tr>
-                                    <td colspan="9" class="text-center py-5 text-muted">
-                                        No calls yet.
-                                @if(($pbxSource ?? '') === 'vtiger')
-                                    No call records in the old CRM.
-                                @else
-                                    Click "Fetch Calls" to pull from your PBX, or ensure <code>vtiger_pbxmanager_gateway</code> is configured in the old CRM.
-                                @endif
+                                    <td colspan="9" class="pbx-empty-state">
+                                        <div class="pbx-empty-icon"><i class="bi bi-telephone-x"></i></div>
+                                        <p class="pbx-empty-title">No calls yet</p>
+                                        <p class="pbx-empty-text">
+                                            @if(($pbxSource ?? '') === 'vtiger')
+                                                No call records in the old CRM.
+                                            @else
+                                                Click "Fetch Calls" to pull from your PBX, or ensure <code>vtiger_pbxmanager_gateway</code> is configured in the old CRM.
+                                            @endif
+                                        </p>
                                     </td>
                                 </tr>
                             @endforelse
-                        </tbody>
-                    </table>
-                </div>
-
-                @if ($calls->hasPages())
-                    <div class="card-footer bg-light d-flex justify-content-between align-items-center py-3">
-                        <span class="text-muted small">{{ $calls->firstItem() }} to {{ $calls->lastItem() }} of {{ $calls->total() }}</span>
-                        {{ $calls->withQueryString()->links('pagination::bootstrap-5') }}
-                    </div>
-                @endif
-            </div>
+                </tbody>
+            </table>
         </div>
+
+        @if ($calls->hasPages())
+            <div class="pbx-card-footer">
+                <span class="pbx-result-count">{{ $calls->firstItem() }}-{{ $calls->lastItem() }} of {{ number_format($calls->total()) }}</span>
+                {{ $calls->withQueryString()->links('pagination::bootstrap-5') }}
+            </div>
+        @endif
     </div>
 </div>
 
 <style>
-.pbx-sidebar-card { border-radius: 10px; border: 1px solid #e9ecef; }
-.pbx-table-card { border-radius: 10px; border: 1px solid #e9ecef; overflow: hidden; }
-.pbx-th { font-size: .7rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; background: #f8fafc; padding: 0.65rem 1rem; border-bottom: 1px solid #e5e7eb; }
-.pbx-table td { padding: 0.65rem 1rem; vertical-align: middle; font-size: .875rem; }
-.pbx-table tbody tr { border-bottom: 1px solid #f1f5f9; }
-.pbx-table tbody tr:hover { background: #f8fafc; }
-.pbx-badge { font-size: .65rem; font-weight: 500; padding: 0.25em 0.5em; }
+/* Call Logs – Professional layout */
+.pbx-page { padding-bottom: 2rem; }
+
+.pbx-card {
+    background: #fff;
+    border-radius: 12px;
+    border: 1px solid var(--geminia-border);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    overflow: hidden;
+}
+
+/* Card header */
+.pbx-card-header {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    padding: 1.5rem 1.75rem;
+    border-bottom: 1px solid var(--geminia-border);
+}
+.pbx-card-title { font-size: 1.5rem; font-weight: 700; color: var(--geminia-text); margin: 0 0 0.15rem; }
+.pbx-card-subtitle { font-size: 0.875rem; color: var(--geminia-text-muted); margin: 0; }
+.pbx-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+}
+.pbx-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.pbx-btn-primary {
+    background: var(--geminia-primary);
+    color: #fff;
+}
+.pbx-btn-primary:hover { background: var(--geminia-primary-dark); }
+.pbx-btn-ghost {
+    background: transparent;
+    color: var(--geminia-text-muted);
+}
+.pbx-btn-ghost:hover { background: var(--geminia-primary-muted); color: var(--geminia-primary); }
+.pbx-status-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.65rem;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: #059669;
+    background: rgba(5, 150, 105, 0.1);
+    border-radius: 6px;
+}
+.pbx-status-dot {
+    width: 6px; height: 6px;
+    background: #059669;
+    border-radius: 50%;
+}
+.pbx-status-indicator .pbx-status-dot { animation: pbx-pulse 2s ease-in-out infinite; }
+@keyframes pbx-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+/* Toolbar: filters + search */
+.pbx-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem 1.75rem;
+    background: #f8fafc;
+    border-bottom: 1px solid var(--geminia-border);
+}
+.pbx-filters {
+    display: flex;
+    gap: 0.25rem;
+}
+.pbx-filter-tab {
+    display: inline-block;
+    padding: 0.5rem 1.1rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--geminia-text-muted);
+    text-decoration: none;
+    border-radius: 8px;
+    border: 1px solid var(--geminia-border);
+    background: #fff;
+    transition: all 0.2s;
+}
+.pbx-filter-tab:hover {
+    color: var(--geminia-primary);
+    border-color: var(--geminia-primary);
+    background: var(--geminia-primary-muted);
+}
+.pbx-filter-tab.active {
+    color: #fff;
+    background: var(--geminia-primary);
+    border-color: var(--geminia-primary);
+}
+.pbx-filter-tab.active:hover {
+    color: #fff;
+    background: var(--geminia-primary-dark);
+    border-color: var(--geminia-primary-dark);
+}
+.pbx-search {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: auto;
+}
+.pbx-search-inner {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+.pbx-search-icon {
+    position: absolute;
+    left: 0.85rem;
+    color: var(--geminia-text-muted);
+    font-size: 0.95rem;
+}
+.pbx-search-input {
+    width: 240px;
+    height: 36px;
+    padding: 0 1rem 0 2.25rem;
+    border: 1px solid var(--geminia-border);
+    border-radius: 6px;
+    font-size: 0.875rem;
+    background: #fff;
+}
+.pbx-search-input:focus { outline: none; border-color: var(--geminia-primary); }
+.pbx-search-submit { padding: 0.4rem 0.6rem; }
+.pbx-result-count {
+    font-size: 0.8rem;
+    color: var(--geminia-text-muted);
+    font-weight: 500;
+}
+
+/* Table */
+.pbx-table-wrap { background: #fff; }
+.pbx-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+}
+.pbx-table th {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--geminia-text-muted);
+    background: #fafbfc;
+    padding: 0.85rem 1.25rem;
+    text-align: left;
+    border-bottom: 1px solid var(--geminia-border);
+}
+.pbx-table td {
+    padding: 0.85rem 1.25rem;
+    vertical-align: middle;
+    border-bottom: 1px solid #f1f5f9;
+}
+.pbx-table tbody tr:hover { background: #fafbfc; }
+.pbx-table tbody tr:last-child td { border-bottom: none; }
+
+/* Badges & cells */
+.pbx-badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.3em 0.65em;
+    border-radius: 4px;
+}
 .pbx-badge-completed { background: #dcfce7; color: #166534; }
 .pbx-badge-busy, .pbx-badge-no-response, .pbx-badge-no-answer { background: #fef3c7; color: #b45309; }
-.pbx-claim-btn:hover { color: var(--success, #059669) !important; }
+.pbx-direction { font-size: 0.8rem; font-weight: 500; text-transform: capitalize; }
+.pbx-direction-inbound { color: #2563eb; }
+.pbx-direction-outbound { color: #059669; }
+.pbx-number-link { display: inline-flex; margin-right: 0.35rem; color: var(--geminia-primary); text-decoration: none; }
+.pbx-number-link:hover { color: var(--geminia-primary-dark); }
+.pbx-number { font-family: ui-monospace, monospace; font-size: 0.85rem; }
+.pbx-cell-muted { color: var(--geminia-text-muted); font-size: 0.85rem; }
+.pbx-duration { font-weight: 500; }
+.pbx-time { white-space: nowrap; color: var(--geminia-text-muted); font-size: 0.85rem; }
+.pbx-claim-btn {
+    display: inline-flex; align-items: center; padding: 0.2rem; margin-left: 0.25rem;
+    background: none; border: none; color: var(--geminia-text-muted); cursor: pointer; border-radius: 4px;
+}
+.pbx-claim-btn:hover { color: #059669; background: rgba(5, 150, 105, 0.1); }
+.pbx-play-btn {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    padding: 0.35rem 0.65rem; font-size: 0.8rem; font-weight: 500;
+    background: var(--geminia-primary-muted); color: var(--geminia-primary);
+    border: none; border-radius: 4px; cursor: pointer;
+}
+.pbx-play-btn:hover { background: rgba(26, 70, 138, 0.12); }
+.pbx-recording-cell {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.pbx-inline-audio {
+    min-width: 120px;
+    max-width: 180px;
+    height: 32px;
+}
+.pbx-inline-audio::-webkit-media-controls-panel { background: var(--geminia-primary-muted); }
+.pbx-play-modal-btn {
+    flex-shrink: 0;
+    padding: 0.3rem 0.5rem;
+    font-size: 0.75rem;
+}
+
+/* Empty state */
+.pbx-empty-state { text-align: center; padding: 3.5rem 2rem !important; }
+.pbx-empty-icon { font-size: 2.5rem; color: #cbd5e1; margin-bottom: 0.75rem; }
+.pbx-empty-title { font-weight: 600; font-size: 1rem; margin: 0 0 0.4rem; color: var(--geminia-text); }
+.pbx-empty-text { font-size: 0.875rem; color: var(--geminia-text-muted); margin: 0; }
+
+/* Footer */
+.pbx-card-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 1rem;
+    padding: 0.9rem 1.75rem;
+    background: #fafbfc;
+    border-top: 1px solid var(--geminia-border);
+}
+.pbx-card-footer .pagination { margin: 0; }
+
+@media (max-width: 768px) {
+    .pbx-card-header, .pbx-toolbar { padding: 1rem 1.25rem; }
+    .pbx-toolbar { flex-direction: column; align-items: stretch; }
+    .pbx-search { margin-left: 0; }
+    .pbx-search-input { width: 100%; }
+}
 </style>
 
 {{-- Make Call modal is in layout (partials.pbx-tel-handler) for use app-wide including tel: links --}}
@@ -204,7 +448,16 @@
 </div>
 
 <script>
-document.querySelectorAll('.pbx-play-btn').forEach(btn => {
+document.querySelectorAll('.pbx-inline-audio').forEach(audio => {
+    audio.addEventListener('error', function() {
+        const cell = this.closest('.pbx-recording-cell');
+        if (cell && !cell.querySelector('.pbx-no-recording')) {
+            cell.innerHTML = '<span class="pbx-cell-muted pbx-no-recording">No recording</span>';
+        }
+    });
+});
+
+document.querySelectorAll('.pbx-play-modal-btn').forEach(btn => {
     btn.addEventListener('click', function() {
         const url = this.dataset.recordingUrl;
         const info = this.dataset.callInfo || '—';

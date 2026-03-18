@@ -384,6 +384,7 @@
             color: var(--color-gray);
             z-index: 3;
             border-top: 1px solid rgba(108, 117, 125, 0.2);
+            text-align: center;
         }
         .login-footer a { color: var(--color-dark-blue); text-decoration: none; }
         .login-footer a:hover { color: var(--color-light-blue); }

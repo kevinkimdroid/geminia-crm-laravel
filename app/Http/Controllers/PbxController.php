@@ -34,6 +34,10 @@ class PbxController extends Controller
 
     protected function indexFromVtiger(Request $request)
     {
+        $durationCols = config('services.pbx.duration_columns', ['billduration', 'totalduration']);
+        $durationExpr = implode(', ', array_map(fn ($c) => "NULLIF(p.{$c}, 0)", $durationCols));
+        $durationRaw = $durationExpr ? "COALESCE({$durationExpr}, 0) as duration_sec" : '0 as duration_sec';
+
         $query = DB::connection('vtiger')
             ->table('vtiger_pbxmanager as p')
             ->leftJoin('vtiger_users as u', 'p.user', '=', 'u.id')
@@ -47,7 +51,7 @@ class PbxController extends Controller
                 'p.recordingurl as recording_url',
                 'p.sourceuuid',
                 'p.starttime as start_time',
-                DB::raw('COALESCE(p.billduration, p.totalduration, 0) as duration_sec'),
+                DB::raw($durationRaw),
                 DB::raw("CONCAT(COALESCE(u.first_name,''), ' ', COALESCE(u.last_name,'')) as user_name")
             );
 
@@ -56,6 +60,9 @@ class PbxController extends Controller
                 $query->where('p.callstatus', 'completed');
             } elseif ($request->list === 'No Response Calls') {
                 $query->whereIn('p.callstatus', ['no-response', 'no-answer', 'busy']);
+            } elseif ($request->list === 'Received Calls') {
+                $claimedIds = PbxCallRecipient::where('call_source', 'vtiger')->pluck('call_id')->toArray();
+                $query->whereIn('p.pbxmanagerid', $claimedIds ?: [0]);
             }
         }
 
@@ -103,6 +110,9 @@ class PbxController extends Controller
                 $query->where('call_status', 'completed');
             } elseif ($request->list === 'No Response Calls') {
                 $query->whereIn('call_status', ['no-response', 'no-answer', 'busy']);
+            } elseif ($request->list === 'Received Calls') {
+                $claimedIds = PbxCallRecipient::where('call_source', 'local')->pluck('call_id')->toArray();
+                $query->whereIn('id', $claimedIds ?: [0]);
             }
         }
 
