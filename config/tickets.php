@@ -162,5 +162,7 @@ return [
         'public_url' => rtrim(env('FEEDBACK_PUBLIC_URL', ''), '/'),
         // CRM API URL for the standalone feedback app to call (server-to-server). E.g. http://10.1.1.65
         'crm_api_url' => rtrim(env('FEEDBACK_CRM_API_URL', env('APP_URL', 'http://localhost')), '/'),
+        // When true, /api/feedback/validate and /api/feedback/submit always return an error (for testing)
+        'force_error' => filter_var(env('FEEDBACK_API_FORCE_ERROR', false), FILTER_VALIDATE_BOOLEAN),
     ],
 ];

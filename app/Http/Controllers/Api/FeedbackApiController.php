@@ -26,6 +26,10 @@ class FeedbackApiController extends Controller
      */
     public function validate(Request $request): JsonResponse
     {
+        if (config('tickets.feedback_request.force_error', false)) {
+            return response()->json(['valid' => false, 'error' => 'Feedback is currently unavailable. Please try again later.']);
+        }
+
         $ticket = (int) ($request->get('ticket') ?? 0);
         $expires = $request->get('expires');
         $signature = $request->get('signature');
@@ -84,6 +88,10 @@ class FeedbackApiController extends Controller
      */
     public function submit(Request $request): JsonResponse
     {
+        if (config('tickets.feedback_request.force_error', false)) {
+            return response()->json(['success' => false, 'error' => 'Feedback is currently unavailable. Please try again later.']);
+        }
+
         $ticket = (int) ($request->get('ticket') ?? 0);
         $expires = $request->get('expires');
         $signature = $request->get('signature');
