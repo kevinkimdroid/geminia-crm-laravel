@@ -182,7 +182,7 @@ class TicketController extends Controller
         if ($fromServeClient && $contactId) {
             $clients = collect([$crm->getContactById($contactId)])->filter();
         } else {
-            $clients = Cache::remember('ticket_create_clients_' . (crm_owner_filter() ?? 'all'), 120, fn () => $crm->getCustomers(30, 0, null, crm_owner_filter()));
+            $clients = Cache::remember('ticket_create_clients_' . (crm_owner_filter() ?? 'all'), 120, fn () => $crm->getCustomers(100, 0, null, crm_owner_filter(), 'name', true));
         }
         $contactDisplay = '';
 
@@ -485,7 +485,7 @@ class TicketController extends Controller
             Cache::forget('ticket_create_clients');
         }
         $crm = app(CrmService::class);
-        $clients = Cache::remember('ticket_create_clients_' . (crm_owner_filter() ?? 'all'), 120, fn () => $crm->getCustomers(30, 0, null, crm_owner_filter()));
+        $clients = Cache::remember('ticket_create_clients_' . (crm_owner_filter() ?? 'all'), 120, fn () => $crm->getCustomers(100, 0, null, crm_owner_filter(), 'name', true));
         $contactDisplay = '';
         if ($ticket->contact_id ?? null) {
             $client = $clients->firstWhere('contactid', $ticket->contact_id);
@@ -517,6 +517,17 @@ class TicketController extends Controller
             $fallback = $this->getFallbackProductLines()->firstWhere('accountname', $lineName);
             $effectiveOrgId = $fallback ? (string) $fallback->accountid : 'line:' . $lineName;
         }
+        $editPolicy = null;
+        if ($ticket->contact_id ?? null) {
+            $editPolicy = $this->crm->getContactPolicyNumber((int) $ticket->contact_id);
+        }
+        if (! $editPolicy && ! empty($ticket->description ?? '') && preg_match('/Related policy:\s*([^\n]+)/i', (string) $ticket->description, $m)) {
+            $p = trim($m[1]);
+            $cid = (string) ($ticket->contact_id ?? '');
+            if ($p !== '' && $p !== $cid && ! looks_like_kra_pin($p) && ! looks_like_client_id($p)) {
+                $editPolicy = $p;
+            }
+        }
         return view('tickets.edit', [
             'ticket' => $ticket,
             'clients' => $clients,
@@ -524,6 +535,7 @@ class TicketController extends Controller
             'accounts' => $accounts,
             'users' => $users,
             'presetOrganizationId' => $effectiveOrgId,
+            'editPolicy' => $editPolicy ?? '',
             'canCloseTickets' => $this->sla->canUserCloseThisTicket($id),
         ]);
     }
@@ -631,6 +643,7 @@ class TicketController extends Controller
             'assigned_to' => 'nullable|integer',
             'hours' => 'nullable|string|max:20',
             'days' => 'nullable|string|max:20',
+            'policy_number' => 'nullable|string|max:100',
         ]);
 
         $newStatus = $validated['status'] ?? $ticket->status;
@@ -646,6 +659,14 @@ class TicketController extends Controller
 
         try {
             $description = $validated['description'] ?? $ticket->description ?? '';
+            $policyNumber = trim($validated['policy_number'] ?? '');
+            $contactId = (int) ($validated['contact_id'] ?? 0);
+            if ($policyNumber !== '' && $policyNumber !== (string) $contactId && ! looks_like_kra_pin($policyNumber) && ! looks_like_client_id($policyNumber)) {
+                if (! preg_match('/Related policy:\s*' . preg_quote($policyNumber, '/') . '(?:\n|$)/i', $description ?? '')) {
+                    $desc = preg_replace('/\n*Related policy:\s*[^\n]+(\n|$)/i', '', $description ?? '');
+                    $description = trim($desc) . "\n\nRelated policy: " . $policyNumber;
+                }
+            }
             $orgId = $validated['organization_id'] ?? null;
             if (is_string($orgId) && str_starts_with($orgId, 'line:')) {
                 $lineName = substr($orgId, 5);
@@ -923,17 +944,20 @@ class TicketController extends Controller
     public function searchContacts(Request $request): JsonResponse
     {
         $q = trim((string) $request->get('q', ''));
-        $limit = min(50, max(5, (int) $request->get('limit', 20)));
-        if (strlen($q) < 1) {
-            return response()->json([]);
-        }
-        $cacheKey = 'ticket_search_contacts:' . md5($q . ':' . $limit);
-        $data = Cache::remember($cacheKey, 30, function () use ($q, $limit) {
+        $limit = min(100, max(10, (int) $request->get('limit', 50)));
+        $browse = $request->boolean('browse') || $q === '';
+        $searchAll = config('tickets.contact_search_all', false);
+        $ownerFilter = $searchAll ? null : crm_owner_filter();
+        $ownerSuffix = $searchAll ? ':all' : (':u' . (crm_owner_filter() ?? ''));
+        $cacheKey = 'ticket_search_contacts:' . md5(($browse ? 'browse' : $q) . ':' . $limit . $ownerSuffix);
+        $data = Cache::remember($cacheKey, $browse ? 60 : 10, function () use ($q, $limit, $browse, $ownerFilter) {
             $seen = [];
             $results = [];
+            $searchTerm = $browse ? null : $q;
+            $fetchLimit = $browse ? min(100, $limit) : (int) ceil($limit / 2);
 
-            // CRM contacts
-            $customers = $this->crm->getCustomers((int) ceil($limit / 2), 0, $q, crm_owner_filter());
+            // CRM contacts (browse mode = first N by name; search mode = filtered)
+            $customers = $this->crm->getCustomers($fetchLimit, 0, $searchTerm, $ownerFilter, $browse ? 'name' : 'created', true);
             foreach ($customers as $c) {
                 $id = (int) $c->contactid;
                 if (! isset($seen[$id])) {
@@ -941,6 +965,7 @@ class TicketController extends Controller
                     $results[] = [
                         'id' => $id,
                         'name' => trim(($c->firstname ?? '') . ' ' . ($c->lastname ?? '')) ?: 'Contact #' . $id,
+                        'policy_number' => $c->policy_number ?? null,
                     ];
                 }
             }
@@ -968,7 +993,7 @@ class TicketController extends Controller
                             if ($lifeSystem === 'group') {
                                 $label .= ' — Group Life';
                             }
-                            $results[] = ['id' => $contactId, 'name' => $label];
+                            $results[] = ['id' => $contactId, 'name' => $label, 'policy_number' => $policy];
                         }
                     }
                 } catch (\Throwable $e) {
@@ -979,6 +1004,16 @@ class TicketController extends Controller
             return array_slice(array_values($results), 0, $limit);
         });
         return response()->json($data);
+    }
+
+    /**
+     * Get policy number for a contact (for auto-fill when client is selected).
+     */
+    public function contactPolicy(int $contactId): JsonResponse
+    {
+        $policy = $this->crm->getContactPolicyNumber($contactId);
+
+        return response()->json(['policy_number' => $policy ?: '']);
     }
 
     /**

@@ -53,6 +53,7 @@ Route::post('/tickets/{ticket}/reassign', [TicketController::class, 'reassign'])
 Route::post('/tickets/{ticket}/comments', [TicketController::class, 'storeComment'])->name('tickets.comments.store');
 Route::resource('tickets', TicketController::class)->except(['destroy']);
 Route::get('/api/tickets/contacts', [TicketController::class, 'searchContacts'])->name('api.tickets.contacts');
+Route::get('/api/tickets/contact/{contact}/policy', [TicketController::class, 'contactPolicy'])->name('api.tickets.contact.policy');
 Route::get('/api/tickets/products', [TicketController::class, 'searchProducts'])->name('api.tickets.products');
 Route::get('/api/tickets/accounts', [TicketController::class, 'searchAccounts'])->name('api.tickets.accounts');
 Route::resource('deals', DealController::class);

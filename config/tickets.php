@@ -155,6 +155,16 @@ return [
     */
     'allow_all_authenticated' => filter_var(env('TICKET_ACCESS_ALL_AUTHENTICATED', false), FILTER_VALIDATE_BOOLEAN),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Ticket Contact Search – Search All Contacts
+    |--------------------------------------------------------------------------
+    | When true, contact search for ticket create/edit searches ALL contacts
+    | (ignores owner filter). Set TICKET_CONTACT_SEARCH_ALL=true if users need
+    | to find clients owned by others when creating tickets.
+    */
+    'contact_search_all' => filter_var(env('TICKET_CONTACT_SEARCH_ALL', false), FILTER_VALIDATE_BOOLEAN),
+
     'feedback_request' => [
         'enabled' => filter_var(env('TICKET_FEEDBACK_REQUEST_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
         'notify_email' => env('TICKET_FEEDBACK_NOTIFY_EMAIL', 'life@geminialife.co.ke'),

@@ -605,8 +605,11 @@ class CrmService
 
     /**
      * Get customers (contacts) with owner info for Support > Customers view.
+     *
+     * @param  string  $orderBy  'created' (default) or 'name' for alphabetical browse
+     * @param  bool  $includePolicy  When true, join contactscf and add policy_number from cf_860, cf_856, cf_872
      */
-    public function getCustomers(int $limit = 50, int $offset = 0, ?string $search = null, ?int $ownerId = null)
+    public function getCustomers(int $limit = 50, int $offset = 0, ?string $search = null, ?int $ownerId = null, string $orderBy = 'created', bool $includePolicy = false)
     {
         try {
             $query = DB::connection('vtiger')
@@ -615,37 +618,99 @@ class CrmService
                 ->leftJoin('vtiger_users as u', 'e.smownerid', '=', 'u.id')
                 ->where('e.deleted', 0)
                 ->whereIn('e.setype', ['Contacts', 'Contact']);
+            if ($includePolicy) {
+                $query->leftJoin('vtiger_contactscf as cf', 'c.contactid', '=', 'cf.contactid');
+            }
             if ($ownerId !== null) {
                 $query->where('e.smownerid', $ownerId);
             }
-            $query
-                ->select(
-                    'c.contactid',
-                    'c.firstname',
-                    'c.lastname',
-                    'c.email',
-                    'c.mobile',
-                    'c.phone',
-                    'e.smownerid',
-                    'u.first_name as owner_first',
-                    'u.last_name as owner_last',
-                    'u.user_name as owner_username'
-                );
+            $selects = [
+                'c.contactid',
+                'c.firstname',
+                'c.lastname',
+                'c.email',
+                'c.mobile',
+                'c.phone',
+                'e.smownerid',
+                'u.first_name as owner_first',
+                'u.last_name as owner_last',
+                'u.user_name as owner_username',
+            ];
+            if ($includePolicy) {
+                $selects = array_merge($selects, ['cf.cf_860', 'cf.cf_856', 'cf.cf_872']);
+            }
+            $query->select($selects);
 
             if ($search && trim($search) !== '') {
                 $term = '%' . trim($search) . '%';
-                $query->where(function ($q) use ($term) {
+                $searchLower = strtolower(trim($search));
+                $exactTerm = $searchLower;
+                $words = array_filter(preg_split('/\s+/', $searchLower, -1, PREG_SPLIT_NO_EMPTY));
+
+                $query->where(function ($q) use ($term, $words, $includePolicy, $exactTerm) {
+                    // Original: match firstname, lastname, email, mobile
                     $q->where('c.firstname', 'like', $term)
                         ->orWhere('c.lastname', 'like', $term)
                         ->orWhere('c.email', 'like', $term)
                         ->orWhere('c.mobile', 'like', $term);
+
+                    // Full name: "First Last" and "Last First" (matches when user types exact full name)
+                    $conn = \DB::connection('vtiger');
+                    $concatFirstLast = $conn->getDriverName() === 'sqlite'
+                        ? "TRIM(COALESCE(c.firstname,'') || ' ' || COALESCE(c.lastname,''))"
+                        : "CONCAT(TRIM(COALESCE(c.firstname,'')), ' ', TRIM(COALESCE(c.lastname,'')))";
+                    $concatLastFirst = $conn->getDriverName() === 'sqlite'
+                        ? "TRIM(COALESCE(c.lastname,'') || ' ' || COALESCE(c.firstname,''))"
+                        : "CONCAT(TRIM(COALESCE(c.lastname,'')), ' ', TRIM(COALESCE(c.firstname,'')))";
+                    $likeTerm = '%' . $exactTerm . '%';
+                    $q->orWhereRaw("(LOWER({$concatFirstLast}) LIKE ? OR LOWER({$concatLastFirst}) LIKE ?)", [$likeTerm, $likeTerm]);
+                    // Exact full name match (when user types complete name - takes precedence over partial)
+                    $q->orWhereRaw("(LOWER({$concatFirstLast}) = ? OR LOWER({$concatLastFirst}) = ?)", [$exactTerm, $exactTerm]);
+
+                    // Policy number search when cf is joined
+                    if ($includePolicy) {
+                        $q->orWhere('cf.cf_860', 'like', $term)
+                            ->orWhere('cf.cf_856', 'like', $term)
+                            ->orWhere('cf.cf_872', 'like', $term);
+                    }
                 });
+
+                // Multi-word: ALL words must appear somewhere in firstname or lastname (exact-name style)
+                if (count($words) > 1) {
+                    foreach ($words as $word) {
+                        $wordTerm = '%' . $word . '%';
+                        $query->where(function ($q) use ($wordTerm) {
+                            $q->where('c.firstname', 'like', $wordTerm)
+                                ->orWhere('c.lastname', 'like', $wordTerm);
+                        });
+                    }
+                }
+
+                // Prioritize exact full-name matches so they appear first (user types "KIPKOSGEI KELVIN KIMUTAI" -> exact match on top)
+                $conn = \DB::connection('vtiger');
+                $concatFirstLast = $conn->getDriverName() === 'sqlite'
+                    ? "TRIM(COALESCE(c.firstname,'') || ' ' || COALESCE(c.lastname,''))"
+                    : "CONCAT(TRIM(COALESCE(c.firstname,'')), ' ', TRIM(COALESCE(c.lastname,'')))";
+                $concatLastFirst = $conn->getDriverName() === 'sqlite'
+                    ? "TRIM(COALESCE(c.lastname,'') || ' ' || COALESCE(c.firstname,''))"
+                    : "CONCAT(TRIM(COALESCE(c.lastname,'')), ' ', TRIM(COALESCE(c.firstname,'')))";
+                $exactOrderBy = "(CASE WHEN (LOWER({$concatFirstLast}) = ? OR LOWER({$concatLastFirst}) = ?) THEN 0 ELSE 1 END)";
+                $query->orderByRaw($exactOrderBy . ' ASC', [$exactTerm, $exactTerm]);
             }
 
-            return $query->orderByDesc('e.createdtime')
-                ->offset($offset)
-                ->limit($limit)
-                ->get();
+            if ($orderBy === 'name') {
+                $query->orderBy('c.firstname')->orderBy('c.lastname');
+            } elseif (!$search || trim($search) === '') {
+                $query->orderByDesc('e.createdtime');
+            }
+            $rows = $query->offset($offset)->limit($limit)->get();
+            if ($includePolicy && $rows->isNotEmpty()) {
+                $rows = $rows->map(function ($r) {
+                    $r->policy_number = $this->pickPolicyExcludingPin($r->cf_860 ?? null, $r->cf_856 ?? null, $r->cf_872 ?? null);
+                    return $r;
+                });
+            }
+            return $rows;
         } catch (\Throwable $e) {
             Log::warning('CrmService::getCustomers: ' . $e->getMessage());
             return collect();

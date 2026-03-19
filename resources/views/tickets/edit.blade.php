@@ -73,14 +73,16 @@
                 </div>
                 <div class="col-md-6 position-relative" id="contactSearchWrapper">
                     <label class="form-label fw-semibold">Client / Contact <span class="text-danger">*</span></label>
-                    <div class="input-group">
-                        <span class="input-group-text bg-white border-end-0"><i class="bi bi-search text-muted"></i></span>
-                        <input type="text" id="contactSearch" class="form-control" placeholder="Type to search..." autocomplete="off" value="{{ old('contact_display', $contactDisplay ?? '') }}" aria-autocomplete="list" aria-expanded="false" aria-controls="contactDropdown" role="combobox">
+                    <div class="input-group contact-search-input-group">
+                        <span class="input-group-text bg-white border-end-0"><i class="bi bi-person-fill text-muted"></i></span>
+                        <input type="text" id="contactSearch" class="form-control" placeholder="Type name or policy number to search" autocomplete="off" value="{{ old('contact_display', $contactDisplay ?? '') }}" aria-autocomplete="list" aria-expanded="false" aria-controls="contactDropdown" role="combobox">
                         <input type="hidden" name="contact_id" id="contactId" value="{{ old('contact_id', $ticket->contact_id ?? '') }}" required>
-                        <button type="button" id="contactClear" class="btn btn-outline-secondary d-none" title="Clear selection"><i class="bi bi-x-lg"></i></button>
+                        <button type="button" id="contactBrowse" class="btn btn-outline-primary" title="Browse all clients"><i class="bi bi-list-ul me-1"></i>Browse</button>
+                        <button type="button" id="contactChange" class="btn btn-outline-secondary d-none" title="Choose different client"><i class="bi bi-arrow-repeat me-1"></i>Change</button>
                         <a href="{{ route('contacts.create') }}" class="btn btn-outline-secondary" title="Add new client"><i class="bi bi-plus-lg"></i></a>
                     </div>
-                    <div id="contactDropdown" class="list-group position-absolute w-100 mt-1 shadow border rounded-2" style="max-height: 220px; overflow-y: auto; display: none; z-index: 1000; border-color:var(--geminia-border)!important;" role="listbox"></div>
+                    <small class="text-muted d-block mt-1" id="contactSearchHint">Type to search or click Browse to select a client</small>
+                    <div id="contactDropdown" class="contact-dropdown position-absolute w-100 mt-1 shadow border rounded-3 overflow-hidden" style="display: none; z-index: 1050; max-height: 320px; overflow-y: auto; background: #fff; border: 1px solid var(--geminia-border, #e2e8f0) !important;" role="listbox"></div>
                     @error('contact_id')<div class="text-danger small mt-1">{{ $message }}</div>@enderror
                 </div>
                 <div class="col-md-6">
@@ -141,6 +143,10 @@
                     </select>
                 </div>
                 <div class="col-md-6">
+                    <label class="form-label fw-semibold">Policy Number</label>
+                    <input type="text" name="policy_number" id="policy_number" class="form-control font-monospace" value="{{ old('policy_number', $editPolicy ?? '') }}" placeholder="e.g. GEMPPP0334">
+                </div>
+                <div class="col-md-6">
                     <label class="form-label fw-semibold">Hours</label>
                     <input type="text" name="hours" class="form-control" placeholder="SLA hours" value="{{ old('hours', $ticket->hours) }}">
                 </div>
@@ -178,7 +184,7 @@
     </div>
 </form>
 
-<script id="clientsData" type="application/json">@json(collect($clients ?? [])->map(fn($c) => ['id' => $c->contactid, 'name' => trim(($c->firstname ?? '') . ' ' . ($c->lastname ?? '')) ?: 'Client #' . $c->contactid])->values())</script>
+<script id="clientsData" type="application/json">@json(collect($clients ?? [])->map(fn($c) => ['id' => $c->contactid, 'name' => trim(($c->firstname ?? '') . ' ' . ($c->lastname ?? '')) ?: 'Client #' . $c->contactid, 'policy' => $c->policy_number ?? ''])->values())</script>
 <script>
 (function() {
     const initialClients = JSON.parse(document.getElementById('clientsData').textContent || '[]');
@@ -186,18 +192,24 @@
     const searchInput = document.getElementById('contactSearch');
     const contactIdInput = document.getElementById('contactId');
     const dropdown = document.getElementById('contactDropdown');
-    const clearBtn = document.getElementById('contactClear');
+    const browseBtn = document.getElementById('contactBrowse');
+    const changeBtn = document.getElementById('contactChange');
+    const hintEl = document.getElementById('contactSearchHint');
     let fetchTimer;
     let highlightedIdx = -1;
     let currentItems = [];
+    let justSelected = false;
 
     function escapeHtml(s) {
         const d = document.createElement('div');
         d.textContent = s;
         return d.innerHTML;
     }
-    function showClearBtn(show) {
-        if (clearBtn) clearBtn.classList.toggle('d-none', !show);
+    function setSelectedMode(selected) {
+        if (browseBtn) browseBtn.classList.toggle('d-none', selected);
+        if (changeBtn) changeBtn.classList.toggle('d-none', !selected);
+        if (hintEl) hintEl.textContent = selected ? 'Client selected. Click Change to pick a different one.' : 'Type to search or click Browse to select a client';
+        searchInput.readOnly = selected;
     }
     function renderDropdown(items, isLoading, noResults) {
         currentItems = items || [];
@@ -209,9 +221,10 @@
             dropdown.innerHTML = '<div class="list-group-item text-muted py-3 text-center">No contacts found. Try a different search or <a href="{{ route("contacts.create") }}">add a new client</a>.</div>';
             dropdown.style.display = 'block';
         } else if (currentItems.length) {
-            dropdown.innerHTML = currentItems.slice(0, 20).map((c, i) =>
-                `<a href="#" class="list-group-item list-group-item-action" data-id="${c.id}" data-name="${escapeHtml(c.name)}" role="option" data-index="${i}">${escapeHtml(c.name)}</a>`
-            ).join('');
+            dropdown.innerHTML = currentItems.slice(0, 60).map((c, i) => {
+                const policy = String(c.policy || c.policy_number || '').trim();
+                return `<a href="#" class="list-group-item list-group-item-action py-2 contact-option" data-id="${c.id}" data-name="${escapeHtml(c.name)}" data-policy="${escapeHtml(policy)}" role="option" data-index="${i}"><i class="bi bi-person me-2 text-muted"></i>${escapeHtml(c.name)}</a>`;
+            }).join('');
             dropdown.style.display = 'block';
         } else {
             dropdown.style.display = 'none';
@@ -220,55 +233,58 @@
     }
     function renderFromLocal() {
         const term = (searchInput.value || '').trim().toLowerCase();
-        const filtered = term ? clients.filter(c => (c.name || '').toLowerCase().includes(term)) : clients.slice(0, 50);
+        const filtered = term ? clients.filter(c => (c.name || '').toLowerCase().includes(term)) : clients.slice(0, 80);
         renderDropdown(filtered);
     }
     function selectItem(item) {
         if (!item) return;
+        justSelected = true;
         contactIdInput.value = item.dataset.id;
         searchInput.value = item.dataset.name;
+        const policyInput = document.getElementById('policy_number') || document.querySelector('input[name="policy_number"]');
+        if (policyInput) {
+            const policy = (item.dataset.policy || '').trim();
+            policyInput.value = policy;
+            fetch('{{ route("api.tickets.contact.policy", ["contact" => ":id"]) }}'.replace(':id', item.dataset.id), { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+                .then(r => r.json()).then(d => { policyInput.value = (d.policy_number || d.policy || policy || '').trim(); }).catch(() => {});
+        }
         dropdown.style.display = 'none';
         searchInput.setAttribute('aria-expanded', 'false');
-        showClearBtn(true);
+        setSelectedMode(true);
     }
-    function fetchContacts() {
+    function fetchContacts(browseMode) {
         const q = searchInput.value.trim();
-        if (q.length < 2) {
-            renderFromLocal();
-            return;
-        }
+        const shouldBrowse = browseMode || q.length === 0;
+        const url = '{{ route("api.tickets.contacts") }}?limit=80' + (shouldBrowse ? '&browse=1' : '&q=' + encodeURIComponent(q));
         renderDropdown(null, true);
-        fetch('{{ route("api.tickets.contacts") }}?q=' + encodeURIComponent(q) + '&limit=30', {
+        fetch(url, {
             headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' },
             credentials: 'same-origin'
         })
         .then(r => r.json())
         .then(data => {
             if (Array.isArray(data) && data.length) renderDropdown(data);
-            else renderDropdown([], false, true);
+            else if (!shouldBrowse) renderDropdown([], false, true);
+            else renderFromLocal();
         })
         .catch(() => renderFromLocal());
     }
 
     searchInput.addEventListener('focus', function() {
+        if (justSelected) { justSelected = false; return; }
+        if (contactIdInput.value) return;
         const q = this.value.trim();
-        if (q.length >= 1) {
-            clearTimeout(fetchTimer);
-            fetchTimer = setTimeout(fetchContacts, 150);
-        } else {
-            renderFromLocal();
-        }
+        clearTimeout(fetchTimer);
+        fetchContacts(q.length === 0);
     });
     searchInput.addEventListener('input', function() {
         const q = this.value.trim();
         clearTimeout(fetchTimer);
-        showClearBtn(false);
+        setSelectedMode(false);
         contactIdInput.value = '';
-        if (q.length >= 1) {
-            fetchTimer = setTimeout(fetchContacts, 250);
-        } else {
-            renderFromLocal();
-        }
+        const policyInput = document.getElementById('policy_number') || document.querySelector('input[name="policy_number"]');
+        if (policyInput) policyInput.value = '';
+        fetchTimer = setTimeout(() => fetchContacts(false), q.length ? 200 : 0);
     });
     searchInput.addEventListener('keydown', function(e) {
         if (dropdown.style.display !== 'block' || !currentItems.length) return;
@@ -302,17 +318,25 @@
         if (item) {
             e.preventDefault();
             selectItem(item);
-            showClearBtn(true);
+            setSelectedMode(true);
         }
     });
 
-    if (clearBtn) {
-        clearBtn.addEventListener('click', function() {
+    if (browseBtn) {
+        browseBtn.addEventListener('click', function() {
+            searchInput.focus();
+            fetchContacts(true);
+        });
+    }
+    if (changeBtn) {
+        changeBtn.addEventListener('click', function() {
             contactIdInput.value = '';
             searchInput.value = '';
+            const policyInput = document.getElementById('policy_number') || document.querySelector('input[name="policy_number"]');
+            if (policyInput) policyInput.value = '';
+            setSelectedMode(false);
             searchInput.focus();
-            showClearBtn(false);
-            renderFromLocal();
+            fetchContacts(true);
         });
     }
 
@@ -320,7 +344,7 @@
     if (oldId) {
         const c = clients.find(x => String(x.id) === String(oldId));
         if (c) searchInput.value = c.name;
-        showClearBtn(true);
+        setSelectedMode(true);
     }
 })();
 </script>
