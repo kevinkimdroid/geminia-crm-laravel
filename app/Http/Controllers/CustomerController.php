@@ -99,7 +99,7 @@ class CustomerController extends Controller
         if ($search !== '') {
             $params['search'] = $search;
         }
-        if (in_array($system, ['group', 'individual'])) {
+        if (in_array($system, ['group', 'individual', 'mortgage', 'group_pension'], true)) {
             $params['system'] = $system;
         }
         if ($request->get('debug')) {
@@ -167,7 +167,7 @@ class CustomerController extends Controller
 
         if ($useErp && ! $lazyLoad) {
             // Never cache when system filter (Group Life / Individual Life) is active – always fresh data
-            $skipCache = ($system === 'group' || $system === 'individual')
+            $skipCache = in_array($system, ['group', 'individual', 'mortgage', 'group_pension'], true)
                 || ($system === 'group' && $search && strlen(trim((string) $search)) >= 2);
             if ($skipCache) {
                 $result = $this->erp->getClientsForListView($perPage, $offset, $search, $system);
@@ -236,7 +236,7 @@ class CustomerController extends Controller
 
         if ($useErp) {
             // Never cache when system filter (Group Life / Individual Life) is active – always fresh data
-            $skipCache = ($system === 'group' || $system === 'individual');
+            $skipCache = in_array($system, ['group', 'individual', 'mortgage', 'group_pension'], true);
             if ($skipCache) {
                 $result = $this->erp->getClientsForListView($perPage, $offset, $search, $system);
             } else {

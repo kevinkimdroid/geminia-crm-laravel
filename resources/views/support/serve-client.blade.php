@@ -236,6 +236,15 @@ document.addEventListener('DOMContentLoaded', function() {
         return 'KES ' + n.toLocaleString('en-KE', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
     }
 
+    function supportEmailClientUrl(params) {
+        const u = new URL(@json(route('support.email-client')));
+        if (params.email) u.searchParams.set('email', params.email);
+        if (params.client_name) u.searchParams.set('client_name', params.client_name);
+        if (params.policy) u.searchParams.set('policy', params.policy);
+        if (params.contact_id) u.searchParams.set('contact_id', String(params.contact_id));
+        return u.pathname + u.search;
+    }
+
     function showError(msg) {
         searchError.textContent = msg;
         searchError.style.display = msg ? 'block' : 'none';
@@ -340,7 +349,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const actions = '<div class="serve-client-actions">' +
                 (policy ? '<form method="GET" action="' + detailUrl + '" class="d-inline"><input type="hidden" name="policy" value="' + esc(policy) + '"><input type="hidden" name="from" value="serve-client"><button type="submit" class="serve-client-cta serve-client-cta-outline" title="View full details"><i class="bi bi-eye"></i> View Details</button></form>' : '') +
                 '<button type="button" class="serve-client-cta serve-client-cta-success serve-client-create-ticket" data-erp-store="' + storeId + '" title="Create support ticket"><i class="bi bi-ticket-perforated"></i> Create Ticket</button>' +
-                (email ? '<a href="mailto:' + esc(email) + '" class="serve-client-cta serve-client-cta-outline" title="Send email"><i class="bi bi-envelope"></i> Email</a>' : '') +
+                (email ? '<a href="' + supportEmailClientUrl({ email: email, client_name: name, policy: policy }) + '" class="serve-client-cta serve-client-cta-outline" title="Send email from CRM"><i class="bi bi-envelope"></i> Email</a>' : '') +
                 (phone ? '<a href="tel:' + esc(telHref(phone)) + '" class="serve-client-cta serve-client-cta-outline" title="Call"><i class="bi bi-telephone"></i> Call</a>' : '') +
                 '</div>';
             return '<div class="serve-client-item">' +
@@ -371,7 +380,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const actions = '<div class="serve-client-actions">' +
                 '<a href="' + contactUrl + '/' + item.contactid + '" class="serve-client-cta serve-client-cta-outline" title="View contact"><i class="bi bi-eye"></i> View Details</a>' +
                 '<a href="' + ticketUrl + '?contact_id=' + item.contactid + '&from=serve-client" class="serve-client-cta serve-client-cta-success" title="Create ticket"><i class="bi bi-ticket-perforated"></i> Create Ticket</a>' +
-                (item.email ? '<a href="mailto:' + esc(item.email) + '" class="serve-client-cta serve-client-cta-outline" title="Email"><i class="bi bi-envelope"></i> Email</a>' : '') +
+                (item.email ? '<a href="' + supportEmailClientUrl({ contact_id: item.contactid }) + '" class="serve-client-cta serve-client-cta-outline" title="Send email from CRM"><i class="bi bi-envelope"></i> Email</a>' : '') +
                 (item.phone ? '<a href="tel:' + esc(telHref(item.phone)) + '" class="serve-client-cta serve-client-cta-outline" title="Call"><i class="bi bi-telephone"></i> Call</a>' : '') +
                 '</div>';
             return '<div class="serve-client-item">' +

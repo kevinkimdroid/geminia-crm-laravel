@@ -168,8 +168,10 @@ return [
     'feedback_request' => [
         'enabled' => filter_var(env('TICKET_FEEDBACK_REQUEST_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
         'notify_email' => env('TICKET_FEEDBACK_NOTIFY_EMAIL', 'life@geminialife.co.ke'),
-        // Public URL for feedback links in emails (clients must reach this). E.g. https://geminialife.co.ke/feedback
+        // Public URL for feedback links in emails (clients must reach this). No trailing path — use public_path.
         'public_url' => rtrim(env('FEEDBACK_PUBLIC_URL', ''), '/'),
+        // URL segment after public_url for HMAC and email links (e.g. crm-client-feedback → /crm-client-feedback?...)
+        'public_path' => trim(env('FEEDBACK_PUBLIC_PATH', 'crm-client-feedback'), '/') ?: 'crm-client-feedback',
         // CRM API URL for the standalone feedback app to call (server-to-server). E.g. http://10.1.1.65
         'crm_api_url' => rtrim(env('FEEDBACK_CRM_API_URL', env('APP_URL', 'http://localhost')), '/'),
         // When true, /api/feedback/validate and /api/feedback/submit always return an error (for testing)

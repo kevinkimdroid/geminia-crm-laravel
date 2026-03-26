@@ -8,6 +8,18 @@ $clientPhone = $client->phone_no ?? $client->phoneNo ?? $client->mobile ?? $clie
 $clientName = $client->life_assur ?? $client->client_name ?? $client->name ?? $client->member_name ?? $client->mem_surname ?? 'Client';
 $clientProduct = $client->product ?? $client->prod_desc ?? '—';
 $clientPolicy = $client->policy_no ?? $policy ?? '—';
+$rawClientEmail = $client->email_adr ?? $client->client_email ?? $client->email ?? null;
+$clientEmail = ($rawClientEmail && filter_var(trim((string) $rawClientEmail), FILTER_VALIDATE_EMAIL)) ? trim((string) $rawClientEmail) : null;
+$emailClientRouteParams = array_filter([
+    'policy' => ($clientPolicy && $clientPolicy !== '—') ? $clientPolicy : null,
+]);
+if ($contact ?? null) {
+    $emailClientRouteParams['contact_id'] = $contact->contactid;
+} elseif ($clientEmail) {
+    $emailClientRouteParams['email'] = $clientEmail;
+    $emailClientRouteParams['client_name'] = $clientName !== 'Client' ? $clientName : null;
+}
+$canSendEmailToClient = ($contact ?? null) || $clientEmail;
 @endphp
 <nav class="breadcrumb-nav mb-3">
     @if($fromServeClient ?? false)
@@ -23,8 +35,12 @@ $clientPolicy = $client->policy_no ?? $policy ?? '—';
     <div>
         <h1 class="app-page-title mb-2">{{ $clientName }}</h1>
         <div class="d-flex flex-wrap align-items-center gap-2">
-            @php $lifeSystem = $client->life_system ?? app(\App\Services\ErpClientService::class)->getLifeSystemFromProduct($clientProduct); @endphp
-            <span class="clients-system-badge clients-system-{{ $lifeSystem }}">{{ $lifeSystem === 'group' ? 'Group Life' : 'Individual Life' }}</span>
+            @php
+                $erpSvc = app(\App\Services\ErpClientService::class);
+                $lifeSystem = $client->life_system ?? $erpSvc->getLifeSystemFromProduct($clientProduct);
+                $lifeSystemLabel = $erpSvc->getClientSystemLabel($lifeSystem);
+            @endphp
+            <span class="clients-system-badge clients-system-{{ $lifeSystem }}">{{ $lifeSystemLabel }}</span>
             <span class="client-status-badge client-status-{{ ($client->status ?? '') === 'A' ? 'active' : (($client->status ?? '') === 'FL' ? 'lapsed' : 'other') }}">{{ $client->status ?? '—' }}</span>
             <span class="text-muted small font-monospace">{{ $clientPolicy }}</span>
         </div>
@@ -36,6 +52,11 @@ $clientPolicy = $client->policy_no ?? $policy ?? '—';
         </a>
         <a href="{{ route('support.sms-notifier', $contact ? ['contact_id' => $contact->contactid] : ['phone' => $clientPhone]) }}" class="btn btn-sm btn-outline-primary">
             <i class="bi bi-chat-dots me-1"></i> Send Text
+        </a>
+        @endif
+        @if($canSendEmailToClient)
+        <a href="{{ route('support.email-client', $emailClientRouteParams) }}" class="btn btn-sm btn-outline-primary">
+            <i class="bi bi-envelope me-1"></i> Send Email
         </a>
         @endif
         <a href="{{ route('support.clients.create-ticket', ['policy' => $clientPolicy]) }}" class="btn btn-sm btn-success">
@@ -75,7 +96,7 @@ $clientPolicy = $client->policy_no ?? $policy ?? '—';
                         <dt>Product</dt>
                         <dd>{{ $clientProduct }}</dd>
                         <dt>System</dt>
-                        <dd><span class="clients-system-badge clients-system-{{ $lifeSystem ?? ($client->life_system ?? 'individual') }}">{{ ($lifeSystem ?? $client->life_system ?? 'individual') === 'group' ? 'Group Life' : 'Individual Life' }}</span></dd>
+                        <dd><span class="clients-system-badge clients-system-{{ $lifeSystem ?? ($client->life_system ?? 'individual') }}">{{ $lifeSystemLabel }}</span></dd>
                         <dt>Policy Status</dt>
                         <dd><span class="client-status-badge client-status-{{ ($client->status ?? '') === 'A' ? 'active' : (($client->status ?? '') === 'FL' ? 'lapsed' : 'other') }}">{{ $client->status ?? '—' }}</span></dd>
                     </dl>
@@ -98,9 +119,14 @@ $clientPolicy = $client->policy_no ?? $policy ?? '—';
                         <dd>{{ $client->paid_mat_amt ?? $client->bal ?? $client->production_amt ?? $client->paidMatAmt ?? '—' }}</dd>
                         <dt>Checkoff</dt>
                         <dd>{{ $client->checkoff ?? '—' }}</dd>
-                        @if($client->email_adr ?? $client->client_email ?? $client->email ?? null)
+                        @if($clientEmail)
                         <dt>Email</dt>
-                        <dd><a href="mailto:{{ $client->email_adr ?? $client->client_email ?? $client->email }}">{{ $client->email_adr ?? $client->client_email ?? $client->email }}</a></dd>
+                        <dd class="d-flex flex-wrap align-items-center gap-2">
+                            <a href="mailto:{{ $clientEmail }}">{{ $clientEmail }}</a>
+                            @if($canSendEmailToClient)
+                            <a href="{{ route('support.email-client', $emailClientRouteParams) }}" class="btn btn-outline-primary btn-sm py-0 px-2">Send via CRM</a>
+                            @endif
+                        </dd>
                         @endif
                     </dl>
                 </div>
@@ -149,6 +175,11 @@ $clientPolicy = $client->policy_no ?? $policy ?? '—';
                     <i class="bi bi-chat-dots me-2"></i>Send Text
                 </a>
                 @endif
+                @if($canSendEmailToClient)
+                <a href="{{ route('support.email-client', $emailClientRouteParams) }}" class="btn btn-outline-primary">
+                    <i class="bi bi-envelope me-2"></i>Send Email
+                </a>
+                @endif
                 <a href="{{ route('support.clients.create-ticket', ['policy' => $clientPolicy]) }}" class="btn btn-outline-success">
                     <i class="bi bi-ticket-perforated me-2"></i>Create Ticket
                 </a>
@@ -173,6 +204,8 @@ $clientPolicy = $client->policy_no ?? $policy ?? '—';
 .clients-system-badge { display: inline-block; padding: 0.2rem 0.55rem; border-radius: 6px; font-size: 0.7rem; font-weight: 600; }
 .clients-system-badge.clients-system-group { background: #ccfbf1; color: #0f766e; }
 .clients-system-badge.clients-system-individual { background: #e0e7ff; color: #4338ca; }
+.clients-system-badge.clients-system-mortgage { background: #ffedd5; color: #9a3412; }
+.clients-system-badge.clients-system-group_pension { background: #ede9fe; color: #5b21b6; }
 .client-status-active { background: #dcfce7; color: #166534; }
 .client-status-lapsed { background: #fee2e2; color: #991b1b; }
 .client-status-other { background: #f1f5f9; color: #475569; }

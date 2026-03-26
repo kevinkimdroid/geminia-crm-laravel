@@ -22,6 +22,7 @@ return [
     'support.serve-client' => null,
     'support.faq' => null,       // Sub-module - visible when Support is visible
         'support.sms-notifier' => null,
+        'support.email-client' => null,
         'support.customers' => null,
         'tools' => null,
         'tools.email-templates' => null,

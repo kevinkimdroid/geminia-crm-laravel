@@ -5,6 +5,9 @@
 
     RewriteEngine On
 
+    # Client feedback app (crm-client-feedback): /crm-client-feedback?ticket=... → index.php
+    RewriteRule ^crm-client-feedback/?$ crm-client-feedback/index.php [L,QSA]
+
     # Handle Authorization Header
     RewriteCond %{HTTP:Authorization} .
     RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]

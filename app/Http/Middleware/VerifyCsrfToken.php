@@ -13,5 +13,7 @@ class VerifyCsrfToken extends Middleware
      */
     protected $except = [
         'api/admin/erp-clients-import',
+        'crm-client-feedback',
+        'crm-client-feedback/*',
     ];
 }

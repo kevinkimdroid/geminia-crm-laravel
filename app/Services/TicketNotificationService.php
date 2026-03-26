@@ -263,11 +263,12 @@ class TicketNotificationService
 
         $publicUrl = trim((string) ($config['public_url'] ?? ''));
         if ($publicUrl !== '') {
+            $path = trim((string) ($config['public_path'] ?? 'crm-client-feedback'), '/');
             $expires = now()->addDays(7)->getTimestamp();
             $params = ['ticket' => $ticketId, 'expires' => $expires];
-            $signed = rtrim($publicUrl, '/') . '/feedback?' . http_build_query($params);
+            $signed = rtrim($publicUrl, '/') . '/' . $path . '?' . http_build_query($params);
             $params['signature'] = hash_hmac('sha256', $signed, config('app.key'));
-            $feedbackUrl = rtrim($publicUrl, '/') . '/feedback?' . http_build_query($params);
+            $feedbackUrl = rtrim($publicUrl, '/') . '/' . $path . '?' . http_build_query($params);
         } else {
             $feedbackUrl = \Illuminate\Support\Facades\URL::temporarySignedRoute(
                 'feedback.form',

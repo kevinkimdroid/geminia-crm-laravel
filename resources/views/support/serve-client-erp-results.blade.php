@@ -45,7 +45,7 @@
         </form>
         @endif
         <button type="button" class="serve-client-cta serve-client-cta-success serve-client-create-ticket" data-erp-store="{{ $storeId }}" title="Create support ticket"><i class="bi bi-ticket-perforated"></i> Create Ticket</button>
-        @if($email)<a href="mailto:{{ e($email) }}" class="serve-client-cta serve-client-cta-outline" title="Send email"><i class="bi bi-envelope"></i> Email</a>@endif
+        @if($email)<a href="{{ route('support.email-client', array_filter(['email' => $email, 'client_name' => $name, 'policy' => $policy ?: null])) }}" class="serve-client-cta serve-client-cta-outline" title="Send email from CRM"><i class="bi bi-envelope"></i> Email</a>@endif
         @if($phone)<a href="tel:{{ tel_href($phone) }}" class="serve-client-cta serve-client-cta-outline" title="Call"><i class="bi bi-telephone"></i> Call</a>@endif
     </div>
 </div>

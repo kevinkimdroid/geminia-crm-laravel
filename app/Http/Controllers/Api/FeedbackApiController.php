@@ -11,7 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
 /**
- * API for the standalone feedback app at geminialife.co.ke/feedback.
+ * API for the standalone crm-client-feedback app (path configured via FEEDBACK_PUBLIC_PATH).
  * Validates signed feedback links and processes submissions.
  */
 class FeedbackApiController extends Controller
@@ -43,7 +43,8 @@ class FeedbackApiController extends Controller
             return response()->json(['valid' => false, 'error' => 'Feedback public URL not configured']);
         }
 
-        $signedUrl = rtrim($publicUrl, '/') . '/feedback?' . http_build_query([
+        $path = trim((string) config('tickets.feedback_request.public_path', 'crm-client-feedback'), '/');
+        $signedUrl = rtrim($publicUrl, '/') . '/' . $path . '?' . http_build_query([
             'ticket' => $ticket,
             'expires' => $expires,
         ]);
@@ -111,7 +112,8 @@ class FeedbackApiController extends Controller
             return response()->json(['success' => false, 'error' => 'Feedback public URL not configured']);
         }
 
-        $signedUrl = rtrim($publicUrl, '/') . '/feedback?' . http_build_query([
+        $path = trim((string) config('tickets.feedback_request.public_path', 'crm-client-feedback'), '/');
+        $signedUrl = rtrim($publicUrl, '/') . '/' . $path . '?' . http_build_query([
             'ticket' => $ticket,
             'expires' => $expires,
         ]);

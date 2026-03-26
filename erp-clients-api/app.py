@@ -35,6 +35,9 @@ VIEW_NAME = os.environ.get("ERP_CLIENTS_VIEW", "LMS_INDIVIDUAL_CRM_VIEW")
 # Separate views for group vs individual life (LMS_GROUP_CRM_VIEW / LMS_INDIVIDUAL_CRM_VIEW)
 GROUP_VIEW = os.environ.get("ERP_CLIENTS_GROUP_VIEW") or (f"{VIEW_SCHEMA}.LMS_GROUP_CRM_VIEW" if VIEW_SCHEMA else "LMS_GROUP_CRM_VIEW")
 INDIVIDUAL_VIEW = os.environ.get("ERP_CLIENTS_INDIVIDUAL_VIEW") or (f"{VIEW_SCHEMA}.LMS_INDIVIDUAL_CRM_VIEW" if VIEW_SCHEMA else "LMS_INDIVIDUAL_CRM_VIEW")
+# Optional: Support > Clients — system=mortgage / group_pension returns empty until these are set
+_MORTGAGE_RAW = (os.environ.get("ERP_CLIENTS_MORTGAGE_VIEW") or "").strip()
+_GROUP_PENSION_RAW = (os.environ.get("ERP_CLIENTS_GROUP_PENSION_VIEW") or "").strip()
 VIEW = f"{VIEW_SCHEMA}.{VIEW_NAME}" if VIEW_SCHEMA else VIEW_NAME
 COLS_BASE = "POLICY_NUMBER,PRODUCT,POL_PREPARED_BY,INTERMEDIARY,STATUS,KRA_PIN"
 # Oracle view uses LIFE_ASSURED (with D); LIFE_ASSUR may also exist
@@ -74,7 +77,7 @@ def _is_receipt_format(val):
     return bool(RECEIPT_PATTERN.match(str(val).strip()))
 
 
-def row_to_client(row, columns):
+def row_to_client(row, columns, *, life_system_override=None):
     """Convert Oracle row to API response format (snake_case)."""
     d = {}
     for i, col in enumerate(columns):
@@ -176,6 +179,8 @@ def row_to_client(row, columns):
         d["id_no"] = d["id_number"]
     elif "id_no" in d and "id_number" not in d:
         d["id_number"] = d["id_no"]
+    if life_system_override:
+        d["life_system"] = life_system_override
     return d
 
 
@@ -184,11 +189,15 @@ def get_connection():
 
 
 def resolve_view(system):
-    """Return the Oracle view to query based on system filter (group|individual)."""
+    """Return the Oracle view to query based on system filter (group|individual|mortgage|group_pension)."""
     if system == "group":
         return GROUP_VIEW
     if system == "individual":
         return INDIVIDUAL_VIEW
+    if system == "mortgage":
+        return _MORTGAGE_RAW
+    if system == "group_pension":
+        return _GROUP_PENSION_RAW
     return VIEW
 
 
@@ -655,7 +664,12 @@ def get_clients():
     policy = (request.args.get("policy") or "").strip()
     system = (request.args.get("system") or "").strip().lower()
     debug_mode = request.args.get("debug", "").strip() in ("1", "true", "yes")
+    if system == "mortgage" and not _MORTGAGE_RAW:
+        return jsonify({"data": [], "total": 0})
+    if system == "group_pension" and not _GROUP_PENSION_RAW:
+        return jsonify({"data": [], "total": 0})
     target_view = resolve_view(system)
+    life_system_tag = system if system in ("mortgage", "group_pension") else None
     is_group = system == "group"
     columns = [c.strip() for c in (COLS_GROUP if is_group else COLS).split(",")]
     search_columns = [c.strip() for c in (SEARCH_COLS_GROUP if is_group else SEARCH_COLS).split(",") if c.strip()]
@@ -794,7 +808,7 @@ def get_clients():
                         actual_columns = [d[0] for d in cursor.description if d[0] and str(d[0]).upper() != "RNUM"]
                     else:
                         actual_columns = []
-                    data = [row_to_client(r[:len(actual_columns)], actual_columns) for r in rows]
+                    data = [row_to_client(r[:len(actual_columns)], actual_columns, life_system_override=life_system_tag) for r in rows]
                     est = int(os.environ.get("ERP_CLIENTS_GROUP_ESTIMATED_TOTAL", os.environ.get("ERP_CLIENTS_ESTIMATED_TOTAL", "1000")))
                     total = accurate_total if accurate_total is not None else (est if len(data) == limit else offset + len(data))
                     cursor.close()
@@ -910,7 +924,7 @@ def get_clients():
                     pass
 
             # ROWNUM subquery adds rnum column; use only data columns
-            data = [row_to_client(r[:len(actual_columns)], actual_columns) for r in rows]
+            data = [row_to_client(r[:len(actual_columns)], actual_columns, life_system_override=life_system_tag) for r in rows]
             # For policy lookup: use requested policy in response
             if policy and data:
                 for rec in data:

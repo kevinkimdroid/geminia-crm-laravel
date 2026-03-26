@@ -1,10 +1,11 @@
 <?php
 /**
- * Standalone feedback app for geminialife.co.ke/feedback
- * Handles "Were you happy with our service?" form.
- * Deploy this folder to https://geminialife.co.ke/feedback/
+ * Standalone client feedback (crm-client-feedback).
+ * Deploy via Laravel public/: public/crm-client-feedback/index.php requires this file,
+ * or map the web server to this directory.
  *
- * Requires: FEEDBACK_CRM_API_URL and FEEDBACK_PUBLIC_URL in config.php
+ * Configure CRM .env: FEEDBACK_PUBLIC_URL, FEEDBACK_PUBLIC_PATH=crm-client-feedback, FEEDBACK_CRM_API_URL
+ * Optional: copy config.example.php to config.php
  */
 
 session_start();
@@ -14,7 +15,6 @@ $config = [
     'app_name' => 'Geminia Life Insurance',
 ];
 
-// Load config from config.php if present
 if (file_exists(__DIR__ . '/config.php')) {
     $config = array_merge($config, require __DIR__ . '/config.php');
 }
@@ -33,7 +33,6 @@ function callCrm(string $url, string $method = 'GET', array $postData = []): ?ar
         curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($postData));
     }
     $response = curl_exec($ch);
-    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
     if ($response === false) {
         return null;
@@ -115,7 +114,7 @@ elseif ($ticket && $expires && $signature) {
     } else {
         $ticketNo = $result['ticket_no'] ?? 'TT' . $ticket;
         $title = $result['title'] ?? 'Support request';
-        $formUrl = ''; // POST to current URL (params in query string)
+        $formUrl = '';
     }
 } else {
     $error = 'Please use the link from the email we sent you after closing your support ticket. That link contains a secure token needed for this form.';
@@ -156,6 +155,9 @@ header('Content-Type: text/html; charset=utf-8');
         <p class="text-muted small mb-4">Your support ticket <strong><?= htmlspecialchars($ticketNo) ?></strong> — <?= htmlspecialchars(mb_substr($title, 0, 50)) ?> — has been closed. We'd love to hear from you.</p>
 
         <form method="POST" action="<?= htmlspecialchars($formUrl) ?>">
+            <input type="hidden" name="ticket" value="<?= (int) $ticket ?>">
+            <input type="hidden" name="expires" value="<?= htmlspecialchars((string) $expires, ENT_QUOTES, 'UTF-8') ?>">
+            <input type="hidden" name="signature" value="<?= htmlspecialchars((string) $signature, ENT_QUOTES, 'UTF-8') ?>">
             <div class="mb-4">
                 <label class="form-label fw-semibold">Were you happy with our service?</label>
                 <div class="d-flex flex-column gap-2">

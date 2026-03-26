@@ -54,15 +54,22 @@ return [
     |   'erp_http' = fetch directly from ERP_CLIENTS_HTTP_URL (fast, no Oracle/cache)
     |
     | When filtering by life system, separate views are used:
-    |   system=group      → ERP_CLIENTS_GROUP_VIEW (LMS_GROUP_CRM_VIEW)
-    |   system=individual → ERP_CLIENTS_INDIVIDUAL_VIEW (LMS_INDIVIDUAL_CRM_VIEW)
-    |   no filter         → clients_list_table (default)
+    |   system=group          → ERP_CLIENTS_GROUP_VIEW (LMS_GROUP_CRM_VIEW)
+    |   system=individual     → ERP_CLIENTS_INDIVIDUAL_VIEW (LMS_INDIVIDUAL_CRM_VIEW)
+    |   system=mortgage       → ERP_CLIENTS_MORTGAGE_VIEW (your mortgage CRM view)
+    |   system=group_pension  → ERP_CLIENTS_GROUP_PENSION_VIEW (your group pension CRM view)
+    |   no filter             → clients_list_table (default)
+    |
+    | If MORTGAGE / GROUP_PENSION views are not set in .env, those tabs return no rows
+    | until ERP_CLIENTS_MORTGAGE_VIEW / ERP_CLIENTS_GROUP_PENSION_VIEW are defined.
     |
     */
     'clients_view_source' => env('CLIENTS_VIEW_SOURCE', 'crm'),
 
     'clients_group_view' => env('ERP_CLIENTS_GROUP_VIEW', 'LMS_GROUP_CRM_VIEW'),
     'clients_individual_view' => env('ERP_CLIENTS_INDIVIDUAL_VIEW', 'LMS_INDIVIDUAL_CRM_VIEW'),
+    'clients_mortgage_view' => env('ERP_CLIENTS_MORTGAGE_VIEW'),
+    'clients_group_pension_view' => env('ERP_CLIENTS_GROUP_PENSION_VIEW'),
 
     /*
     |--------------------------------------------------------------------------
@@ -77,6 +84,9 @@ return [
     */
     'group_life_keywords' => array_map('trim', explode(',', env('ERP_GROUP_LIFE_KEYWORDS', 'GROUP,GL,CREDIT LIFE'))),
     'individual_life_keywords' => array_map('trim', explode(',', env('ERP_INDIVIDUAL_LIFE_KEYWORDS', 'INDIVIDUAL,IL,LIFE'))),
+    /* Product substring match (UPPER) for erp_sync cache filtering & badges when no dedicated view row tag */
+    'mortgage_keywords' => array_map('trim', explode(',', env('ERP_MORTGAGE_KEYWORDS', 'MORTGAGE'))),
+    'group_pension_keywords' => array_map('trim', explode(',', env('ERP_GROUP_PENSION_KEYWORDS', 'GROUP PENSION,PENSION,PPP'))),
     'clients_list_table' => env('ERP_CLIENTS_LIST_TABLE', env('ERP_CLIENTS_TABLE', 'CLIENTS')),
     'clients_list_columns' => env('ERP_CLIENTS_LIST_COLUMNS', 'POLICY_NUMBER,PRODUCT,POL_PREPARED_BY,INTERMEDIARY,STATUS,KRA_PIN'),
     'clients_list_order' => env('ERP_CLIENTS_LIST_ORDER', 'PRODUCT'),

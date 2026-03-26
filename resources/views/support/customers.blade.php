@@ -42,10 +42,13 @@
 
 @if(in_array($clientsSource ?? 'crm', ['erp_sync', 'erp_http']))
 {{-- Life System filter pills --}}
+@php $erpClientSvc = app(\App\Services\ErpClientService::class); @endphp
 <div class="clients-system-pills mb-3">
     <a href="{{ route($listRoute ?? 'support.customers', collect(request()->query())->except('system')->all()) }}" class="clients-system-pill {{ !($system ?? '') ? 'active' : '' }}">All</a>
     <a href="{{ route($listRoute ?? 'support.customers', array_merge(request()->query(), ['system' => 'group'])) }}" class="clients-system-pill clients-system-group {{ ($system ?? '') === 'group' ? 'active' : '' }}"><i class="bi bi-people-fill me-1"></i>Group Life</a>
     <a href="{{ route($listRoute ?? 'support.customers', array_merge(request()->query(), ['system' => 'individual'])) }}" class="clients-system-pill clients-system-individual {{ ($system ?? '') === 'individual' ? 'active' : '' }}"><i class="bi bi-person-fill me-1"></i>Individual Life</a>
+    <a href="{{ route($listRoute ?? 'support.customers', array_merge(request()->query(), ['system' => 'mortgage'])) }}" class="clients-system-pill clients-system-mortgage {{ ($system ?? '') === 'mortgage' ? 'active' : '' }}"><i class="bi bi-house-fill me-1"></i>Mortgage</a>
+    <a href="{{ route($listRoute ?? 'support.customers', array_merge(request()->query(), ['system' => 'group_pension'])) }}" class="clients-system-pill clients-system-group-pension {{ ($system ?? '') === 'group_pension' ? 'active' : '' }}"><i class="bi bi-piggy-bank-fill me-1"></i>Group Pension</a>
 </div>
 @endif
 
@@ -69,6 +72,10 @@
                     Total Group Life Clients
                 @elseif(($system ?? '') === 'individual')
                     Total Individual Life Clients
+                @elseif(($system ?? '') === 'mortgage')
+                    Total Mortgage Clients
+                @elseif(($system ?? '') === 'group_pension')
+                    Total Group Pension Clients
                 @else
                     Total {{ ($listRoute ?? 'support.customers') === 'contacts.index' ? 'Contacts' : 'Clients' }}
                 @endif
@@ -134,8 +141,11 @@
                         </td>
                         <td class="clients-product">{{ Str::limit($customer->product ?? '—', 40) }}</td>
                         <td>
-                            @php $ls = $customer->life_system ?? app(\App\Services\ErpClientService::class)->getLifeSystemFromProduct($customer->product ?? null); @endphp
-                            <span class="clients-system-badge clients-system-{{ $ls }}">{{ $ls === 'group' ? 'Group Life' : 'Individual Life' }}</span>
+                            @php
+                                $ls = $customer->life_system ?? $erpClientSvc->getLifeSystemFromProduct($customer->product ?? null);
+                                $lsLabel = $erpClientSvc->getClientSystemLabel($ls);
+                            @endphp
+                            <span class="clients-system-badge clients-system-{{ $ls }}">{{ $lsLabel }}</span>
                         </td>
                         <td>
                             @php $st = $customer->status ?? ''; @endphp
@@ -295,11 +305,15 @@
 .clients-system-pill.active { background: var(--geminia-primary); border-color: var(--geminia-primary); color: #fff; }
 .clients-system-group.active { background: #0d9488; border-color: #0d9488; }
 .clients-system-individual.active { background: #6366f1; border-color: #6366f1; }
+.clients-system-mortgage.active { background: #c2410c; border-color: #c2410c; }
+.clients-system-group-pension.active { background: #7c3aed; border-color: #7c3aed; }
 .clients-system-badge {
     display: inline-block; padding: 0.2rem 0.55rem; border-radius: 6px; font-size: 0.7rem; font-weight: 600;
 }
 .clients-system-badge.clients-system-group { background: #ccfbf1; color: #0f766e; }
 .clients-system-badge.clients-system-individual { background: #e0e7ff; color: #4338ca; }
+.clients-system-badge.clients-system-mortgage { background: #ffedd5; color: #9a3412; }
+.clients-system-badge.clients-system-group_pension { background: #ede9fe; color: #5b21b6; }
 
 .clients-actions { display: flex; gap: 0.35rem; justify-content: flex-end; flex-wrap: wrap; }
 .clients-btn-view { background: var(--geminia-primary-muted); color: var(--geminia-primary) !important; border: none; padding: 0.35rem 0.65rem; border-radius: 8px; font-size: 0.8rem; text-decoration: none; display: inline-flex; align-items: center; }
@@ -399,7 +413,8 @@
                     var identifier = policy;
                     var statusClass = (c.status === 'A') ? 'active' : ((c.status === 'FL') ? 'lapsed' : 'other');
                     var ls = c.life_system || 'individual';
-                    var systemLabel = ls === 'group' ? 'Group Life' : 'Individual Life';
+                    var systemLabels = { group: 'Group Life', individual: 'Individual Life', mortgage: 'Mortgage', group_pension: 'Group Pension' };
+                    var systemLabel = systemLabels[ls] || 'Individual Life';
                     return '<tr><td><a href="' + serveUrl + '?search=' + encodeURIComponent(identifier) + '" class="clients-policy-link">' + esc(policy || '—') + '</a></td>' +
                         '<td>' + esc(c.pol_prepared_by || '—') + '</td>' +
                         '<td>' + esc((c.intermediary || '—').substring(0, 25)) + '</td>' +

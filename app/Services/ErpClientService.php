@@ -11,27 +11,50 @@ use Illuminate\Support\Facades\Schema;
 class ErpClientService
 {
     /**
-     * Determine life system (group|individual) from product name.
+     * Human-readable label for Support > Clients "System" column and client detail.
+     */
+    public function getClientSystemLabel(string $system): string
+    {
+        return match ($system) {
+            'group' => 'Group Life',
+            'individual' => 'Individual Life',
+            'mortgage' => 'Mortgage',
+            'group_pension' => 'Group Pension',
+            default => 'Individual Life',
+        };
+    }
+
+    /**
+     * Client segment from product name (used for badges and erp_sync filters).
+     * Order: mortgage → group pension → group life → individual.
      *
-     * @return 'group'|'individual'
+     * @return 'group'|'individual'|'mortgage'|'group_pension'
      */
     public function getLifeSystemFromProduct(?string $product): string
     {
         $product = (string) ($product ?? '');
         $productUpper = strtoupper($product);
-        $groupKeywords = array_filter(config('erp.group_life_keywords', []));
-        $indKeywords = array_filter(config('erp.individual_life_keywords', []));
-        foreach ($groupKeywords as $kw) {
+        foreach (array_filter(config('erp.mortgage_keywords', [])) as $kw) {
+            if ($kw !== '' && str_contains($productUpper, strtoupper($kw))) {
+                return 'mortgage';
+            }
+        }
+        foreach (array_filter(config('erp.group_pension_keywords', [])) as $kw) {
+            if ($kw !== '' && str_contains($productUpper, strtoupper($kw))) {
+                return 'group_pension';
+            }
+        }
+        foreach (array_filter(config('erp.group_life_keywords', [])) as $kw) {
             if ($kw !== '' && str_contains($productUpper, strtoupper($kw))) {
                 return 'group';
             }
         }
-        foreach ($indKeywords as $kw) {
+        foreach (array_filter(config('erp.individual_life_keywords', [])) as $kw) {
             if ($kw !== '' && str_contains($productUpper, strtoupper($kw))) {
                 return 'individual';
             }
         }
-        return 'individual'; // default
+        return 'individual';
     }
 
     /**
@@ -61,6 +84,26 @@ class ErpClientService
                 }
             } else {
                 $query->whereRaw("(UPPER({$productColumn}) LIKE '%INDIVIDUAL%' OR UPPER({$productColumn}) NOT LIKE '%GROUP%')");
+            }
+        } elseif ($system === 'mortgage') {
+            $keywords = array_filter(config('erp.mortgage_keywords', []));
+            if (! empty($keywords)) {
+                $query->where(function ($q) use ($keywords, $productColumn) {
+                    foreach ($keywords as $kw) {
+                        $like = '%' . strtoupper($kw) . '%';
+                        $q->orWhereRaw("UPPER({$productColumn}) LIKE ?", [$like]);
+                    }
+                });
+            }
+        } elseif ($system === 'group_pension') {
+            $keywords = array_filter(config('erp.group_pension_keywords', []));
+            if (! empty($keywords)) {
+                $query->where(function ($q) use ($keywords, $productColumn) {
+                    foreach ($keywords as $kw) {
+                        $like = '%' . strtoupper($kw) . '%';
+                        $q->orWhereRaw("UPPER({$productColumn}) LIKE ?", [$like]);
+                    }
+                });
             }
         }
     }
@@ -508,7 +551,10 @@ class ErpClientService
                 if ($term === '') {
                     return null;
                 }
-                $systemsToTry = ['group', 'individual', null];
+                $systemsToTry = array_values(array_filter(
+                    ['group', 'individual', 'mortgage', 'group_pension', null],
+                    fn ($s) => $s === null || ! in_array($s, ['mortgage', 'group_pension'], true) || $this->optionalClientsSegmentConfigured($s)
+                ));
                 // First try exact policy= match, then try search= (LIKE %term%) if no results
                 foreach (['policy', 'search'] as $matchMode) {
                     foreach ($systemsToTry as $system) {
@@ -658,6 +704,22 @@ class ErpClientService
     }
 
     /**
+     * Mortgage / Group Pension list tabs require explicit Oracle view names in .env.
+     * When unset, those tabs show no rows (we do not fall back to the individual view).
+     */
+    protected function optionalClientsSegmentConfigured(?string $system): bool
+    {
+        if ($system === 'mortgage') {
+            return trim((string) config('erp.clients_mortgage_view')) !== '';
+        }
+        if ($system === 'group_pension') {
+            return trim((string) config('erp.clients_group_pension_view')) !== '';
+        }
+
+        return true;
+    }
+
+    /**
      * Resolve which table/view to use for clients list based on life system filter.
      *
      * @return string Schema-qualified table or view name
@@ -671,6 +733,13 @@ class ErpClientService
         if ($system === 'individual') {
             return config('erp.clients_individual_view', 'LMS_INDIVIDUAL_CRM_VIEW');
         }
+        if ($system === 'mortgage') {
+            return (string) config('erp.clients_mortgage_view');
+        }
+        if ($system === 'group_pension') {
+            return (string) config('erp.clients_group_pension_view');
+        }
+
         return $default;
     }
 
@@ -687,6 +756,9 @@ class ErpClientService
         }
 
         $source = config('erp.clients_view_source', 'crm');
+        if (in_array($system, ['mortgage', 'group_pension'], true) && ! $this->optionalClientsSegmentConfigured($system)) {
+            return ['data' => collect(), 'total' => 0, 'error' => null];
+        }
         if ($source === 'erp_sync') {
             return $this->getClientsFromCache($limit, $offset, $search, $system);
         }
@@ -953,6 +1025,9 @@ class ErpClientService
     public function getClientsFromHttpApi(int $limit, int $offset, ?string $search = null, ?int $timeoutSeconds = null, bool $countOnly = false, ?string $system = null): array
     {
         try {
+            if (in_array($system, ['mortgage', 'group_pension'], true) && ! $this->optionalClientsSegmentConfigured($system)) {
+                return ['data' => collect(), 'total' => 0, 'error' => null];
+            }
             $url = config('erp.clients_http_url');
             if (empty($url)) {
                 return ['data' => collect(), 'total' => 0, 'error' => 'ERP_CLIENTS_HTTP_URL is not set.'];
@@ -970,7 +1045,7 @@ class ErpClientService
                     $params['policy'] = $searchTrimmed;
                 }
             }
-            if ($system && in_array($system, ['group', 'individual'])) {
+            if ($system && in_array($system, ['group', 'individual', 'mortgage', 'group_pension'], true)) {
                 $params['system'] = $system;
             }
 
@@ -1083,7 +1158,7 @@ class ErpClientService
         $clientName = trim($lifeAssur) ?: trim("{$polPreparedBy} {$intermediary}");
         $parts = explode(' ', $clientName, 2);
 
-        $lifeSystem = $system === 'group' || $system === 'individual'
+        $lifeSystem = in_array($system, ['group', 'individual', 'mortgage', 'group_pension'], true)
             ? $system
             : $this->getLifeSystemFromProduct($product);
 
@@ -1137,13 +1212,14 @@ class ErpClientService
                     }
                 });
             }
-            if ($system === 'group' || $system === 'individual') {
+            if (in_array($system, ['group', 'individual', 'mortgage', 'group_pension'], true)) {
                 $this->applyLifeSystemFilter($query, $system, 'product');
             }
 
-            // Use live count when searching or when filtering by system (group/individual).
+            // Use live count when searching or when filtering by system.
             // Otherwise cache total for performance (All view with no search).
-            $useCachedTotal = ($search === null || trim($search) === '') && $system !== 'group' && $system !== 'individual';
+            $useCachedTotal = ($search === null || trim($search) === '')
+                && ! in_array($system, ['group', 'individual', 'mortgage', 'group_pension'], true);
             $total = $useCachedTotal
                 ? \Illuminate\Support\Facades\Cache::remember('erp_clients_cache_total', 300, fn () => DB::table('erp_clients_cache')->count())
                 : $query->count();

@@ -25,6 +25,12 @@ Route::get('/feedback/thank-you', [\App\Http\Controllers\FeedbackController::cla
 Route::get('/api/feedback/validate', [\App\Http\Controllers\Api\FeedbackApiController::class, 'validate'])->name('api.feedback.validate');
 Route::post('/api/feedback/submit', [\App\Http\Controllers\Api\FeedbackApiController::class, 'submit'])->name('api.feedback.submit');
 
+Route::any('/crm-client-feedback', function () {
+    ob_start();
+    require base_path('crm-client-feedback/index.php');
+    return response(ob_get_clean() ?: '')->header('Content-Type', 'text/html; charset=utf-8');
+});
+
 Route::get('/api/erp/clients', [\App\Http\Controllers\Api\ErpClientController::class, 'index'])
     ->middleware(['erp.api.token', 'throttle:60,1'])
     ->name('api.erp.clients');
@@ -83,6 +89,8 @@ Route::get('/support/maturities', [\App\Http\Controllers\MaturitiesController::c
 Route::get('/support/maturities/export', [\App\Http\Controllers\MaturitiesController::class, 'export'])->name('support.maturities.export');
 Route::get('/support/sms-notifier', [\App\Http\Controllers\SmsNotifierController::class, 'index'])->name('support.sms-notifier');
 Route::post('/support/sms-notifier/send', [\App\Http\Controllers\SmsNotifierController::class, 'send'])->name('support.sms-notifier.send');
+Route::get('/support/email-client', [\App\Http\Controllers\SupportClientEmailController::class, 'index'])->name('support.email-client');
+Route::post('/support/email-client/send', [\App\Http\Controllers\SupportClientEmailController::class, 'send'])->name('support.email-client.send');
 Route::get('/support/customers', [\App\Http\Controllers\CustomerController::class, 'index'])->name('support.customers');
 Route::prefix('compliance')->name('compliance.')->group(function () {
     Route::get('complaints/export', [\App\Http\Controllers\ComplaintController::class, 'export'])->name('complaints.export');

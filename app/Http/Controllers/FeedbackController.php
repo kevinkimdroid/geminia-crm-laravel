@@ -20,12 +20,15 @@ class FeedbackController extends Controller
     /**
      * Show the feedback form or process submission (requires signed URL).
      * GET: show form. POST: submit feedback. Form posts to same signed URL.
+     *
+     * When FEEDBACK_PUBLIC_URL is set, emails use HMAC signatures (same as /api/feedback/*).
+     * Otherwise Laravel temporarySignedRoute + hasValidSignature() is used.
      */
     public function form(Request $request): View|RedirectResponse
     {
         $request->validate(['ticket' => 'required|integer']);
 
-        if (! $request->hasValidSignature()) {
+        if (! $this->feedbackRequestHasValidSignature($request)) {
             return redirect()->route('login')->with('error', 'This feedback link has expired or is invalid.');
         }
 
@@ -116,5 +119,33 @@ class FeedbackController extends Controller
         $alreadySubmitted = $request->session()->get('submitted', false);
 
         return view('feedback.thank-you', ['already_submitted' => (bool) $alreadySubmitted]);
+    }
+
+    /**
+     * Validates either HMAC link (FEEDBACK_PUBLIC_URL set) or Laravel signed URL.
+     */
+    private function feedbackRequestHasValidSignature(Request $request): bool
+    {
+        $publicUrl = trim((string) config('tickets.feedback_request.public_url', ''));
+        if ($publicUrl !== '') {
+            $ticket = (int) $request->get('ticket', 0);
+            $expires = $request->get('expires');
+            $signature = $request->get('signature');
+            if (! $ticket || $expires === null || $expires === '' || $signature === null || $signature === '') {
+                return false;
+            }
+            $path = trim((string) config('tickets.feedback_request.public_path', 'crm-client-feedback'), '/');
+            $signedUrl = rtrim($publicUrl, '/') . '/' . $path . '?' . http_build_query([
+                'ticket' => $ticket,
+                'expires' => $expires,
+            ]);
+            if (! hash_equals((string) $signature, hash_hmac('sha256', $signedUrl, config('app.key')))) {
+                return false;
+            }
+
+            return time() <= (int) $expires;
+        }
+
+        return $request->hasValidSignature();
     }
 }
