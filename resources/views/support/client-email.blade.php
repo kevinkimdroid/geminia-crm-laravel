@@ -122,6 +122,7 @@
             <ul class="small text-muted ps-3 mb-4">
                 <li class="mb-2">Uses the same sender as ticket notifications (Graph or <code>MAIL_*</code>).</li>
                 <li class="mb-2">Plain text only — no attachments from this screen.</li>
+                <li class="mb-0">To add a password to a PDF, use <a href="{{ route('tools.pdf-protect') }}">Tools → Protect PDF</a>.</li>
             </ul>
             <a href="{{ route('support.serve-client') }}" class="btn btn-outline-secondary w-100 mb-2">
                 <i class="bi bi-person-plus me-2"></i>Serve Client

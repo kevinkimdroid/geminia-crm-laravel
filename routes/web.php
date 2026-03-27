@@ -116,6 +116,8 @@ Route::get('/tools/pbx-manager/vtiger/{id}/recording', [\App\Http\Controllers\Pb
 Route::get('/tools/pbx-manager/calls/{pbxCall}/recording', [\App\Http\Controllers\PbxController::class, 'recording'])->name('tools.pbx-manager.recording');
 Route::post('/tools/pbx-manager/claim', [\App\Http\Controllers\PbxController::class, 'claim'])->name('tools.pbx-manager.claim');
 Route::post('/tools/pbx-manager/claim-latest', [\App\Http\Controllers\PbxController::class, 'claimLatest'])->name('tools.pbx-manager.claim-latest');
+Route::get('/tools/pdf-protect', [\App\Http\Controllers\PdfProtectController::class, 'index'])->name('tools.pdf-protect');
+Route::post('/tools/pdf-protect', [\App\Http\Controllers\PdfProtectController::class, 'process'])->name('tools.pdf-protect.process');
 Route::get('/tools/pdf-maker', [\App\Http\Controllers\PdfMakerController::class, 'index'])->name('tools.pdf-maker');
 Route::get('/tools/pdf-maker/{module}/create', [\App\Http\Controllers\PdfMakerController::class, 'create'])->name('tools.pdf-maker.create');
 Route::get('/tools/pdf-maker/{module}/template', [\App\Http\Controllers\PdfMakerController::class, 'template'])->name('tools.pdf-maker.template');

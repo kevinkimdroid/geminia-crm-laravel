@@ -746,6 +746,42 @@ class CrmService
         return $c ? trim(($c->firstname ?? '') . ' ' . ($c->lastname ?? '')) : '';
     }
 
+    /**
+     * Policy number for a contact from vtiger_contactscf (cf_860, cf_856, cf_872), excluding KRA PIN.
+     */
+    public function getContactPolicyNumber(int $contactId): ?string
+    {
+        if ($contactId <= 0) {
+            return null;
+        }
+        try {
+            $row = DB::connection('vtiger')
+                ->table('vtiger_contactdetails as c')
+                ->join('vtiger_crmentity as e', 'c.contactid', '=', 'e.crmid')
+                ->leftJoin('vtiger_contactscf as cf', 'c.contactid', '=', 'cf.contactid')
+                ->where('e.deleted', 0)
+                ->whereIn('e.setype', ['Contacts', 'Contact'])
+                ->where('c.contactid', $contactId)
+                ->select('cf.cf_860', 'cf.cf_856', 'cf.cf_872')
+                ->first();
+            if (! $row) {
+                return null;
+            }
+            $policy = $this->pickPolicyExcludingPin(
+                $row->cf_860 ?? null,
+                $row->cf_856 ?? null,
+                $row->cf_872 ?? null
+            );
+            $policy = $policy !== null ? trim((string) $policy) : '';
+
+            return $policy !== '' ? $policy : null;
+        } catch (\Throwable $e) {
+            Log::warning('CrmService::getContactPolicyNumber: ' . $e->getMessage());
+
+            return null;
+        }
+    }
+
     public function getCustomersCount(?string $search = null, ?int $ownerId = null): int
     {
         try {

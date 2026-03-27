@@ -29,6 +29,7 @@ return [
         'tools.recycle-bin' => null,
         'tools.pbx-manager' => null,
         'tools.pdf-maker' => null,
+        'tools.pdf-protect' => null,
         'tools.mail-manager' => null,
         'calendar' => null,
         'reports' => 'Reports',

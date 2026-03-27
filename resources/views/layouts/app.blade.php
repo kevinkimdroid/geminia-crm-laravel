@@ -375,6 +375,11 @@
                     @if($can('tools.mail-manager'))
                     <a href="{{ route('tools.mail-manager') }}" class="app-nav-link app-nav-sublink"><i class="bi bi-envelope-at"></i><span>Mail Manager</span></a>
                     @endif
+                    @if($can('tools.pdf-maker'))
+                    <a href="{{ route('tools.pdf-protect') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('tools.pdf-protect') ? 'active' : '' }}">
+                        <i class="bi bi-shield-lock"></i><span>Protect PDF</span>
+                    </a>
+                    @endif
                 </div>
                 @if($can('settings'))
                 <div class="app-nav-group">
