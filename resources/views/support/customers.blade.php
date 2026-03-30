@@ -45,10 +45,10 @@
 @php $erpClientSvc = app(\App\Services\ErpClientService::class); @endphp
 <div class="clients-system-pills mb-3">
     <a href="{{ route($listRoute ?? 'support.customers', collect(request()->query())->except('system')->all()) }}" class="clients-system-pill {{ !($system ?? '') ? 'active' : '' }}">All</a>
-    <a href="{{ route($listRoute ?? 'support.customers', array_merge(request()->query(), ['system' => 'group'])) }}" class="clients-system-pill clients-system-group {{ ($system ?? '') === 'group' ? 'active' : '' }}"><i class="bi bi-people-fill me-1"></i>Group Life</a>
-    <a href="{{ route($listRoute ?? 'support.customers', array_merge(request()->query(), ['system' => 'individual'])) }}" class="clients-system-pill clients-system-individual {{ ($system ?? '') === 'individual' ? 'active' : '' }}"><i class="bi bi-person-fill me-1"></i>Individual Life</a>
-    <a href="{{ route($listRoute ?? 'support.customers', array_merge(request()->query(), ['system' => 'mortgage'])) }}" class="clients-system-pill clients-system-mortgage {{ ($system ?? '') === 'mortgage' ? 'active' : '' }}"><i class="bi bi-house-fill me-1"></i>Mortgage</a>
-    <a href="{{ route($listRoute ?? 'support.customers', array_merge(request()->query(), ['system' => 'group_pension'])) }}" class="clients-system-pill clients-system-group-pension {{ ($system ?? '') === 'group_pension' ? 'active' : '' }}"><i class="bi bi-piggy-bank-fill me-1"></i>Group Pension</a>
+    <a href="{{ route($listRoute ?? 'support.customers', array_merge(request()->query(), ['system' => 'group'])) }}" class="clients-system-pill clients-system-group {{ ($system ?? '') === 'group' ? 'active' : '' }}"><i class="bi bi-people-fill me-1"></i>{{ config('clients_ui.tab_labels.group') }}</a>
+    <a href="{{ route($listRoute ?? 'support.customers', array_merge(request()->query(), ['system' => 'individual'])) }}" class="clients-system-pill clients-system-individual {{ ($system ?? '') === 'individual' ? 'active' : '' }}"><i class="bi bi-person-fill me-1"></i>{{ config('clients_ui.tab_labels.individual') }}</a>
+    <a href="{{ route($listRoute ?? 'support.customers', array_merge(request()->query(), ['system' => 'mortgage'])) }}" class="clients-system-pill clients-system-mortgage {{ ($system ?? '') === 'mortgage' ? 'active' : '' }}"><i class="bi bi-house-fill me-1"></i>{{ config('clients_ui.tab_labels.mortgage') }}</a>
+    <a href="{{ route($listRoute ?? 'support.customers', array_merge(request()->query(), ['system' => 'group_pension'])) }}" class="clients-system-pill clients-system-group-pension {{ ($system ?? '') === 'group_pension' ? 'active' : '' }}"><i class="bi bi-piggy-bank-fill me-1"></i>{{ config('clients_ui.tab_labels.group_pension') }}</a>
 </div>
 @endif
 
@@ -69,13 +69,13 @@
             <span class="clients-stat-value" id="clientsTotalValue">{{ number_format($total ?? 0) }}</span>
             <span class="clients-stat-label">
                 @if(($system ?? '') === 'group')
-                    Total Group Life Clients
+                    Total {{ config('clients_ui.tab_labels.group') }} Clients
                 @elseif(($system ?? '') === 'individual')
-                    Total Individual Life Clients
+                    Total {{ config('clients_ui.tab_labels.individual') }} Clients
                 @elseif(($system ?? '') === 'mortgage')
-                    Total Mortgage Clients
+                    Total {{ config('clients_ui.tab_labels.mortgage') }} Clients
                 @elseif(($system ?? '') === 'group_pension')
-                    Total Group Pension Clients
+                    Total {{ config('clients_ui.tab_labels.group_pension') }} Clients
                 @else
                     Total {{ ($listRoute ?? 'support.customers') === 'contacts.index' ? 'Contacts' : 'Clients' }}
                 @endif
@@ -223,6 +223,10 @@
                                     @endif
                                     @else
                                     Get started by adding your first {{ ($listRoute ?? 'support.customers') === 'contacts.index' ? 'contact' : 'client' }}.
+                                    @if(in_array($clientsSource ?? 'crm', ['erp_http', 'erp_sync']) && in_array(($system ?? ''), ['group', 'mortgage', 'group_pension'], true))
+                                    <br><span class="small text-muted">ERP list empty: confirm <code>erp-clients-api</code> is running and <code>ERP_CLIENTS_…_VIEW</code> matches Oracle.</span>
+                                    <br><a href="{{ route('support.clients.debug-api', array_filter(['system' => $system ?? null])) }}" target="_blank" rel="noopener" class="small">Debug ERP API response</a>
+                                    @endif
                                     @endif
                                 </p>
                                 @if(!($search ?? ''))
@@ -390,6 +394,7 @@
     var system = @json($system ?? '');
     var initialPage = {{ (int) ($page ?? 1) }};
     var listRoute = '{{ $listRoute ?? "support.customers" }}';
+    var systemLabels = @json(config('clients_ui.tab_labels'));
 
     function esc(s) { var d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
     function loadClients(page) {
@@ -413,8 +418,7 @@
                     var identifier = policy;
                     var statusClass = (c.status === 'A') ? 'active' : ((c.status === 'FL') ? 'lapsed' : 'other');
                     var ls = c.life_system || 'individual';
-                    var systemLabels = { group: 'Group Life', individual: 'Individual Life', mortgage: 'Mortgage', group_pension: 'Group Pension' };
-                    var systemLabel = systemLabels[ls] || 'Individual Life';
+                    var systemLabel = systemLabels[ls] || systemLabels.individual || 'Individual Life';
                     return '<tr><td><a href="' + serveUrl + '?search=' + encodeURIComponent(identifier) + '" class="clients-policy-link">' + esc(policy || '—') + '</a></td>' +
                         '<td>' + esc(c.pol_prepared_by || '—') + '</td>' +
                         '<td>' + esc((c.intermediary || '—').substring(0, 25)) + '</td>' +

@@ -111,7 +111,12 @@ class CustomerController extends Controller
         $body = $response->json();
         $parsed = parse_url($url);
         $base = ($parsed['scheme'] ?? 'http') . '://' . ($parsed['host'] ?? 'localhost') . (isset($parsed['port']) ? ':' . $parsed['port'] : '');
-        $columnsView = $system === 'group' ? 'group' : null;
+        $columnsView = match ($system) {
+            'group' => 'group',
+            'mortgage' => 'mortgage',
+            'group_pension' => 'group_pension',
+            default => null,
+        };
         $columnsUrl = $base . '/columns' . ($columnsView ? '?view=' . $columnsView : '');
         $columnsResp = \Illuminate\Support\Facades\Http::timeout(5)->get($columnsUrl);
         $columnsData = $columnsResp->successful() ? $columnsResp->json() : null;

@@ -172,6 +172,8 @@ return [
         'MOBILE' => 'mobile',
         'ADDRESS' => 'address',
         'STATUS' => 'status',
+        'MENDR_STATUS' => 'status',
+        'ENDR_STATUS' => 'status',
         'POLICY_NO' => 'policy_no',
         'POLICY_NUMBER' => 'policy_number',
         'PRODUCT' => 'product',

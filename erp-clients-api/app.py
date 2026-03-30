@@ -8,14 +8,57 @@ import os
 import re
 from pathlib import Path
 
-# Load .env if present
-_env = Path(__file__).parent / ".env"
-if _env.exists():
-    for line in _env.read_text().splitlines():
+_DOTENV_PATH = Path(__file__).parent / ".env"
+_dotenv_mtime = None
+# ERP_CLIENTS_GROUP_VIEW (updated when .env loads — must stay in sync for Group Life tab)
+GROUP_VIEW = ""
+_group_view_columns_cache = None
+_group_view_cached_for = None
+
+
+def _sync_group_view_from_env():
+    """Set GROUP_VIEW from env; invalidate column cache when the qualified name changes."""
+    global GROUP_VIEW, _group_view_columns_cache, _group_view_cached_for
+    schema = os.environ.get("ERP_VIEW_SCHEMA", "TQ_LMS")
+    gv = os.environ.get("ERP_CLIENTS_GROUP_VIEW") or (
+        f"{schema}.LMS_GROUP_CRM_VIEW" if schema else "LMS_GROUP_CRM_VIEW"
+    )
+    if gv != _group_view_cached_for:
+        _group_view_cached_for = gv
+        _group_view_columns_cache = None
+    GROUP_VIEW = gv
+
+
+def ensure_env_loaded():
+    """
+    Load erp-clients-api/.env into os.environ. File values override existing vars
+    (fixes empty ERP_* inherited from the shell). Re-reads when the file changes (mtime).
+    """
+    global _dotenv_mtime
+    p = _DOTENV_PATH
+    if not p.exists():
+        _sync_group_view_from_env()
+        return
+    try:
+        m = p.stat().st_mtime
+    except OSError:
+        _sync_group_view_from_env()
+        return
+    if _dotenv_mtime == m:
+        return
+    _dotenv_mtime = m
+    for line in p.read_text(encoding="utf-8", errors="replace").splitlines():
         line = line.strip()
         if line and not line.startswith("#") and "=" in line:
             k, _, v = line.partition("=")
-            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+            key = k.strip()
+            if not key:
+                continue
+            os.environ[key] = v.strip().strip('"').strip("'")
+    _sync_group_view_from_env()
+
+
+ensure_env_loaded()
 
 from flask import Flask, request, jsonify
 
@@ -27,18 +70,29 @@ except ImportError:
 
 app = Flask(__name__)
 
+
+@app.before_request
+def _reload_dotenv_if_changed():
+    ensure_env_loaded()
+
 DSN = os.environ.get("ORACLE_DSN", "10.1.4.101:18032/PDBTQUEST")
 USER = os.environ.get("ORACLE_USER", "TQ_LMS")
 PASSWORD = os.environ.get("ORACLE_PASSWORD", "")
 VIEW_SCHEMA = os.environ.get("ERP_VIEW_SCHEMA", "TQ_LMS")
 VIEW_NAME = os.environ.get("ERP_CLIENTS_VIEW", "LMS_INDIVIDUAL_CRM_VIEW")
-# Separate views for group vs individual life (LMS_GROUP_CRM_VIEW / LMS_INDIVIDUAL_CRM_VIEW)
-GROUP_VIEW = os.environ.get("ERP_CLIENTS_GROUP_VIEW") or (f"{VIEW_SCHEMA}.LMS_GROUP_CRM_VIEW" if VIEW_SCHEMA else "LMS_GROUP_CRM_VIEW")
+# GROUP_VIEW is set by ensure_env_loaded → _sync_group_view_from_env()
+_sync_group_view_from_env()
 INDIVIDUAL_VIEW = os.environ.get("ERP_CLIENTS_INDIVIDUAL_VIEW") or (f"{VIEW_SCHEMA}.LMS_INDIVIDUAL_CRM_VIEW" if VIEW_SCHEMA else "LMS_INDIVIDUAL_CRM_VIEW")
-# Optional: Support > Clients — system=mortgage / group_pension returns empty until these are set
-_MORTGAGE_RAW = (os.environ.get("ERP_CLIENTS_MORTGAGE_VIEW") or "").strip()
-_GROUP_PENSION_RAW = (os.environ.get("ERP_CLIENTS_GROUP_PENSION_VIEW") or "").strip()
 VIEW = f"{VIEW_SCHEMA}.{VIEW_NAME}" if VIEW_SCHEMA else VIEW_NAME
+
+
+def _mortgage_view_q():
+    """Schema-qualified mortgage view from env (read after ensure_env_loaded / before_request)."""
+    return (os.environ.get("ERP_CLIENTS_MORTGAGE_VIEW") or "").strip()
+
+
+def _group_pension_view_q():
+    return (os.environ.get("ERP_CLIENTS_GROUP_PENSION_VIEW") or "").strip()
 COLS_BASE = "POLICY_NUMBER,PRODUCT,POL_PREPARED_BY,INTERMEDIARY,STATUS,KRA_PIN"
 # Oracle view uses LIFE_ASSURED (with D); LIFE_ASSUR may also exist
 COLS_EXTENDED = "POLICY_NUMBER,LIFE_ASSURED,PRODUCT,POL_PREPARED_BY,INTERMEDIARY,STATUS,KRA_PIN,PRP_DOB,MATURITY_DATE,ID_NO,PHONE_NO,CHECKOFF,BAL"
@@ -56,6 +110,37 @@ POLICY_COL_GROUP = os.environ.get("ERP_GROUP_POLICY_COLUMN", "POL_POLICY_NO")
 GROUP_BY_COL = os.environ.get("ERP_GROUP_GROUP_BY_COLUMN")  # default: IPOL_POLICY_NO if exists, else POLICY_COL_GROUP
 PRODUCT_COL_GROUP = os.environ.get("ERP_GROUP_PRODUCT_COLUMN", "PROD_DESC")
 USE_GROUP_AGGREGATE = os.environ.get("ERP_GROUP_AGGREGATE_BY_POLICY", "true").lower() in ("1", "true", "yes")
+# If LMS_INDIVIDUAL_CRM_VIEW.PRODUCT is null for all rows, comma-list Oracle column names to SELECT and map into API "product" (first non-empty wins). Example: MATURITY_STATUS,POLICY_STATUS
+ERP_INDIVIDUAL_PRODUCT_FALLBACK = os.environ.get("ERP_INDIVIDUAL_PRODUCT_FALLBACK", "").strip()
+
+
+def _merge_individual_product_fallback_columns(columns):
+    if not ERP_INDIVIDUAL_PRODUCT_FALLBACK:
+        return list(columns)
+    seen = {c.strip().upper() for c in columns}
+    out = list(columns)
+    for part in ERP_INDIVIDUAL_PRODUCT_FALLBACK.split(","):
+        p = part.strip().upper()
+        if p and p not in seen:
+            out.append(p)
+            seen.add(p)
+    return out
+
+
+def _apply_individual_product_fallback(d):
+    if not ERP_INDIVIDUAL_PRODUCT_FALLBACK:
+        return
+    if d.get("product") and str(d.get("product")).strip():
+        return
+    for part in ERP_INDIVIDUAL_PRODUCT_FALLBACK.split(","):
+        alt = part.strip()
+        if not alt:
+            continue
+        ak = alt.lower().replace(" ", "_").replace("-", "_")
+        v = d.get(ak)
+        if v is not None and str(v).strip():
+            d["product"] = str(v).strip()
+            return
 
 
 def parse_date(val):
@@ -65,6 +150,41 @@ def parse_date(val):
         return val.strftime("%Y-%m-%d")
     s = str(val).strip()
     return s[:10] if s and len(s) >= 10 else (s or None)
+
+
+def _coerce_oracle_scalar_to_str(v):
+    """
+    Text columns may be CLOB/NCLOB — str(lob) is often empty in Python; .read() returns the text.
+    """
+    if v is None:
+        return None
+    if hasattr(v, "strftime"):
+        return v.strftime("%Y-%m-%d")
+    if isinstance(v, (bytes, bytearray)):
+        s = v.decode("utf-8", errors="replace").strip()
+        return s if s else None
+    read_fn = getattr(v, "read", None)
+    if callable(read_fn):
+        try:
+            chunk = read_fn()
+            if chunk is None:
+                return None
+            if isinstance(chunk, (bytes, bytearray)):
+                s = chunk.decode("utf-8", errors="replace").strip()
+            else:
+                s = str(chunk).strip()
+            return s if s else None
+        except Exception:
+            pass
+    try:
+        s = str(v).strip()
+    except Exception:
+        return None
+    if not s:
+        return None
+    if s.startswith("<oracledb.") or s.startswith("<cx_Oracle."):
+        return None
+    return s
 
 
 RECEIPT_PATTERN = re.compile(r"^\d+/[A-Za-z]+/\d+$")  # 1/HO/100024 = receipt, NOT policy
@@ -84,9 +204,11 @@ def row_to_client(row, columns, *, life_system_override=None):
         v = row[i] if i < len(row) else None
         key = col.lower().replace(" ", "_").replace("-", "_")
         if key in ("prp_dob", "maturity", "maturity_date", "effective_date", "authorization_date") and v is not None:
+            if callable(getattr(v, "read", None)):
+                v = _coerce_oracle_scalar_to_str(v)
             d[key] = parse_date(v)
         else:
-            d[key] = str(v).strip() if v is not None else None
+            d[key] = _coerce_oracle_scalar_to_str(v)
     # BAL = balance, PRODUCTION_AMT (group view) -> paid_mat_amt for Laravel
     if "bal" in d and d["bal"] is not None:
         d["paid_mat_amt"] = d["bal"]
@@ -145,12 +267,16 @@ def row_to_client(row, columns, *, life_system_override=None):
     elif "client_name" in d and not d.get("life_assur") and not d.get("life_assured"):
         d["life_assur"] = d["client_name"]
         d["life_assured"] = d["client_name"]
-    # Product from PROD_DESC (per user: "product should fetch prod_desc from the view PROD_DESC")
+    # Product: group views prefer PROD_DESC / ERP_GROUP_PRODUCT_COLUMN; individual LMS view uses PRODUCT.
+    prod_from_row = d.get("product")
     prod_desc_val = d.get("prod_desc") or d.get(PRODUCT_COL_GROUP.lower().replace(" ", "_"))
     if prod_desc_val and str(prod_desc_val).strip():
         d["product"] = str(prod_desc_val).strip()
+    elif prod_from_row and str(prod_from_row).strip():
+        d["product"] = str(prod_from_row).strip()
     else:
         d["product"] = d.get("prod_sht_desc") or d.get("scheme_name") or None
+    _apply_individual_product_fallback(d)
     if "agn_name" in d and not d.get("intermediary"):
         d["intermediary"] = d["agn_name"]
     # Group view: BRA_MANAGER, UNIT_MANAR can serve as pol_prepared_by
@@ -179,6 +305,15 @@ def row_to_client(row, columns, *, life_system_override=None):
         d["id_no"] = d["id_number"]
     elif "id_no" in d and "id_number" not in d:
         d["id_number"] = d["id_no"]
+    # Mortgage: MENDR_STATUS; Group Pension: ENDR_STATUS; then generic policy status
+    mendr_st = d.get("mendr_status")
+    endr_st = d.get("endr_status")
+    if mendr_st is not None and str(mendr_st).strip() != "":
+        d["status"] = str(mendr_st).strip()
+    elif endr_st is not None and str(endr_st).strip() != "":
+        d["status"] = str(endr_st).strip()
+    elif d.get("policy_status") and str(d.get("policy_status") or "").strip() != "":
+        d["status"] = str(d["policy_status"]).strip()
     if life_system_override:
         d["life_system"] = life_system_override
     return d
@@ -195,9 +330,9 @@ def resolve_view(system):
     if system == "individual":
         return INDIVIDUAL_VIEW
     if system == "mortgage":
-        return _MORTGAGE_RAW
+        return _mortgage_view_q()
     if system == "group_pension":
-        return _GROUP_PENSION_RAW
+        return _group_pension_view_q()
     return VIEW
 
 
@@ -234,11 +369,10 @@ def _group_agg_select_cols():
     if PRODUCT_COL_GROUP not in seen and PRODUCT_COL_GROUP in cols:
         return GROUP_AGG_SELECT + [(PRODUCT_COL_GROUP, "MAX", PRODUCT_COL_GROUP.lower().replace(" ", "_"))]
     return GROUP_AGG_SELECT
-_group_view_columns_cache = None
 
 
 def _get_group_view_columns():
-    """Discover actual columns in LMS_GROUP_CRM_VIEW. Cached per process."""
+    """Discover actual columns in ERP_CLIENTS_GROUP_VIEW. Cached until the configured view changes."""
     global _group_view_columns_cache
     if _group_view_columns_cache is not None:
         return _group_view_columns_cache
@@ -285,6 +419,92 @@ def _get_group_by_column():
         if c in cols:
             return c
     return POLICY_COL_GROUP
+
+
+_view_columns_cache = {}
+
+
+def _parse_qualified_view(qualified: str):
+    """Parse 'SCHEMA.VIEW' into (owner_upper, table_upper)."""
+    q = (qualified or "").strip()
+    if "." in q:
+        parts = q.split(".", 1)
+        return parts[0].strip().upper(), parts[1].strip().upper()
+    return (VIEW_SCHEMA.upper() or "TQ_LMS", q.upper())
+
+
+def _get_columns_for_qualified_view(qualified: str):
+    """Column set for any schema-qualified Oracle view. Cached per name (e.g. mortgage list view)."""
+    global _view_columns_cache
+    key = qualified.strip()
+    if key in _view_columns_cache:
+        return _view_columns_cache[key]
+    try:
+        owner, tname = _parse_qualified_view(key)
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT column_name FROM all_tab_columns WHERE table_name = :t AND owner = :o ORDER BY column_id",
+            {"t": tname, "o": owner},
+        )
+        cols = {str(r[0]).upper() for r in cursor.fetchall()}
+        cursor.close()
+        conn.close()
+        _view_columns_cache[key] = cols
+        return cols
+    except Exception:
+        fallback = {"POL_POLICY_NO", "POLICY_NUMBER", "CLIENT_NAME", "PROD_DESC", "PRODUCT"}
+        _view_columns_cache[key] = fallback
+        return fallback
+
+
+def _get_group_by_column_for_view(qualified: str):
+    """Policy column for group-shaped views (e.g. LMS_GROUP_MORTAGE_VIEW), using that view's columns."""
+    cols = _get_columns_for_qualified_view(qualified)
+    if GROUP_BY_COL and GROUP_BY_COL in cols:
+        return GROUP_BY_COL
+    if POLICY_COL_GROUP in cols:
+        return POLICY_COL_GROUP
+    for c in GROUP_POLICY_COLS:
+        if c in cols:
+            return c
+    if "POLICY_NUMBER" in cols:
+        return "POLICY_NUMBER"
+    return POLICY_COL_GROUP
+
+
+def _refine_search_columns_for_qualified_view(qualified, base_columns, env_override_key=None):
+    """
+    Keep only column names that exist on the given view. Avoids ORA-00904 when Group Life search
+    lists columns absent from LMS_GROUP_MORTAGE_VIEW (etc.).
+    """
+    if not qualified or not base_columns:
+        return list(base_columns) if base_columns else []
+    raw = (os.environ.get(env_override_key) or "").strip() if env_override_key else ""
+    if raw:
+        candidates = [c.strip() for c in raw.split(",") if c.strip()]
+    else:
+        candidates = list(base_columns)
+    vc = _get_columns_for_qualified_view(qualified)
+    out = [c for c in candidates if c.upper() in vc]
+    if out:
+        return out
+    for c in (
+        "POL_POLICY_NO",
+        "IPOL_POLICY_NO",
+        "POLICY_NUMBER",
+        "CLIENT_NAME",
+        "LIFE_ASSURED",
+        "PROD_DESC",
+        "PRODUCT",
+        "AGN_NAME",
+        "KRA_PIN",
+        "CLIENT_EMAIL",
+        "CLIENT_CONTACT",
+    ):
+        if c in vc:
+            out.append(c)
+    return out
 
 
 def _build_group_aggregate_query(extra_where=""):
@@ -495,14 +715,22 @@ def _get_distinct_products():
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        # Individual view: PRODUCT column
-        cursor.execute(f"""
-            SELECT * FROM (
-                SELECT DISTINCT PRODUCT FROM {INDIVIDUAL_VIEW} WHERE PRODUCT IS NOT NULL AND TRIM(PRODUCT) != ''
-            ) WHERE ROWNUM <= 100
-        """)
+        # Individual view: PRODUCT (may be CLOB — TO_CHAR in SQL avoids TRIM/CLOB quirks)
+        try:
+            cursor.execute(f"""
+                SELECT * FROM (
+                    SELECT DISTINCT TO_CHAR(PRODUCT) AS P FROM {INDIVIDUAL_VIEW}
+                    WHERE PRODUCT IS NOT NULL AND LENGTH(TRIM(TO_CHAR(PRODUCT))) > 0
+                ) WHERE ROWNUM <= 100
+            """)
+        except Exception:
+            cursor.execute(f"""
+                SELECT * FROM (
+                    SELECT DISTINCT PRODUCT FROM {INDIVIDUAL_VIEW} WHERE PRODUCT IS NOT NULL
+                ) WHERE ROWNUM <= 100
+            """)
         for r in cursor.fetchall():
-            v = (r[0] or "").strip()
+            v = (_coerce_oracle_scalar_to_str(r[0]) or "").strip()
             if v and v not in seen:
                 seen.add(v)
                 products.append(v)
@@ -664,16 +892,37 @@ def get_clients():
     policy = (request.args.get("policy") or "").strip()
     system = (request.args.get("system") or "").strip().lower()
     debug_mode = request.args.get("debug", "").strip() in ("1", "true", "yes")
-    if system == "mortgage" and not _MORTGAGE_RAW:
-        return jsonify({"data": [], "total": 0})
-    if system == "group_pension" and not _GROUP_PENSION_RAW:
-        return jsonify({"data": [], "total": 0})
+    if system == "mortgage" and not _mortgage_view_q():
+        return jsonify({
+            "data": [],
+            "total": 0,
+            "error": "ERP_CLIENTS_MORTGAGE_VIEW missing in erp-clients-api/.env — add e.g. TQ_LMS.LMS_GROUP_MORTGAGE_VIEW and save (API reloads .env automatically).",
+        })
+    if system == "group_pension" and not _group_pension_view_q():
+        return jsonify({
+            "data": [],
+            "total": 0,
+            "error": "ERP_CLIENTS_GROUP_PENSION_VIEW missing in erp-clients-api/.env.",
+        })
     target_view = resolve_view(system)
     life_system_tag = system if system in ("mortgage", "group_pension") else None
     is_group = system == "group"
-    columns = [c.strip() for c in (COLS_GROUP if is_group else COLS).split(",")]
-    search_columns = [c.strip() for c in (SEARCH_COLS_GROUP if is_group else SEARCH_COLS).split(",") if c.strip()]
-    order_col = ORDER_COL_GROUP if is_group else ORDER_COL
+    is_mortgage = system == "mortgage"
+    # LMS_GROUP_MORTAGE_VIEW etc.: same column/search shape as Group Life, not individual CRM view
+    use_group_columns = is_group or is_mortgage
+    columns = [c.strip() for c in (COLS_GROUP if use_group_columns else COLS).split(",")]
+    if system == "individual":
+        columns = _merge_individual_product_fallback_columns(columns)
+    search_columns = [c.strip() for c in (SEARCH_COLS_GROUP if use_group_columns else SEARCH_COLS).split(",") if c.strip()]
+    if is_mortgage and _mortgage_view_q():
+        search_columns = _refine_search_columns_for_qualified_view(
+            _mortgage_view_q(), search_columns, "ERP_CLIENTS_MORTGAGE_SEARCH_COLUMNS"
+        )
+    if system == "group_pension" and _group_pension_view_q():
+        search_columns = _refine_search_columns_for_qualified_view(
+            _group_pension_view_q(), search_columns, "ERP_CLIENTS_GROUP_PENSION_SEARCH_COLUMNS"
+        )
+    order_col = ORDER_COL_GROUP if use_group_columns else ORDER_COL
 
     if not PASSWORD:
         return jsonify({"data": [], "total": 0, "error": "ORACLE_PASSWORD not set"}), 503
@@ -710,7 +959,7 @@ def get_clients():
         use_ind = (USE_GROUP_FROM_INDIVIDUAL or (use_group_fallback and tried_fallback[0]))
         if is_group and use_ind:
             av = INDIVIDUAL_VIEW
-            ac = [c.strip() for c in COLS.split(",")]
+            ac = _merge_individual_product_fallback_columns([c.strip() for c in COLS.split(",")])
             ao = ORDER_COL
             if policy_search_fallback[0]:
                 return av, ac, ao, {}, None
@@ -739,6 +988,8 @@ def get_clients():
             if policy:
                 if is_group and actual_view == target_view:
                     conditions.append(f"{_get_group_by_column()} = :policy")
+                elif is_mortgage and actual_view == target_view:
+                    conditions.append(f"{_get_group_by_column_for_view(target_view)} = :policy")
                 else:
                     conditions.append(f"{POLICY_COL} = :policy")
                 bind["policy"] = policy
@@ -770,6 +1021,11 @@ def get_clients():
 
             # Group Life: dedicated path - aggregate by policy, use discovered columns
             use_aggregate = is_group and USE_GROUP_AGGREGATE and actual_view == target_view
+            use_mortgage_select_star = (
+                is_mortgage
+                and bool(_mortgage_view_q())
+                and os.environ.get("ERP_CLIENTS_MORTGAGE_USE_SELECT_STAR", "true").lower() in ("1", "true", "yes")
+            )
             if use_aggregate:
                 try:
                     data, total = _get_group_life_clients(limit, offset, search, policy)
@@ -791,8 +1047,11 @@ def get_clients():
                         tried_fallback[0] = True
                         continue
                     raise
-            # For group view: SELECT * discovers columns at runtime - works with LMS_GROUP_CRM_VIEW
-            use_select_star = is_group and USE_GROUP_SELECT_STAR and actual_view == target_view and not USE_GROUP_AGGREGATE
+            # Group view: SELECT * discovers columns at runtime. Group-shaped mortgage view uses the same pattern.
+            use_select_star = (
+                (is_group and USE_GROUP_SELECT_STAR and actual_view == target_view and not USE_GROUP_AGGREGATE)
+                or (use_mortgage_select_star and actual_view == target_view)
+            )
             if use_select_star:
                 try:
                     sql = f"""
@@ -838,15 +1097,21 @@ def get_clients():
                 except oracledb.DatabaseError as e:
                     err_str = str(e)
                     if "ORA-00904" in err_str or "invalid identifier" in err_str.lower():
-                        # Fallback: try column sets; group view may use different names
+                        # Fallback: try column sets; group view may use different names.
+                        # Never use a set without PRODUCT for Individual (and most) views — last resort
+                        # ("...POL_PREPARED_BY,INTERMEDIARY" only) caused full lists with blank PRODUCT.
                         fallbacks = [
                             ("POLICY_NUMBER,LIFE_ASSURED,PRODUCT,POL_PREPARED_BY,INTERMEDIARY,STATUS,KRA_PIN,PRP_DOB,MATURITY_DATE,ID_NO,PHONE_NO,CHECKOFF,BAL", "PRODUCT"),
                             ("POLICY_NUMBER,LIFE_ASSUR,PRODUCT,POL_PREPARED_BY,INTERMEDIARY,STATUS,KRA_PIN,PRP_DOB,MATURITY_DATE,ID_NO,PHONE_NO,CHECKOFF,BAL", "PRODUCT"),
+                            ("POLICY_NUMBER,LIFE_ASSURED,PRODUCT,POL_PREPARED_BY,INTERMEDIARY,STATUS,KRA_PIN,PRP_DOB,MATURITY_DATE,ID_NO,PHONE_NO", "PRODUCT"),
+                            ("POLICY_NUMBER,LIFE_ASSURED,PRODUCT,POL_PREPARED_BY,INTERMEDIARY,STATUS,KRA_PIN", "PRODUCT"),
                             ("POLICY_NUMBER,SCHEME_NAME,POL_PREPARED_BY,INTERMEDIARY,STATUS,KRA_PIN", "SCHEME_NAME"),
                             ("POLICY_NUMBER,MEMBER_NAME,PRODUCT,POL_PREPARED_BY,INTERMEDIARY,STATUS,KRA_PIN", "PRODUCT"),
                             ("POLICY_NUMBER,PRODUCT,POL_PREPARED_BY,INTERMEDIARY,STATUS,KRA_PIN", "PRODUCT"),
-                            ("POLICY_NUMBER,POL_PREPARED_BY,INTERMEDIARY", "POLICY_NUMBER"),
+                            ("POLICY_NUMBER,PRODUCT,POL_PREPARED_BY,INTERMEDIARY", "PRODUCT"),
                         ]
+                        if use_group_columns:
+                            fallbacks.append(("POLICY_NUMBER,POL_PREPARED_BY,INTERMEDIARY", "POLICY_NUMBER"))
                         for fb in fallbacks:
                             try:
                                 col_list = fb[0]
@@ -869,7 +1134,7 @@ def get_clients():
                             if search and search_columns:
                                 group_search = [["POLICY_NUMBER", "POL_PREPARED_BY", "INTERMEDIARY", "KRA_PIN"], ["POLICY_NUMBER"]]
                                 ind_search = [["POLICY_NUMBER", "LIFE_ASSURED", "POL_PREPARED_BY", "INTERMEDIARY", "KRA_PIN"], ["POLICY_NUMBER", "LIFE_ASSURED"]]
-                                for search_cols_try in (group_search if is_group else ind_search):
+                                for search_cols_try in (group_search if use_group_columns else ind_search):
                                     try:
                                         conds = [f"{c} LIKE :search" for c in search_cols_try]
                                         where_alt = " WHERE (" + " OR ".join(conds) + ")"
@@ -976,7 +1241,7 @@ def get_clients():
 @app.route("/columns", methods=["GET"])
 @app.route("/clients/columns", methods=["GET"])
 def view_columns():
-    """Return actual column names from the view (helps debug null data). Use ?view=group for LMS_GROUP_CRM_VIEW."""
+    """Return actual column names from the view (helps debug null data). ?view=group|mortgage|group_pension or default individual."""
     if not PASSWORD:
         return jsonify({"error": "ORACLE_PASSWORD not set"}), 503
     v = (request.args.get("view") or "").strip().lower()
@@ -985,6 +1250,16 @@ def view_columns():
         # Extract table name for all_tab_columns (e.g. TQ_LMS.LMS_GROUP_CRM_VIEW -> LMS_GROUP_CRM_VIEW)
         parts = target.split(".")
         tname = parts[-1].upper() if parts else "LMS_GROUP_CRM_VIEW"
+        owner = parts[0].upper() if len(parts) > 1 else VIEW_SCHEMA.upper()
+    elif v == "mortgage" and _mortgage_view_q():
+        target = _mortgage_view_q()
+        parts = target.split(".")
+        tname = parts[-1].upper() if parts else ""
+        owner = parts[0].upper() if len(parts) > 1 else VIEW_SCHEMA.upper()
+    elif v == "group_pension" and _group_pension_view_q():
+        target = _group_pension_view_q()
+        parts = target.split(".")
+        tname = parts[-1].upper() if parts else ""
         owner = parts[0].upper() if len(parts) > 1 else VIEW_SCHEMA.upper()
     else:
         target = VIEW
@@ -1017,12 +1292,60 @@ def clients_debug():
     if not PASSWORD:
         return jsonify({"data": [], "error": "ORACLE_PASSWORD not set"}), 503
     try:
+        want_raw = (request.args.get("raw") or "").strip().lower() in ("1", "true", "yes")
         conn = get_connection()
         cursor = conn.cursor()
+        if want_raw:
+            cursor.execute(
+                "SELECT SYS_CONTEXT('USERENV','SESSION_USER'), SYS_CONTEXT('USERENV','CURRENT_SCHEMA') FROM dual"
+            )
+            sess = cursor.fetchone()
+            oracle_user = str(sess[0]) if sess and sess[0] is not None else None
+            oracle_schema = str(sess[1]) if sess and sess[1] is not None else None
+            where_clause = f" WHERE {POLICY_COL} = :policy"
+            sql = f"SELECT * FROM {INDIVIDUAL_VIEW}{where_clause}"
+            cursor.execute(sql, {"policy": policy})
+            desc = cursor.description or []
+            cols = [d[0] for d in desc]
+            row = cursor.fetchone()
+            raw_non_null = {}
+            product_probe = {}
+            if row:
+                for i, c in enumerate(cols):
+                    if not c or str(c).upper() == "RNUM":
+                        continue
+                    v = row[i] if i < len(row) else None
+                    coerced = _coerce_oracle_scalar_to_str(v)
+                    if str(c).strip().upper() == "PRODUCT":
+                        product_probe = {
+                            "python_type": type(v).__name__ if v is not None else None,
+                            "coerced": coerced,
+                        }
+                    if coerced:
+                        raw_non_null[str(c)] = coerced[:400]
+            cursor.close()
+            conn.close()
+            note = (
+                "If Toad shows PRODUCT text but coerced is null, compare CONNECTION user/schema here "
+                "to Toad (synonym may point at a different view). CLOB columns need .read() — now handled in API."
+            )
+            return jsonify(
+                {
+                    "policy": policy,
+                    "view": INDIVIDUAL_VIEW,
+                    "oracle_session_user": oracle_user,
+                    "oracle_current_schema": oracle_schema,
+                    "product_column_probe": product_probe,
+                    "raw_non_null": raw_non_null,
+                    "note": note,
+                }
+            )
+
         columns = [c.strip() for c in COLS.split(",")]
+        columns = _merge_individual_product_fallback_columns(columns)
         cols_unquoted = ",".join(columns)
         where_clause = f" WHERE {POLICY_COL} = :policy"
-        sql = f"SELECT {cols_unquoted} FROM {VIEW}{where_clause}"
+        sql = f"SELECT {cols_unquoted} FROM {INDIVIDUAL_VIEW}{where_clause}"
         cursor.execute(sql, {"policy": policy})
         rows = cursor.fetchall()
         data = [row_to_client(r, columns) for r in rows] if rows else []

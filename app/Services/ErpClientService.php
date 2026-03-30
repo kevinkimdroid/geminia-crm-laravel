@@ -15,6 +15,11 @@ class ErpClientService
      */
     public function getClientSystemLabel(string $system): string
     {
+        $labels = config('clients_ui.tab_labels', []);
+        if (isset($labels[$system]) && is_string($labels[$system]) && $labels[$system] !== '') {
+            return $labels[$system];
+        }
+
         return match ($system) {
             'group' => 'Group Life',
             'individual' => 'Individual Life',
@@ -386,7 +391,7 @@ class ErpClientService
             'pol_prepared_by' => $row['pol_prepared_by'] ?? '',
             'intermediary' => $row['intermediary'] ?? '',
             'product' => $this->resolveProductExcludingAgent($row),
-            'status' => $row['status'] ?? '',
+            'status' => (string) ($get(['mendr_status', 'mendrStatus', 'MENDR_STATUS', 'endr_status', 'endrStatus', 'ENDR_STATUS', 'status', 'STATUS', 'policy_status', 'POLICY_STATUS']) ?? ''),
             'kra_pin' => $get(['kra_pin', 'kraPin']) ?? '',
             'id_no' => $get(['id_no', 'idNo', 'ID_NO']),
             'phone_no' => $get(['phone_no', 'phoneNo', 'phone', 'mobile']),
@@ -677,7 +682,7 @@ class ErpClientService
 
     /**
      * Get total clients count (for dashboard). Uses same source and logic as Support > Clients page.
-     * For erp_http: sums Group Life + Individual Life to match the "All" filter on the Clients page.
+     * For erp_http: sums Group Life + Individual Life + Mortgage + Group Pension (when those views are configured).
      */
     public function getClientsCount(int $timeoutSeconds = 15): ?int
     {
@@ -688,13 +693,31 @@ class ErpClientService
         if ($source === 'erp_http') {
             $groupResult = $this->getClientsFromHttpApi(1, 0, null, $timeoutSeconds, true, 'group');
             $indResult = $this->getClientsFromHttpApi(1, 0, null, $timeoutSeconds, true, 'individual');
-            if ($groupResult['error'] && $indResult['error']) {
-                return null;
-            }
+            $hadAnySuccess = (! $groupResult['error'] || ! $indResult['error']);
             $groupTotal = (int) ($groupResult['total'] ?? 0);
             $indTotal = (int) ($indResult['total'] ?? 0);
+            $sum = $groupTotal + $indTotal;
 
-            return $groupTotal + $indTotal;
+            if ($this->optionalClientsSegmentConfigured('mortgage')) {
+                $m = $this->getClientsFromHttpApi(1, 0, null, $timeoutSeconds, true, 'mortgage');
+                if (! $m['error']) {
+                    $hadAnySuccess = true;
+                    $sum += (int) ($m['total'] ?? 0);
+                }
+            }
+            if ($this->optionalClientsSegmentConfigured('group_pension')) {
+                $gp = $this->getClientsFromHttpApi(1, 0, null, $timeoutSeconds, true, 'group_pension');
+                if (! $gp['error']) {
+                    $hadAnySuccess = true;
+                    $sum += (int) ($gp['total'] ?? 0);
+                }
+            }
+
+            if (! $hadAnySuccess && $groupResult['error'] && $indResult['error']) {
+                return null;
+            }
+
+            return $sum;
         }
         if ($source === 'erp_sync') {
             $result = $this->getClientsFromCache(1, 0);
@@ -1040,8 +1063,12 @@ class ErpClientService
             $searchTrimmed = $search ? trim($search) : '';
             if ($searchTrimmed !== '') {
                 $params['search'] = $searchTrimmed;
-                // Group Life: when search looks like a policy number, also pass policy= for targeted lookup
-                if ($system === 'group' && ! $this->isReceiptFormat($searchTrimmed) && preg_match('/^[A-Za-z0-9\-]+$/', $searchTrimmed)) {
+                // Group / Mortgage / Group pension: policy-style search also sends policy= for exact match on POL_POLICY_NO etc.
+                if (
+                    in_array($system, ['group', 'mortgage', 'group_pension'], true)
+                    && ! $this->isReceiptFormat($searchTrimmed)
+                    && preg_match('/^[A-Za-z0-9\-]+$/', $searchTrimmed)
+                ) {
                     $params['policy'] = $searchTrimmed;
                 }
             }
@@ -1068,6 +1095,11 @@ class ErpClientService
             $total = (int) ($body['total'] ?? $body['count'] ?? count($rows) + $offset);
             $data = collect($rows)->map(fn ($row) => $this->mapHttpRowToClientObject(is_array($row) ? $row : (array) $row, $system));
 
+            $apiMsg = $body['error'] ?? $body['message'] ?? null;
+            if (is_string($apiMsg) && $apiMsg !== '' && $data->isEmpty()) {
+                return ['data' => $data, 'total' => $total, 'error' => 'ERP API: '.$apiMsg];
+            }
+
             return ['data' => $data, 'total' => $total, 'error' => null];
         } catch (\Throwable $e) {
             Log::error('ERP HTTP clients fetch failed', ['message' => $e->getMessage()]);
@@ -1082,7 +1114,7 @@ class ErpClientService
     /** Product from prod_desc (PROD_DESC column in view). */
     protected function resolveProductExcludingAgent(array $row): string
     {
-        return trim((string) ($row['prod_desc'] ?? $row['product'] ?? $row['prod_sht_desc'] ?? $row['scheme_name'] ?? ''));
+        return trim((string) ($row['prod_desc'] ?? $row['PRODUCT'] ?? $row['product'] ?? $row['prod_sht_desc'] ?? $row['scheme_name'] ?? ''));
     }
 
     /**
@@ -1140,9 +1172,9 @@ class ErpClientService
         $lifeAssur = $get(['life_assur', 'life_assured', 'lifeAssur', 'lifeAssured', 'mem_surname', 'member_name', 'memberName', 'client_name', 'clientName']) ?? '';
         $polPreparedBy = $get(['pol_prepared_by', 'polPreparedBy', 'bra_manager', 'unit_manar']) ?? '';
         $intermediary = $get(['intermediary', 'intermediary_name', 'agency', 'agn_name', 'agnName']) ?? '';
-        $productKeys = $system === 'group'
-            ? ['prod_desc', 'product', 'prod_sht_desc', 'scheme_name', 'schemeName']
-            : ['product', 'prod_desc', 'scheme_name', 'schemeName', 'prod_sht_desc'];
+        $productKeys = in_array($system, ['group', 'mortgage', 'group_pension'], true)
+            ? ['prod_desc', 'product', 'PRODUCT', 'prod_sht_desc', 'scheme_name', 'schemeName']
+            : ['PRODUCT', 'product', 'prod_desc', 'scheme_name', 'schemeName', 'prod_sht_desc'];
         $product = $get($productKeys) ?? null;
         $kraPin = $get(['kra_pin', 'kraPin']) ?? '';
         $prpDob = $get(['prp_dob', 'prpDob']) ?? null;
@@ -1153,7 +1185,7 @@ class ErpClientService
         $emailAdr = $get(['email_adr', 'emailAdr', 'client_email', 'mem_email']) ?? null;
         $idNo = $get(['id_no', 'idNo', 'ID_NO']) ?? null;
         $phoneNo = $get(['phone_no', 'phoneNo', 'phone', 'mobile', 'client_contact', 'mem_teleph']) ?? null;
-        $status = $get(['status', 'STATUS']) ?? '';
+        $status = $get(['mendr_status', 'mendrStatus', 'MENDR_STATUS', 'endr_status', 'endrStatus', 'ENDR_STATUS', 'status', 'STATUS', 'policy_status', 'POLICY_STATUS']) ?? '';
 
         $clientName = trim($lifeAssur) ?: trim("{$polPreparedBy} {$intermediary}");
         $parts = explode(' ', $clientName, 2);
