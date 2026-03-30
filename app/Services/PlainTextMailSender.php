@@ -39,4 +39,48 @@ class PlainTextMailSender
             return false;
         }
     }
+
+    /**
+     * Send plain-text email with a single PDF attachment (Graph when configured, else Laravel Mail).
+     *
+     * @param  string  $pdfBinary  Raw PDF bytes
+     */
+    public function sendWithPdfAttachment(
+        string $to,
+        ?string $toName,
+        string $subject,
+        string $body,
+        string $pdfFilename,
+        string $pdfBinary
+    ): bool {
+        $graph = app(MicrosoftGraphMailService::class);
+        if ($graph->isConfigured()) {
+            if ($graph->sendMail($to, $toName, $subject, $body, false, [
+                ['name' => $pdfFilename, 'contentType' => 'application/pdf', 'content' => $pdfBinary],
+            ])) {
+                return true;
+            }
+            Log::warning('PlainTextMailSender: Graph send with attachment failed, trying Laravel Mail', ['to' => $to]);
+        }
+
+        $mailer = config('mail.default');
+        if ($mailer === 'log') {
+            Log::warning('PlainTextMailSender: MAIL_MAILER=log – message will not be delivered.');
+        }
+
+        try {
+            $from = config('mail.from.address', config('email-service.sender', 'life@geminialife.co.ke'));
+            $fromName = config('mail.from.name', config('app.name'));
+            Mail::raw($body, function ($message) use ($to, $toName, $subject, $from, $fromName, $pdfFilename, $pdfBinary) {
+                $message->to($to, $toName)->from($from, $fromName)->subject($subject);
+                $message->attachData($pdfBinary, $pdfFilename, ['mime' => 'application/pdf']);
+            });
+
+            return true;
+        } catch (\Throwable $e) {
+            Log::warning('PlainTextMailSender: sendWithPdfAttachment failed', ['to' => $to, 'error' => $e->getMessage()]);
+
+            return false;
+        }
+    }
 }

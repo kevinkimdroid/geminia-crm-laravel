@@ -86,6 +86,9 @@ Route::get('/support/serve-client/search', [\App\Http\Controllers\ServeClientCon
 Route::post('/support/serve-client/create-ticket', [\App\Http\Controllers\ServeClientController::class, 'createTicket'])->name('serve-client.create-ticket');
 Route::get('/support/faq', fn () => view('support.faq'))->name('support.faq');
 Route::get('/support/maturities', [\App\Http\Controllers\MaturitiesController::class, 'index'])->name('support.maturities');
+Route::post('/support/maturities/renewal-status', [\App\Http\Controllers\MaturitiesController::class, 'updateRenewalStatus'])->name('support.maturities.renewal-status');
+Route::get('/support/maturities/discharge-voucher/pdf', [\App\Http\Controllers\MaturityDischargeVoucherController::class, 'pdf'])->name('support.maturities.discharge-voucher.pdf');
+Route::post('/support/maturities/discharge-voucher/email', [\App\Http\Controllers\MaturityDischargeVoucherController::class, 'email'])->name('support.maturities.discharge-voucher.email');
 Route::get('/support/maturities/export', [\App\Http\Controllers\MaturitiesController::class, 'export'])->name('support.maturities.export');
 Route::get('/support/sms-notifier', [\App\Http\Controllers\SmsNotifierController::class, 'index'])->name('support.sms-notifier');
 Route::post('/support/sms-notifier/send', [\App\Http\Controllers\SmsNotifierController::class, 'send'])->name('support.sms-notifier.send');

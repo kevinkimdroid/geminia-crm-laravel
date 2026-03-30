@@ -18,18 +18,24 @@ class MaturitiesExport implements FromCollection, WithHeadings, WithStyles
     {
         return $this->rows->map(function ($row) {
             $r = is_object($row) ? $row : (object) $row;
+            $status = $r->renewal_status ?? '';
+            $renewalDate = $r->renewal_date ?? '';
+
             return [
                 $r->policy_number ?? $r->policy_no ?? '',
                 $r->life_assured ?? $r->life_assur ?? '',
                 $r->product ?? '',
                 $r->maturity ?? $r->maturity_date ?? '',
+                $status,
+                $renewalDate,
+                $r->renewal_notes ?? '',
             ];
         });
     }
 
     public function headings(): array
     {
-        return ['Policy Number', 'Life Assured', 'Product', 'Maturity Date'];
+        return ['Policy Number', 'Life Assured', 'Product', 'Maturity Date', 'Renewal status', 'Renewal date', 'Notes'];
     }
 
     public function styles(Worksheet $sheet): array

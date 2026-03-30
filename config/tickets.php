@@ -1,5 +1,34 @@
 <?php
 
+$maturityHorizonLabels = [
+    90 => ['label' => 'Early renewal awareness', 'priority' => 'Low'],
+    60 => ['label' => 'Renewal follow-up', 'priority' => 'Normal'],
+    30 => ['label' => 'Renewal due soon', 'priority' => 'High'],
+];
+
+$maturityHorizonDays = array_values(array_filter(array_map(static function ($v) {
+    $n = (int) trim((string) $v);
+
+    return $n >= 1 ? $n : null;
+}, explode(',', env('TICKET_AUTO_MATURITY_HORIZONS', '90,60,30')))));
+if ($maturityHorizonDays === []) {
+    $maturityHorizonDays = [90, 60, 30];
+}
+
+$maturityHorizons = [];
+foreach ($maturityHorizonDays as $d) {
+    $meta = $maturityHorizonLabels[$d] ?? ['label' => "{$d}-day renewal reminder", 'priority' => 'Normal'];
+    $maturityHorizons[] = [
+        'days_before' => $d,
+        'label' => $meta['label'],
+        'priority' => $meta['priority'],
+        'assign_to_user_id' => null,
+        'category' => null,
+    ];
+}
+
+$productAssigneesDecoded = json_decode((string) env('TICKET_AUTO_MATURITY_PRODUCT_ASSIGNEES', '{}'), true);
+
 return [
 
     /*
@@ -70,6 +99,10 @@ return [
     | Assigned to a specific user (e.g. Customer Service).
     | Set TICKET_AUTO_MATURITY_ENABLED=true and TICKET_AUTO_MATURITY_ASSIGN_TO=userId.
     |
+    | Multi-horizon bands (TICKET_AUTO_MATURITY_USE_HORIZONS=true): non-overlapping
+    | windows e.g. 61–90d, 31–60d, 1–30d each get their own ticket with (90d)/(60d)/(30d) in title.
+    | Product routing: TICKET_AUTO_MATURITY_PRODUCT_ASSIGNEES JSON map {"Exact Product": vtiger_user_id}
+    |
     */
     'auto_maturity' => [
         'enabled' => filter_var(env('TICKET_AUTO_MATURITY_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
@@ -77,6 +110,9 @@ return [
         'assign_to_user_id' => (int) env('TICKET_AUTO_MATURITY_ASSIGN_TO', 1),
         'category' => env('TICKET_AUTO_MATURITY_CATEGORY', 'Policy Document'),
         'source' => env('TICKET_AUTO_MATURITY_SOURCE', 'Auto'),
+        'use_horizon_bands' => filter_var(env('TICKET_AUTO_MATURITY_USE_HORIZONS', true), FILTER_VALIDATE_BOOLEAN),
+        'horizons' => $maturityHorizons,
+        'product_assignees' => is_array($productAssigneesDecoded) ? $productAssigneesDecoded : [],
     ],
 
     /*

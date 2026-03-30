@@ -197,7 +197,10 @@ class MicrosoftGraphMailService
      * Send email via Microsoft Graph (same mailbox used for fetch).
      * Requires Mail.Send application permission in Azure AD.
      */
-    public function sendMail(string $toAddress, ?string $toName, string $subject, string $body, bool $bodyIsHtml = false): bool
+    /**
+     * @param  array<int, array{name: string, contentType: string, content: string}>  $attachments  Raw file bytes in `content`
+     */
+    public function sendMail(string $toAddress, ?string $toName, string $subject, string $body, bool $bodyIsHtml = false, array $attachments = []): bool
     {
         if (! $this->isConfigured()) {
             return false;
@@ -212,26 +215,41 @@ class MicrosoftGraphMailService
         $mailboxEncoded = rawurlencode($mailbox);
         $url = self::GRAPH_BASE . "/users/{$mailboxEncoded}/sendMail";
 
-        $payload = [
-            'message' => [
-                'subject' => $subject,
-                'body' => [
-                    'contentType' => $bodyIsHtml ? 'HTML' : 'Text',
-                    'content' => $body,
-                ],
-                'toRecipients' => [
-                    [
-                        'emailAddress' => [
-                            'address' => $toAddress,
-                            'name' => $toName ?: null,
-                        ],
+        $message = [
+            'subject' => $subject,
+            'body' => [
+                'contentType' => $bodyIsHtml ? 'HTML' : 'Text',
+                'content' => $body,
+            ],
+            'toRecipients' => [
+                [
+                    'emailAddress' => [
+                        'address' => $toAddress,
+                        'name' => $toName ?: null,
                     ],
                 ],
             ],
         ];
 
+        if ($attachments !== []) {
+            $message['attachments'] = [];
+            foreach ($attachments as $a) {
+                if (empty($a['name']) || ! isset($a['content'])) {
+                    continue;
+                }
+                $message['attachments'][] = [
+                    '@odata.type' => '#microsoft.graph.fileAttachment',
+                    'name' => $a['name'],
+                    'contentType' => $a['contentType'] ?? 'application/octet-stream',
+                    'contentBytes' => base64_encode($a['content']),
+                ];
+            }
+        }
+
+        $payload = ['message' => $message];
+
         $response = Http::withToken($token)
-            ->timeout(15)
+            ->timeout(30)
             ->post($url, $payload);
 
         if (! $response->successful()) {
