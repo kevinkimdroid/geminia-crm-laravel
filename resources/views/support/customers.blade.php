@@ -66,7 +66,12 @@
     </div>
     <div class="col-lg-4">
         <div class="clients-stat-card">
-            <span class="clients-stat-value" id="clientsTotalValue">{{ number_format($total ?? 0) }}</span>
+            @php
+                $clientsStatTotal = ($clientsGrandTotal !== null && ! ($system ?? '') && ($clientsSource ?? '') === 'erp_http')
+                    ? (int) $clientsGrandTotal
+                    : (int) ($total ?? 0);
+            @endphp
+            <span class="clients-stat-value" id="clientsTotalValue">{{ number_format($clientsStatTotal) }}</span>
             <span class="clients-stat-label">
                 @if(($system ?? '') === 'group')
                     Total {{ config('clients_ui.tab_labels.group') }} Clients
@@ -411,7 +416,12 @@
                 var paginationNav = document.getElementById('clientsPaginationNav');
 
                 if (loadingRow) loadingRow.remove();
-                if (totalEl) totalEl.textContent = (d.total || 0).toLocaleString();
+                if (totalEl) {
+                    var statTotal = (!system && d.grand_total != null && String(d.source || '') === 'erp_http')
+                        ? d.grand_total
+                        : (d.total || 0);
+                    totalEl.textContent = Number(statTotal).toLocaleString();
+                }
 
                 var rows = (d.customers || []).map(function(c) {
                     var policy = (c.policy_no || c.policy_number || c.policy || c.pol_policy_no || '').toString().trim();
@@ -442,6 +452,7 @@
                 }
 
                 var perPage = d.per_page || 25;
+                // Pagination follows list scope (Group+Individual merge); stat card uses grand_total when present
                 var total = d.total || 0;
                 var first = total ? ((d.page - 1) * perPage + 1) : 0;
                 var last = Math.min(d.page * perPage, total);

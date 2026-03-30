@@ -770,7 +770,7 @@ class ErpClientService
      * Get clients for Support > Customers list.
      * Source: erp = live Oracle, erp_sync = cached table.
      *
-     * @return array{data: \Illuminate\Support\Collection, total: int, error: string|null}
+     * @return array{data: \Illuminate\Support\Collection, total: int, error: string|null, grand_total?: int|null}
      */
     public function getClientsForListView(int $limit, int $offset, ?string $search = null, ?string $system = null): array
     {
@@ -879,7 +879,10 @@ class ErpClientService
      * Get clients for "All" filter: merge Group Life + Individual Life, interleaved.
      * Ensures both types are differentiated and displayed when no system filter is set.
      *
-     * @return array{data: \Illuminate\Support\Collection, total: int, error: string|null}
+     * "All" tab lists Group + Individual rows only (interleaved). total = group+ind for pagination.
+     * grand_total = group+ind+mortgage+pension (when views configured) so the stat matches all segments.
+     *
+     * @return array{data: \Illuminate\Support\Collection, total: int, error: string|null, grand_total: int}
      */
     protected function getClientsForListViewMerged(int $limit, int $offset, ?string $search): array
     {
@@ -910,9 +913,24 @@ class ErpClientService
         $groupTotal = (int) ($groupResult['total'] ?? 0);
         $indTotal = (int) ($indResult['total'] ?? 0);
         $total = $groupTotal + $indTotal;
+        $grandTotal = $total;
+
+        if ($this->optionalClientsSegmentConfigured('mortgage')) {
+            $m = $this->getClientsFromHttpApi(1, 0, $search, null, true, 'mortgage');
+            if (! $m['error']) {
+                $grandTotal += (int) ($m['total'] ?? 0);
+            }
+        }
+        if ($this->optionalClientsSegmentConfigured('group_pension')) {
+            $gp = $this->getClientsFromHttpApi(1, 0, $search, null, true, 'group_pension');
+            if (! $gp['error']) {
+                $grandTotal += (int) ($gp['total'] ?? 0);
+            }
+        }
+
         $error = $groupResult['error'] ?: $indResult['error'];
 
-        return ['data' => $data, 'total' => $total, 'error' => $error];
+        return ['data' => $data, 'total' => $total, 'grand_total' => $grandTotal, 'error' => $error];
     }
 
     /**

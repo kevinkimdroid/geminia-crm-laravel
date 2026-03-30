@@ -161,6 +161,7 @@ class CustomerController extends Controller
         $offset = ($page - 1) * $perPage;
 
         $clientsError = null;
+        $clientsGrandTotal = null;
         $useErp = in_array($source, ['erp', 'erp_sync', 'erp_http'])
             && (in_array($source, ['erp_sync', 'erp_http']) || $this->erp->isConfigured())
             && ($source !== 'erp_http' || ! empty(config('erp.clients_http_url')));
@@ -184,11 +185,13 @@ class CustomerController extends Controller
             }
             $customers = $result['data'];
             $total = $result['total'];
+            $clientsGrandTotal = $result['grand_total'] ?? null;
             $clientsError = $result['error'] ?? null;
             if ($clientsError && $customers->isEmpty()) {
                 $ownerId = crm_owner_filter();
                 $customers = $this->crm->getCustomers($perPage, $offset, $search, $ownerId);
                 $total = $this->crm->getCustomersCount($search, $ownerId);
+                $clientsGrandTotal = null;
                 $clientsError = $clientsError . ' Showing CRM contacts below (if any).';
             }
         } elseif ($lazyLoad) {
@@ -213,6 +216,7 @@ class CustomerController extends Controller
         return view('support.customers', [
             'customers' => $customers,
             'total' => $total,
+            'clientsGrandTotal' => $clientsGrandTotal,
             'search' => $search,
             'system' => $system,
             'page' => $page,
@@ -239,6 +243,7 @@ class CustomerController extends Controller
             && (in_array($source, ['erp_sync', 'erp_http']) || $this->erp->isConfigured())
             && ($source !== 'erp_http' || ! empty(config('erp.clients_http_url')));
 
+        $clientsGrandTotal = null;
         if ($useErp) {
             // Never cache when system filter (Group Life / Individual Life) is active – always fresh data
             $skipCache = in_array($system, ['group', 'individual', 'mortgage', 'group_pension'], true);
@@ -252,17 +257,20 @@ class CustomerController extends Controller
             }
             $customers = $result['data'];
             $total = $result['total'];
+            $clientsGrandTotal = $result['grand_total'] ?? null;
             $clientsError = $result['error'] ?? null;
             if ($clientsError && $customers->isEmpty()) {
                 $ownerId = crm_owner_filter();
                 $customers = $this->crm->getCustomers($perPage, $offset, $search, $ownerId);
                 $total = $this->crm->getCustomersCount($search, $ownerId);
+                $clientsGrandTotal = null;
             }
         } else {
             $ownerId = crm_owner_filter();
             $customers = $this->crm->getCustomers($perPage, $offset, $search, $ownerId);
             $total = $this->crm->getCustomersCount($search, $ownerId);
             $clientsError = null;
+            $clientsGrandTotal = null;
         }
 
         $rows = collect($customers)->map(function ($c) use ($source) {
@@ -287,13 +295,18 @@ class CustomerController extends Controller
             ];
         })->values()->all();
 
-        return response()->json([
+        $payload = [
             'customers' => $rows,
             'total' => $total,
             'page' => $page,
             'per_page' => $perPage,
             'error' => $clientsError,
             'source' => $source,
-        ]);
+        ];
+        if ($useErp) {
+            $payload['grand_total'] = $clientsGrandTotal;
+        }
+
+        return response()->json($payload);
     }
 }
