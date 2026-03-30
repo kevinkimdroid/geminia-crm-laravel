@@ -49,7 +49,8 @@ class DashboardController extends Controller
 
     /**
      * Lightweight endpoint for lazy-loaded clients count (avoids blocking dashboard on slow ERP).
-     * Uses the same logic as Support > Clients "All" view so the count always matches.
+     * Uses ErpClientService::getClientsCount() — same as Support > Clients “All” stat (group + individual
+     * + mortgage + group pension when those views are configured in Laravel .env).
      */
     public function clientsCount(): \Illuminate\Http\JsonResponse
     {
@@ -59,9 +60,7 @@ class DashboardController extends Controller
         }
         $count = Cache::remember('geminia_clients_count', 120, function () {
             try {
-                // Use same source as Clients page "All" filter (group + individual merged total)
-                $result = $this->erp->getClientsForListView(1, 0, null, null);
-                return $result['error'] ? 0 : (int) ($result['total'] ?? 0);
+                return (int) ($this->erp->getClientsCount(25) ?? 0);
             } catch (\Throwable $e) {
                 return 0;
             }

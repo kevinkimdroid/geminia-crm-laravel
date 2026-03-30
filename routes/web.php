@@ -164,6 +164,7 @@ Route::delete('/settings/crm/pbx-extension-mapping/{mapping}', [\App\Http\Contro
 Route::post('/settings/crm/ticket-sla/roles', [\App\Http\Controllers\TicketSlaController::class, 'updateRoles'])->name('settings.ticket-sla.update-roles');
 Route::post('/settings/crm/ticket-sla/departments', [\App\Http\Controllers\TicketSlaController::class, 'addDepartmentTat'])->name('settings.ticket-sla.add-department');
 Route::post('/settings/crm/ticket-sla/sync-categories', [\App\Http\Controllers\TicketSlaController::class, 'syncFromCategories'])->name('settings.ticket-sla.sync-categories');
+Route::post('/settings/crm/ticket-dropdowns', [\App\Http\Controllers\TicketDropdownSettingsController::class, 'update'])->name('settings.ticket-dropdowns.update');
 Route::post('/settings/crm/ticket-sla/import', [\App\Http\Controllers\TicketSlaController::class, 'importFromExcel'])->name('settings.ticket-sla.import');
 Route::post('/settings/crm/ticket-sla/departments/update', [\App\Http\Controllers\TicketSlaController::class, 'updateDepartmentTat'])->name('settings.ticket-sla.update-department');
 Route::delete('/settings/crm/ticket-sla/departments/{department}', [\App\Http\Controllers\TicketSlaController::class, 'deleteDepartmentTat'])->name('settings.ticket-sla.delete-department');

@@ -188,11 +188,15 @@ class CustomerController extends Controller
             $clientsGrandTotal = $result['grand_total'] ?? null;
             $clientsError = $result['error'] ?? null;
             if ($clientsError && $customers->isEmpty()) {
-                $ownerId = crm_owner_filter();
-                $customers = $this->crm->getCustomers($perPage, $offset, $search, $ownerId);
-                $total = $this->crm->getCustomersCount($search, $ownerId);
-                $clientsGrandTotal = null;
-                $clientsError = $clientsError . ' Showing CRM contacts below (if any).';
+                // API .env missing mortgage/pension/group view vars — do not substitute CRM contacts (misleading).
+                $erpHttpConfigGap = $source === 'erp_http' && str_contains((string) $clientsError, 'erp-clients-api/.env');
+                if (! $erpHttpConfigGap) {
+                    $ownerId = crm_owner_filter();
+                    $customers = $this->crm->getCustomers($perPage, $offset, $search, $ownerId);
+                    $total = $this->crm->getCustomersCount($search, $ownerId);
+                    $clientsGrandTotal = null;
+                    $clientsError = $clientsError . ' Showing CRM contacts below (if any).';
+                }
             }
         } elseif ($lazyLoad) {
             $customers = collect();
@@ -260,10 +264,13 @@ class CustomerController extends Controller
             $clientsGrandTotal = $result['grand_total'] ?? null;
             $clientsError = $result['error'] ?? null;
             if ($clientsError && $customers->isEmpty()) {
-                $ownerId = crm_owner_filter();
-                $customers = $this->crm->getCustomers($perPage, $offset, $search, $ownerId);
-                $total = $this->crm->getCustomersCount($search, $ownerId);
-                $clientsGrandTotal = null;
+                $erpHttpConfigGap = $source === 'erp_http' && str_contains((string) $clientsError, 'erp-clients-api/.env');
+                if (! $erpHttpConfigGap) {
+                    $ownerId = crm_owner_filter();
+                    $customers = $this->crm->getCustomers($perPage, $offset, $search, $ownerId);
+                    $total = $this->crm->getCustomersCount($search, $ownerId);
+                    $clientsGrandTotal = null;
+                }
             }
         } else {
             $ownerId = crm_owner_filter();

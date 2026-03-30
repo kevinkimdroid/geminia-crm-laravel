@@ -30,10 +30,11 @@
                 </ul>
             </div>
             <div class="settings-tab-group dropdown">
-                <button type="button" class="settings-tab settings-tab-dropdown {{ in_array($section ?? '', ['ticket-automation','ticket-sla','scheduler','workflows']) ? 'active' : '' }}" data-bs-toggle="dropdown" aria-expanded="false">
+                <button type="button" class="settings-tab settings-tab-dropdown {{ in_array($section ?? '', ['ticket-automation','ticket-sla','ticket-dropdowns','scheduler','workflows']) ? 'active' : '' }}" data-bs-toggle="dropdown" aria-expanded="false">
                     <i class="bi bi-ticket-perforated"></i> Tickets <i class="bi bi-chevron-down ms-1"></i>
                 </button>
                 <ul class="dropdown-menu">
+                    <li><a class="dropdown-item" href="{{ route('settings.crm') }}?section=ticket-dropdowns"><i class="bi bi-ui-checks me-2"></i>Create ticket form</a></li>
                     <li><a class="dropdown-item" href="{{ route('settings.crm') }}?section=ticket-sla"><i class="bi bi-clock-history me-2"></i>SLA & TAT</a></li>
                     <li><a class="dropdown-item" href="{{ route('settings.crm') }}?section=ticket-automation"><i class="bi bi-arrow-left-right me-2"></i>Assignment Rules</a></li>
                     <li><a class="dropdown-item" href="{{ route('settings.crm') }}?section=scheduler"><i class="bi bi-calendar-check me-2"></i>Scheduler</a></li>
@@ -88,7 +89,7 @@
             @endif
             @php
                 $section = $section ?? 'overview';
-                $validSections = ['overview', 'users', 'departments', 'roles', 'profiles', 'sharing-rules', 'groups', 'login-history', 'modules', 'module-layouts', 'module-numbering', 'scheduler', 'workflows', 'ticket-automation', 'ticket-sla', 'configuration', 'pbx-extension-mapping', 'marketing', 'integration', 'other'];
+                $validSections = ['overview', 'users', 'departments', 'roles', 'profiles', 'sharing-rules', 'groups', 'login-history', 'modules', 'module-layouts', 'module-numbering', 'scheduler', 'workflows', 'ticket-automation', 'ticket-sla', 'ticket-dropdowns', 'configuration', 'pbx-extension-mapping', 'marketing', 'integration', 'other'];
                 $section = in_array($section, $validSections) ? $section : 'overview';
             @endphp
             @include('settings.sections.' . $section)

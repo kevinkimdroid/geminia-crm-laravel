@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\CrmSetting;
 use App\Models\Department;
 use App\Models\VtigerProfile;
 use App\Models\VtigerRole;
@@ -104,6 +105,16 @@ class SettingsController extends Controller
             $data['rolesCanClose'] = $sla->getRolesCanClose();
             $data['departmentTat'] = $sla->getAllDepartmentTat();
             $data['categoriesWithoutTat'] = $sla->getCategoriesWithoutTat();
+        } elseif ($section === 'ticket-dropdowns') {
+            $data['ticketCategoriesCustom'] = CrmSetting::tableExists()
+                ? (CrmSetting::get('ticket_categories_custom') ?? '')
+                : '';
+            $data['ticketSourcesCustom'] = CrmSetting::tableExists()
+                ? (CrmSetting::get('ticket_sources_custom') ?? '')
+                : '';
+            $crm = app(\App\Services\CrmService::class);
+            $data['previewCategories'] = $crm->getTicketCategoriesFromCrm();
+            $data['previewSources'] = $crm->getTicketSourcesFromCrm();
         } elseif ($section === 'modules') {
             $moduleService = app(\App\Services\ModuleService::class);
             $data['modules'] = $moduleService->getAllModules();

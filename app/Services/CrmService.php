@@ -1812,9 +1812,13 @@ class CrmService
             }
 
             $configCats = config('tickets.categories', []);
+            $customCats = \App\Models\CrmSetting::tableExists()
+                ? \App\Models\CrmSetting::parsedLines(\App\Models\CrmSetting::get('ticket_categories_custom'))
+                : [];
             $all = collect($fromPicklist)
                 ->merge($fromTickets)
                 ->merge($configCats)
+                ->merge($customCats)
                 ->unique()
                 ->filter(fn ($v) => trim((string) $v) !== '')
                 ->map(fn ($v) => trim((string) $v))
@@ -1824,7 +1828,12 @@ class CrmService
             return array_values(array_unique($all));
         } catch (\Throwable $e) {
             Log::warning('CrmService::getTicketCategoriesFromCrm: ' . $e->getMessage());
-            return config('tickets.categories', []);
+            $base = config('tickets.categories', []);
+            $custom = \App\Models\CrmSetting::tableExists()
+                ? \App\Models\CrmSetting::parsedLines(\App\Models\CrmSetting::get('ticket_categories_custom'))
+                : [];
+
+            return array_values(array_unique(array_merge($base, $custom)));
         }
     }
 
@@ -1849,13 +1858,28 @@ class CrmService
                 ->values()
                 ->toArray();
 
-            $configSources = ['CRM', 'Email', 'Web', 'Phone', 'WALK IN', 'EMAIL', 'SMS', 'ONLINE CHAT', 'PORTAL', 'TWITTER', 'FACEBOOK', 'WHATSAPP', 'Call', 'USSD', 'Agent'];
-            $all = collect($fromCrm)->merge($configSources)->unique()->filter(fn ($v) => trim((string) $v) !== '')->map(fn ($v) => trim((string) $v))->values()->toArray();
+            $configSources = config('tickets.sources', []);
+            $customSources = \App\Models\CrmSetting::tableExists()
+                ? \App\Models\CrmSetting::parsedLines(\App\Models\CrmSetting::get('ticket_sources_custom'))
+                : [];
+            $all = collect($fromCrm)
+                ->merge($configSources)
+                ->merge($customSources)
+                ->unique()
+                ->filter(fn ($v) => trim((string) $v) !== '')
+                ->map(fn ($v) => trim((string) $v))
+                ->values()
+                ->toArray();
 
             return array_values(array_unique($all));
         } catch (\Throwable $e) {
             Log::warning('CrmService::getTicketSourcesFromCrm: ' . $e->getMessage());
-            return ['CRM', 'Email', 'Web', 'Phone', 'Call', 'USSD', 'Agent'];
+            $base = config('tickets.sources', ['CRM', 'Email', 'Web', 'Phone', 'Call', 'USSD', 'Agent']);
+            $custom = \App\Models\CrmSetting::tableExists()
+                ? \App\Models\CrmSetting::parsedLines(\App\Models\CrmSetting::get('ticket_sources_custom'))
+                : [];
+
+            return array_values(array_unique(array_merge($base, $custom)));
         }
     }
 

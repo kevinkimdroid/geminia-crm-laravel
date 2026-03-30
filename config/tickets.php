@@ -31,6 +31,24 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Ticket Sources (create/edit ticket form)
+    |--------------------------------------------------------------------------
+    |
+    | Shown in the Ticket Source dropdown, merged with values from the CRM and
+    | with Settings → Tickets → Create ticket form (custom lines). Override via
+    | TICKET_SOURCES (comma-separated) in .env if needed.
+    |
+    */
+
+    'sources' => array_values(array_filter(array_map('trim', explode(',', env(
+        'TICKET_SOURCES',
+        'CRM,Email,Web,Phone,WALK IN,SMS,ONLINE CHAT,PORTAL,TWITTER,FACEBOOK,WHATSAPP,Call,USSD,Agent'
+    ))))) ?: [
+        'CRM', 'Email', 'Web', 'Phone', 'Call', 'USSD', 'Agent',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Product Line / Account Sort Order
     |--------------------------------------------------------------------------
     |

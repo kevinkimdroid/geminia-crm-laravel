@@ -11,7 +11,12 @@ if (! function_exists('ticket_categories')) {
             try {
                 return app(\App\Services\CrmService::class)->getTicketCategoriesFromCrm();
             } catch (\Throwable $e) {
-                return config('tickets.categories', []);
+                $base = config('tickets.categories', []);
+                $custom = \App\Models\CrmSetting::tableExists()
+                    ? \App\Models\CrmSetting::parsedLines(\App\Models\CrmSetting::get('ticket_categories_custom'))
+                    : [];
+
+                return array_values(array_unique(array_merge($base, $custom)));
             }
         });
     }
@@ -28,7 +33,12 @@ if (! function_exists('ticket_sources')) {
             try {
                 return app(\App\Services\CrmService::class)->getTicketSourcesFromCrm();
             } catch (\Throwable $e) {
-                return ['CRM', 'Email', 'Web', 'Phone'];
+                $base = config('tickets.sources', ['CRM', 'Email', 'Web', 'Phone']);
+                $custom = \App\Models\CrmSetting::tableExists()
+                    ? \App\Models\CrmSetting::parsedLines(\App\Models\CrmSetting::get('ticket_sources_custom'))
+                    : [];
+
+                return array_values(array_unique(array_merge($base, $custom)));
             }
         });
     }

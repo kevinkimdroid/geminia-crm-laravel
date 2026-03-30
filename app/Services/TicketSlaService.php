@@ -114,6 +114,21 @@ class TicketSlaService
     }
 
     /**
+     * Categories from .env / config plus Settings → Create ticket form custom lines.
+     *
+     * @return list<string>
+     */
+    protected function allConfiguredTicketCategories(): array
+    {
+        $fromConfig = config('tickets.categories', []);
+        $custom = \App\Models\CrmSetting::tableExists()
+            ? \App\Models\CrmSetting::parsedLines(\App\Models\CrmSetting::get('ticket_categories_custom'))
+            : [];
+
+        return array_values(array_unique(array_map('trim', array_merge($fromConfig, $custom))));
+    }
+
+    /**
      * Sync departments from ticket categories. Adds any category that doesn't have TAT configured.
      * Ticket category = department for SLA purposes.
      *
@@ -121,7 +136,7 @@ class TicketSlaService
      */
     public function syncDepartmentsFromCategories(): array
     {
-        $categories = config('tickets.categories', []);
+        $categories = $this->allConfiguredTicketCategories();
         $existing = $this->getAllDepartmentTat()->pluck('department')->map(fn ($d) => (string) $d)->toArray();
         $added = [];
 
@@ -145,7 +160,7 @@ class TicketSlaService
      */
     public function getCategoriesWithoutTat(): array
     {
-        $categories = config('tickets.categories', []);
+        $categories = $this->allConfiguredTicketCategories();
         $configured = $this->getAllDepartmentTat()->pluck('department')->map(fn ($d) => strtolower((string) $d))->toArray();
 
         return array_values(array_filter($categories, function ($cat) use ($configured) {
