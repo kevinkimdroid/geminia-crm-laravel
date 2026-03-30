@@ -853,8 +853,8 @@ class CrmService
                 ->leftJoin('vtiger_contactdetails as c', 't.contact_id', '=', 'c.contactid')
                 ->leftJoin('vtiger_contactscf as cf', 't.contact_id', '=', 'cf.contactid')
                 ->leftJoin('vtiger_users as u', 'e.smownerid', '=', 'u.id')
+                ->leftJoin('vtiger_users as creator', 'e.smcreatorid', '=', 'creator.id')
                 ->when($fullDescription, fn ($q) => $q
-                    ->leftJoin('vtiger_users as creator', 'e.smcreatorid', '=', 'creator.id')
                     ->leftJoin('vtiger_users as modifier', 'e.modifiedby', '=', 'modifier.id'))
                 ->where('e.deleted', 0)
                 ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
@@ -878,6 +878,9 @@ class CrmService
                     'u.first_name as owner_first',
                     'u.last_name as owner_last',
                     'u.user_name as owner_username',
+                    'creator.first_name as assigned_by_first',
+                    'creator.last_name as assigned_by_last',
+                    'creator.user_name as assigned_by_username',
                     ...($fullDescription ? [
                         DB::raw("TRIM(CONCAT(COALESCE(creator.first_name,''), ' ', COALESCE(creator.last_name,''))) as creator_name"),
                         DB::raw("creator.user_name as creator_username"),
@@ -915,7 +918,10 @@ class CrmService
                         ->orWhere('cf.cf_872', 'like', $term)
                         ->orWhere('u.first_name', 'like', $term)
                         ->orWhere('u.last_name', 'like', $term)
-                        ->orWhere('u.user_name', 'like', $term);
+                        ->orWhere('u.user_name', 'like', $term)
+                        ->orWhere('creator.first_name', 'like', $term)
+                        ->orWhere('creator.last_name', 'like', $term)
+                        ->orWhere('creator.user_name', 'like', $term);
                 });
             }
 
@@ -977,6 +983,7 @@ class CrmService
                 ->leftJoin('vtiger_contactdetails as c', 't.contact_id', '=', 'c.contactid')
                 ->leftJoin('vtiger_contactscf as cf', 't.contact_id', '=', 'cf.contactid')
                 ->leftJoin('vtiger_users as u', 'e.smownerid', '=', 'u.id')
+                ->leftJoin('vtiger_users as creator', 'e.smcreatorid', '=', 'creator.id')
                 ->where('e.deleted', 0)
                 ->whereIn('e.setype', ['HelpDesk', 'Ticket']);
 
@@ -1008,7 +1015,10 @@ class CrmService
                         ->orWhere('cf.cf_872', 'like', $term)
                         ->orWhere('u.first_name', 'like', $term)
                         ->orWhere('u.last_name', 'like', $term)
-                        ->orWhere('u.user_name', 'like', $term);
+                        ->orWhere('u.user_name', 'like', $term)
+                        ->orWhere('creator.first_name', 'like', $term)
+                        ->orWhere('creator.last_name', 'like', $term)
+                        ->orWhere('creator.user_name', 'like', $term);
                 });
             }
 
@@ -1049,7 +1059,7 @@ class CrmService
     /**
      * Get paginated tickets for a specific contact with search and status filter.
      */
-    public function getTicketsForContactPaginated(int $contactId, int $limit = 20, int $offset = 0, ?string $status = null, ?string $search = null)
+    public function getTicketsForContactPaginated(int $contactId, int $limit = 20, int $offset = 0, ?string $status = null, ?string $search = null, ?int $ownerId = null)
     {
         try {
             $query = DB::connection('vtiger')
@@ -1058,6 +1068,7 @@ class CrmService
                 ->leftJoin('vtiger_contactdetails as c', 't.contact_id', '=', 'c.contactid')
                 ->leftJoin('vtiger_contactscf as cf', 'c.contactid', '=', 'cf.contactid')
                 ->leftJoin('vtiger_users as u', 'e.smownerid', '=', 'u.id')
+                ->leftJoin('vtiger_users as creator', 'e.smcreatorid', '=', 'creator.id')
                 ->where('e.deleted', 0)
                 ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
                 ->where('t.contact_id', $contactId)
@@ -1067,6 +1078,7 @@ class CrmService
                     'e.createdtime',
                     'e.modifiedtime',
                     'e.smownerid',
+                    'e.smcreatorid',
                     'c.firstname as contact_first',
                     'c.lastname as contact_last',
                     'cf.cf_860',
@@ -1075,8 +1087,15 @@ class CrmService
                     'cf.cf_872',
                     'u.first_name as owner_first',
                     'u.last_name as owner_last',
-                    'u.user_name as owner_username'
+                    'u.user_name as owner_username',
+                    'creator.first_name as assigned_by_first',
+                    'creator.last_name as assigned_by_last',
+                    'creator.user_name as assigned_by_username'
                 );
+
+            if ($ownerId !== null && $ownerId > 0) {
+                $query->where('e.smownerid', $ownerId);
+            }
 
             if ($status && trim($status) !== '') {
                 $query->where('t.status', $status);

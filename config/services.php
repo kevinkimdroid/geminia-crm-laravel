@@ -70,14 +70,22 @@ return [
     |--------------------------------------------------------------------------
     | Social Media Webhook URLs (for platform developer consoles)
     |--------------------------------------------------------------------------
-    | Use these when configuring webhooks in Meta, Twitter, TikTok, Google.
+    | Meta: use the same /webhooks/social/meta URL for Facebook Page + Instagram.
     */
     'social_webhooks' => [
-        'facebook' => env('SOCIAL_WEBHOOK_FACEBOOK', 'https://geminialife.co.ke/webhook/index.php?provider=facebook'),
-        'instagram' => env('SOCIAL_WEBHOOK_INSTAGRAM', 'https://geminialife.co.ke/webhook/index.php?provider=instagram'),
-        'tiktok' => env('SOCIAL_WEBHOOK_TIKTOK', 'https://geminialife.co.ke/webhook/index.php?provider=tiktok'),
-        'twitter' => env('SOCIAL_WEBHOOK_TWITTER', 'https://geminialife.co.ke/webhook/index.php?provider=twitter'),
-        'google' => env('SOCIAL_WEBHOOK_GOOGLE', 'https://geminialife.co.ke/webhook/index.php?provider=google'),
+        'facebook' => env('SOCIAL_WEBHOOK_FACEBOOK', rtrim((string) env('APP_URL', 'http://localhost'), '/') . '/webhooks/social/meta'),
+        'instagram' => env('SOCIAL_WEBHOOK_INSTAGRAM', rtrim((string) env('APP_URL', 'http://localhost'), '/') . '/webhooks/social/meta'),
+        'tiktok' => env('SOCIAL_WEBHOOK_TIKTOK', rtrim((string) env('APP_URL', 'http://localhost'), '/') . '/webhooks/social/ingest'),
+        'twitter' => env('SOCIAL_WEBHOOK_TWITTER', rtrim((string) env('APP_URL', 'http://localhost'), '/') . '/webhooks/social/ingest'),
+        'google' => env('SOCIAL_WEBHOOK_GOOGLE', rtrim((string) env('APP_URL', 'http://localhost'), '/') . '/webhooks/social/ingest'),
+    ],
+
+    'social_webhook' => [
+        'meta_verify_token' => env('META_WEBHOOK_VERIFY_TOKEN'),
+        'meta_app_secret' => env('META_APP_SECRET', env('FACEBOOK_CLIENT_SECRET')),
+        'skip_signature_verify' => env('SOCIAL_WEBHOOK_SKIP_SIGNATURE_VERIFY', false),
+        'enrich_with_graph' => env('SOCIAL_WEBHOOK_ENRICH_GRAPH', false),
+        'ingest_bearer_token' => env('SOCIAL_WEBHOOK_INGEST_TOKEN'),
     ],
 
     'pbx' => [

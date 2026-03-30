@@ -265,6 +265,7 @@
                                 <th class="small text-uppercase fw-bold">Status</th>
                                 <th class="small text-uppercase fw-bold">Priority</th>
                                 <th class="small text-uppercase fw-bold">Assigned</th>
+                                <th class="small text-uppercase fw-bold">Assigned By</th>
                                 <th class="small text-uppercase fw-bold">Created</th>
                                 <th class="small text-uppercase fw-bold text-end">Actions</th>
                             </tr>
@@ -282,6 +283,7 @@
                                     }
                                 }
                                 $ownerName = trim(($ticket->owner_first ?? '') . ' ' . ($ticket->owner_last ?? '')) ?: ($ticket->owner_username ?? '—');
+                                $assignedByName = trim(($ticket->assigned_by_first ?? '') . ' ' . ($ticket->assigned_by_last ?? '')) ?: ($ticket->assigned_by_username ?? '—');
                             @endphp
                             <tr>
                                 <td>
@@ -300,6 +302,7 @@
                                 </td>
                                 <td><span class="text-muted">{{ $ticket->priority ?? 'Normal' }}</span></td>
                                 <td><span class="text-muted small">{{ $ownerName }}</span></td>
+                                <td><span class="text-muted small">{{ $assignedByName }}</span></td>
                                 <td><span class="text-muted small">{{ $ticket->createdtime ? date('d M Y', strtotime($ticket->createdtime)) : '—' }}</span></td>
                                 <td class="text-end">
                                     <a href="{{ route('tickets.show', $ticket->ticketid) }}" class="btn btn-sm btn-outline-secondary" title="View"><i class="bi bi-eye"></i></a>
@@ -308,7 +311,7 @@
                             </tr>
                             @empty
                             <tr>
-                                <td colspan="8" class="text-center py-5">
+                                <td colspan="9" class="text-center py-5">
                                     <div class="text-muted">
                                         <i class="bi bi-ticket-perforated display-6 d-block mb-2"></i>
                                         <p class="mb-2">No tickets for this client yet.</p>

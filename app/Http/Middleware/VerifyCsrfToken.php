@@ -14,5 +14,6 @@ class VerifyCsrfToken extends Middleware
     protected $except = [
         'api/admin/erp-clients-import',
         'api/feedback/submit',
+        'webhooks/social/*',
     ];
 }

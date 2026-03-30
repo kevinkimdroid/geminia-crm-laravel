@@ -66,7 +66,7 @@
             @if($currentList ?? '')<input type="hidden" name="list" value="{{ $currentList }}">@endif
             <div class="tickets-search">
                 <i class="bi bi-search"></i>
-                <input type="text" name="search" id="tickets-search-input" class="form-control border-0 bg-transparent" placeholder="Search tickets, contacts, assigned to… (Ctrl+K)" value="{{ $search ?? '' }}">
+                <input type="text" name="search" id="tickets-search-input" class="form-control border-0 bg-transparent" placeholder="Search tickets, contacts, assigned to / by… (Ctrl+K)" value="{{ $search ?? '' }}">
             </div>
             <select name="assigned_to" class="form-select form-select-sm tickets-assign-filter" onchange="this.form.submit()">
                 <option value="">All assignees</option>
@@ -93,6 +93,7 @@
                         <th>Status</th>
                         <th>Priority</th>
                         <th>Assigned</th>
+                        <th>Assigned By</th>
                         <th>Created</th>
                         <th class="text-end">Actions</th>
                     </tr>
@@ -113,6 +114,7 @@
                                 }
                             }
                             $ownerName = trim(($ticket->owner_first ?? '') . ' ' . ($ticket->owner_last ?? '')) ?: ($ticket->owner_username ?? '—');
+                            $assignedByName = trim(($ticket->assigned_by_first ?? '') . ' ' . ($ticket->assigned_by_last ?? '')) ?: ($ticket->assigned_by_username ?? '—');
                             $words = array_filter(explode(' ', $contactName));
                             $initials = count($words) >= 2 ? strtoupper(substr($words[0], 0, 1) . substr(end($words), 0, 1)) : ($contactName !== '—' ? strtoupper(substr($contactName, 0, 1)) : '?');
                         @endphp
@@ -139,6 +141,7 @@
                             </td>
                             <td><span class="text-muted small">{{ $ticket->priority ?? 'Normal' }}</span></td>
                             <td><span class="text-muted small">{{ $ownerName }}</span></td>
+                            <td><span class="text-muted small">{{ $assignedByName }}</span></td>
                             <td><span class="text-muted small">{{ $ticket->createdtime ? date('d M Y', strtotime($ticket->createdtime)) : '—' }}</span></td>
                             <td class="text-end">
                                 <button type="button" class="btn btn-sm btn-link text-primary p-1 ticket-reassign-btn" title="Reassign to someone" data-ticket-id="{{ $ticket->ticketid }}"><i class="bi bi-person-plus"></i></button>
@@ -150,7 +153,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="9">
+                            <td colspan="10">
                                 <div class="text-center py-5">
                                     <div class="tickets-empty-icon mb-3"><i class="bi bi-ticket-perforated"></i></div>
                                     <h5 class="fw-bold mb-2">No tickets found</h5>

@@ -25,6 +25,13 @@ Route::get('/feedback/thank-you', [\App\Http\Controllers\FeedbackController::cla
 Route::get('/api/feedback/validate', [\App\Http\Controllers\Api\FeedbackApiController::class, 'validate'])->name('api.feedback.validate');
 Route::post('/api/feedback/submit', [\App\Http\Controllers\Api\FeedbackApiController::class, 'submit'])->name('api.feedback.submit');
 
+Route::match(['get', 'post'], '/webhooks/social/meta', [\App\Http\Controllers\SocialMediaWebhookController::class, 'meta'])
+    ->middleware('throttle:120,1')
+    ->name('webhooks.social.meta');
+Route::post('/webhooks/social/ingest', [\App\Http\Controllers\SocialMediaWebhookController::class, 'ingest'])
+    ->middleware('throttle:60,1')
+    ->name('webhooks.social.ingest');
+
 Route::any('/crm-client-feedback', function () {
     ob_start();
     require base_path('crm-client-feedback/index.php');
