@@ -264,7 +264,7 @@
                                 <th class="small text-uppercase fw-bold">Policy</th>
                                 <th class="small text-uppercase fw-bold">Status</th>
                                 <th class="small text-uppercase fw-bold">Priority</th>
-                                <th class="small text-uppercase fw-bold">Assigned</th>
+                                <th class="small text-uppercase fw-bold">Assigned To</th>
                                 <th class="small text-uppercase fw-bold">Assigned By</th>
                                 <th class="small text-uppercase fw-bold">Created</th>
                                 <th class="small text-uppercase fw-bold text-end">Actions</th>

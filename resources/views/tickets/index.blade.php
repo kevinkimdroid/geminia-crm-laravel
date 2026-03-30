@@ -92,7 +92,7 @@
                         <th title="Policy linked when ticket was created (from Create Ticket / Serve Client)">Policy</th>
                         <th>Status</th>
                         <th>Priority</th>
-                        <th>Assigned</th>
+                        <th>Assigned To</th>
                         <th>Assigned By</th>
                         <th>Created</th>
                         <th class="text-end">Actions</th>
