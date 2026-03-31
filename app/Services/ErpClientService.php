@@ -1211,11 +1211,11 @@ class ErpClientService
             $searchTrimmed = $search ? trim($search) : '';
             if ($searchTrimmed !== '') {
                 $params['search'] = $searchTrimmed;
-                // Group / Mortgage / Group pension: policy-style search also sends policy= for exact match on POL_POLICY_NO etc.
+                // Group / Mortgage / Group pension: full policy ids also send policy= for exact match.
+                // Do not send policy= for prefixes (e.g. GL-GLA-) — exact equality returns no rows.
                 if (
                     in_array($system, ['group', 'mortgage', 'group_pension'], true)
-                    && ! $this->isReceiptFormat($searchTrimmed)
-                    && preg_match('/^[A-Za-z0-9\-\/]+$/', $searchTrimmed)
+                    && $this->shouldSendExactPolicyParamForSegmentSearch($searchTrimmed)
                 ) {
                     $params['policy'] = $searchTrimmed;
                 }
@@ -1307,7 +1307,25 @@ class ErpClientService
         return (bool) preg_match('/^[A-Z]\d{9}[A-Z]$/i', trim((string) $val));
     }
 
-    /** Same rule as policy= on HTTP API: policy-style tokens should surface mortgage/pension rows first on All-search. */
+    /**
+     * When true, HTTP query may include policy= for exact match on POL_POLICY_NO etc.
+     * Prefix / family searches (e.g. "GL-GLA-") must NOT set policy= — the API would use equality
+     * and return zero rows; use search= + LIKE only until the term includes a digit (full policy id).
+     */
+    protected function shouldSendExactPolicyParamForSegmentSearch(string $term): bool
+    {
+        $t = trim($term);
+        if ($t === '' || $this->isReceiptFormat($t) || $this->isPinFormat($t)) {
+            return false;
+        }
+        if (! preg_match('/^[A-Za-z0-9\-\/]+$/', $t)) {
+            return false;
+        }
+
+        return (bool) preg_match('/\d/', $t);
+    }
+
+    /** Policy- or prefix-shaped tokens: surface mortgage/pension rows first on All-search. */
     protected function searchTermLooksLikePolicyNumber(string $term): bool
     {
         $t = trim($term);
