@@ -585,6 +585,11 @@ def _policy_exact_match_predicate_for_view(qualified: str) -> str:
     return "(" + " OR ".join(preds) + ")"
 
 
+def _search_like_column_expr(column: str) -> str:
+    """Substring match; UPPER + TO_CHAR so family prefixes (GL-GLA-) and numeric policy columns still match."""
+    return f"UPPER(TO_CHAR({column})) LIKE UPPER(:search)"
+
+
 def _refine_search_columns_for_qualified_view(qualified, base_columns, env_override_key=None):
     """
     Keep only column names that exist on the given view. Avoids ORA-00904 when Group Life search
@@ -1002,6 +1007,12 @@ def get_clients():
     offset = max(0, int(request.args.get("offset", 0)))
     search = (request.args.get("search") or "").strip()
     policy = (request.args.get("policy") or "").strip()
+    # No real policy is only letters/hyphens (e.g. GL-GLA-): exact :policy match returns 0 rows.
+    # Treat as prefix search via LIKE on :search even if an older CRM still sends policy=.
+    if policy and not re.search(r"\d", policy):
+        if not search:
+            search = policy
+        policy = ""
     system = (request.args.get("system") or "").strip().lower()
     debug_mode = request.args.get("debug", "").strip() in ("1", "true", "yes")
     mendr_renewal_on = (request.args.get("mendr_renewal_on") or "").strip()
@@ -1203,7 +1214,7 @@ def get_clients():
             # Laravel sends both policy= (exact) and search= (same string). AND-ing policy = X with
             # LIKE on name columns fails when X does not appear in names — e.g. GL-GLA-00024.
             if search and scols and not policy:
-                search_conds = [f"{c} LIKE :search" for c in scols]
+                search_conds = [_search_like_column_expr(c) for c in scols]
                 conditions.append("(" + " OR ".join(search_conds) + ")")
                 bind["search"] = f"%{search}%"
             if is_mortgage and mendr_window_days_int is not None and actual_view == target_view:
@@ -1412,7 +1423,7 @@ def get_clients():
                                 ind_search = [["POLICY_NUMBER", "LIFE_ASSURED", "POL_PREPARED_BY", "INTERMEDIARY", "KRA_PIN"], ["POLICY_NUMBER", "LIFE_ASSURED"]]
                                 for search_cols_try in (group_search if use_group_columns else ind_search):
                                     try:
-                                        conds = [f"{c} LIKE :search" for c in search_cols_try]
+                                        conds = [_search_like_column_expr(c) for c in search_cols_try]
                                         where_alt = " WHERE (" + " OR ".join(conds) + ")"
                                         sql = f"""
                                             SELECT * FROM (
