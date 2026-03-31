@@ -155,6 +155,9 @@ class ServeClientController extends Controller
             return redirect()->route('support.serve-client')->with('error', 'Policy number required.');
         }
 
+        $hintSystem = strtolower(trim((string) $request->get('system', '')));
+        $orgLineForHint = $hintSystem === 'mortgage' ? 'line:Mortgage' : 'line:Group Life';
+
         $clientData = $this->erp->getPolicyDetails($policy);
         if (!$clientData) {
             $contact = $this->crm->findContactByPolicyNumber($policy);
@@ -162,7 +165,7 @@ class ServeClientController extends Controller
                 return redirect()->route('tickets.create', [
                     'contact_id' => $contact->contactid,
                     'policy' => $policy,
-                    'organization_id' => 'line:Group Life',
+                    'organization_id' => $orgLineForHint,
                     'from' => 'serve-client',
                 ])->with('info', "Policy \"{$policy}\" could not be retrieved from ERP. Using existing CRM contact.");
             }
@@ -178,7 +181,7 @@ class ServeClientController extends Controller
                 return redirect()->route('tickets.create', [
                     'contact_id' => $contactId,
                     'policy' => $policy,
-                    'organization_id' => 'line:Group Life',
+                    'organization_id' => $orgLineForHint,
                     'from' => 'serve-client',
                 ])->with('info', "Policy \"{$policy}\" could not be retrieved from ERP. A placeholder contact was created — update client details in Contacts when you have them.");
             }
@@ -222,7 +225,9 @@ class ServeClientController extends Controller
         if ($policyNumber !== '' && ! looks_like_kra_pin($policyNumber)) {
             $params['policy'] = $policyNumber;
         }
-        if ($isGroupLife) {
+        if ($hintSystem === 'mortgage' || ($erpClient['life_system'] ?? '') === 'mortgage') {
+            $params['organization_id'] = 'line:Mortgage';
+        } elseif ($isGroupLife) {
             $params['organization_id'] = 'line:Group Life';
         }
         return redirect()->route('tickets.create', $params)->with('success', 'Client selected. Complete the ticket details below.');

@@ -91,6 +91,65 @@ def _mortgage_view_q():
     return (os.environ.get("ERP_CLIENTS_MORTGAGE_VIEW") or "").strip()
 
 
+def _mortgage_renewal_date_sql_expr_two_cols(col_a: str, col_b: str) -> str:
+    """
+    Next renewal date when the view has two candidates (e.g. MENDR vs MATURITY).
+    Plain COALESCE(col_a, col_b) fails when col_a is non-null but stale (last cycle)
+    while col_b holds the upcoming renewal — e.g. policy due 16-Apr-2026 on MATURITY.
+    Prefer, in order: col_a if on/after today, col_b if on/after today, else COALESCE(a,b).
+    """
+    ca, cb = col_a.strip(), col_b.strip()
+    return (
+        "COALESCE("
+        f"CASE WHEN {ca} IS NOT NULL AND TRUNC({ca}) >= TRUNC(SYSDATE) THEN {ca} END, "
+        f"CASE WHEN {cb} IS NOT NULL AND TRUNC({cb}) >= TRUNC(SYSDATE) THEN {cb} END, "
+        f"{ca}, {cb})"
+    )
+
+
+def _mortgage_renewal_date_sql_expr():
+    """
+    SQL expression for filtering/sorting mortgage renewals (default: MENDR_RENEWAL_DATE only).
+    Env ERP_CLIENTS_MORTGAGE_RENEWAL_DATE_COLUMN overrides:
+      - One column, e.g. MENDR_RENEWAL_DATE
+      - Two columns A|B → smart pick (see _mortgage_renewal_date_sql_expr_two_cols)
+      - Three or more → COALESCE(...)
+    """
+    spec = (os.environ.get("ERP_CLIENTS_MORTGAGE_RENEWAL_DATE_COLUMN") or "MENDR_RENEWAL_DATE").strip()
+    if "|" in spec:
+        parts = [p.strip() for p in spec.split("|") if p.strip()]
+        if len(parts) >= 3:
+            return "COALESCE(" + ", ".join(parts) + ")"
+        if len(parts) == 2:
+            return _mortgage_renewal_date_sql_expr_two_cols(parts[0], parts[1])
+        return parts[0] if parts else "MENDR_RENEWAL_DATE"
+    return spec if spec else "MENDR_RENEWAL_DATE"
+
+
+def _mortgage_renewal_sql_range_predicate(rexpr):
+    """
+    Inclusive [start, end] on calendar dates, but never before Oracle SYSDATE (no past renewals).
+    rexpr: SQL date expression (column name or COALESCE(...)).
+    """
+    return (
+        f"({rexpr}) IS NOT NULL "
+        f"AND TRUNC({rexpr}) >= GREATEST(TO_DATE(:mendr_renewal_from, 'YYYY-MM-DD'), TRUNC(SYSDATE)) "
+        f"AND TRUNC({rexpr}) <= TO_DATE(:mendr_renewal_to, 'YYYY-MM-DD')"
+    )
+
+
+def _mortgage_renewal_sql_days_from_today_predicate(rexpr):
+    """
+    Rows where renewal date is between TRUNC(SYSDATE) and TRUNC(SYSDATE)+N days inclusive end.
+    Uses DB server calendar (avoids CRM/PHP vs Oracle date skew).
+    """
+    return (
+        f"({rexpr}) IS NOT NULL "
+        f"AND TRUNC({rexpr}) >= TRUNC(SYSDATE) "
+        f"AND TRUNC({rexpr}) <= TRUNC(SYSDATE) + :mendr_window_days"
+    )
+
+
 def _group_pension_view_q():
     return (os.environ.get("ERP_CLIENTS_GROUP_PENSION_VIEW") or "").strip()
 COLS_BASE = "POLICY_NUMBER,PRODUCT,POL_PREPARED_BY,INTERMEDIARY,STATUS,KRA_PIN"
@@ -203,7 +262,17 @@ def row_to_client(row, columns, *, life_system_override=None):
     for i, col in enumerate(columns):
         v = row[i] if i < len(row) else None
         key = col.lower().replace(" ", "_").replace("-", "_")
-        if key in ("prp_dob", "maturity", "maturity_date", "effective_date", "authorization_date") and v is not None:
+        if key in (
+            "prp_dob",
+            "maturity",
+            "maturity_date",
+            "effective_date",
+            "authorization_date",
+            "mendr_renewal_date",
+            "renewal_date",
+            "next_renewal_date",
+            "ren_date",
+        ) and v is not None:
             if callable(getattr(v, "read", None)):
                 v = _coerce_oracle_scalar_to_str(v)
             d[key] = parse_date(v)
@@ -252,6 +321,16 @@ def row_to_client(row, columns, *, life_system_override=None):
     # Normalize maturity_date -> maturity for Laravel
     if "maturity_date" in d and "maturity" not in d:
         d["maturity"] = d["maturity_date"]
+    # Renewal date for mortgage lists: LMS often leaves MATURITY_DATE as the next cycle when MENDR_RENEWAL_DATE is null
+    if not d.get("mendr_renewal_date"):
+        for k in ("renewal_date", "next_renewal_date", "ren_date"):
+            if d.get(k):
+                d["mendr_renewal_date"] = d[k]
+                break
+    if not d.get("mendr_renewal_date") and d.get("maturity"):
+        d["mendr_renewal_date"] = d["maturity"]
+    elif not d.get("mendr_renewal_date") and d.get("maturity_date"):
+        d["mendr_renewal_date"] = d["maturity_date"]
     # Normalize life_assured -> life_assur for Laravel (Oracle uses LIFE_ASSURED)
     if "life_assured" in d:
         d["life_assur"] = d["life_assured"]
@@ -881,7 +960,7 @@ def get_maturities():
 @app.route("/clients", methods=["GET"])
 @app.route("/api/clients", methods=["GET"])
 def get_clients():
-    """GET /clients?limit=50&offset=0&search=term&policy=XXX&count_only=1&products=1 (products=1 returns distinct PRODUCT values)"""
+    """GET /clients? ... mortgage: mendr_window_days=N (MENDR_RENEWAL_DATE from TRUNC(SYSDATE), inclusive), or mendr_renewal_from/to, or mendr_renewal_on."""
     products_only = request.args.get("products", "").strip() in ("1", "true", "yes")
     if products_only:
         return _get_distinct_products()
@@ -892,6 +971,39 @@ def get_clients():
     policy = (request.args.get("policy") or "").strip()
     system = (request.args.get("system") or "").strip().lower()
     debug_mode = request.args.get("debug", "").strip() in ("1", "true", "yes")
+    mendr_renewal_on = (request.args.get("mendr_renewal_on") or "").strip()
+    if mendr_renewal_on and not re.match(r"^\d{4}-\d{2}-\d{2}$", mendr_renewal_on):
+        mendr_renewal_on = ""
+    mendr_renewal_from = (request.args.get("mendr_renewal_from") or "").strip()
+    mendr_renewal_to = (request.args.get("mendr_renewal_to") or "").strip()
+    if mendr_renewal_from and not re.match(r"^\d{4}-\d{2}-\d{2}$", mendr_renewal_from):
+        mendr_renewal_from = ""
+    if mendr_renewal_to and not re.match(r"^\d{4}-\d{2}-\d{2}$", mendr_renewal_to):
+        mendr_renewal_to = ""
+    if mendr_renewal_from and mendr_renewal_to and mendr_renewal_from > mendr_renewal_to:
+        mendr_renewal_from, mendr_renewal_to = mendr_renewal_to, mendr_renewal_from
+    mendr_renewal_range = bool(mendr_renewal_from and mendr_renewal_to)
+    _mwd_raw = (request.args.get("mendr_window_days") or "").strip()
+    mendr_window_days_int = None
+    if _mwd_raw.isdigit():
+        mendr_window_days_int = max(1, min(120, int(_mwd_raw)))
+    mortgage_upcoming = request.args.get("mortgage_upcoming_renewals", "").strip().lower() in ("1", "true", "yes")
+    if (
+        system == "mortgage"
+        and mortgage_upcoming
+        and not mendr_renewal_range
+        and mendr_window_days_int is None
+        and not policy
+        and not search
+    ):
+        return jsonify({
+            "data": [],
+            "total": 0,
+            "error": (
+                "Upcoming renewals only: pass mendr_window_days (1–120) or mendr_renewal_from and mendr_renewal_to. "
+                "The full mortgage register is not returned in this mode."
+            ),
+        })
     if system == "mortgage" and not _mortgage_view_q():
         return jsonify({
             "data": [],
@@ -927,8 +1039,67 @@ def get_clients():
     if not PASSWORD:
         return jsonify({"data": [], "total": 0, "error": "ORACLE_PASSWORD not set"}), 503
 
+    # Mortgage: count rows with MENDR_RENEWAL_DATE within N days from TRUNC(SYSDATE) (takes precedence over from/to)
+    if count_only and not search and not policy and mendr_window_days_int is not None and is_mortgage and _mortgage_view_q():
+        try:
+            conn = get_connection()
+            cursor = conn.cursor()
+            rexpr = _mortgage_renewal_date_sql_expr()
+            wh = " WHERE " + _mortgage_renewal_sql_days_from_today_predicate(rexpr)
+            cursor.execute(
+                f"SELECT COUNT(*) FROM {target_view}{wh}",
+                {"mendr_window_days": mendr_window_days_int},
+            )
+            total = cursor.fetchone()[0]
+            cursor.close()
+            conn.close()
+            return jsonify({"data": [], "total": total})
+        except Exception as e:
+            return jsonify({"data": [], "total": 0, "error": str(e)})
+
+    # Mortgage: count rows with renewal in [from, to] (inclusive calendar dates)
+    if (
+        count_only
+        and not search
+        and not policy
+        and mendr_renewal_range
+        and mendr_window_days_int is None
+        and is_mortgage
+        and _mortgage_view_q()
+    ):
+        try:
+            conn = get_connection()
+            cursor = conn.cursor()
+            rexpr = _mortgage_renewal_date_sql_expr()
+            wh = " WHERE " + _mortgage_renewal_sql_range_predicate(rexpr)
+            cursor.execute(
+                f"SELECT COUNT(*) FROM {target_view}{wh}",
+                {"mendr_renewal_from": mendr_renewal_from, "mendr_renewal_to": mendr_renewal_to},
+            )
+            total = cursor.fetchone()[0]
+            cursor.close()
+            conn.close()
+            return jsonify({"data": [], "total": total})
+        except Exception as e:
+            return jsonify({"data": [], "total": 0, "error": str(e)})
+
+    # Mortgage: count rows with renewal on a single day (date picker / legacy mendr_renewal_on)
+    if count_only and not search and not policy and mendr_renewal_on and is_mortgage and _mortgage_view_q():
+        try:
+            conn = get_connection()
+            cursor = conn.cursor()
+            rexpr = _mortgage_renewal_date_sql_expr()
+            wh = f" WHERE TRUNC({rexpr}) = TO_DATE(:mendr_renewal_on, 'YYYY-MM-DD')"
+            cursor.execute(f"SELECT COUNT(*) FROM {target_view}{wh}", {"mendr_renewal_on": mendr_renewal_on})
+            total = cursor.fetchone()[0]
+            cursor.close()
+            conn.close()
+            return jsonify({"data": [], "total": total})
+        except Exception as e:
+            return jsonify({"data": [], "total": 0, "error": str(e)})
+
     # Count-only request: return accurate total for dashboard (no rows fetched)
-    if count_only and not search and not policy:
+    if count_only and not search and not policy and not mendr_renewal_on and not mendr_renewal_range and mendr_window_days_int is None:
         try:
             conn = get_connection()
             cursor = conn.cursor()
@@ -997,10 +1168,40 @@ def get_clients():
                 search_conds = [f"{c} LIKE :search" for c in scols]
                 conditions.append("(" + " OR ".join(search_conds) + ")")
                 bind["search"] = f"%{search}%"
+            if is_mortgage and mendr_window_days_int is not None and actual_view == target_view:
+                rexpr = _mortgage_renewal_date_sql_expr()
+                conditions.append(_mortgage_renewal_sql_days_from_today_predicate(rexpr))
+                bind["mendr_window_days"] = mendr_window_days_int
+            elif is_mortgage and mendr_renewal_range and actual_view == target_view:
+                rexpr = _mortgage_renewal_date_sql_expr()
+                conditions.append(_mortgage_renewal_sql_range_predicate(rexpr))
+                bind["mendr_renewal_from"] = mendr_renewal_from
+                bind["mendr_renewal_to"] = mendr_renewal_to
+            elif is_mortgage and mendr_renewal_on and actual_view == target_view:
+                rexpr = _mortgage_renewal_date_sql_expr()
+                conditions.append(f"TRUNC({rexpr}) = TO_DATE(:mendr_renewal_on, 'YYYY-MM-DD')")
+                bind["mendr_renewal_on"] = mendr_renewal_on
             if grp_where_str:
                 conditions.append(grp_where_str.strip())
             if conditions:
                 where_clause = " WHERE " + " AND ".join(conditions)
+
+            if (
+                mortgage_upcoming
+                and is_mortgage
+                and not policy
+                and not search
+                and mendr_window_days_int is None
+                and not mendr_renewal_range
+                and not mendr_renewal_on
+            ):
+                cursor.close()
+                conn.close()
+                return jsonify({
+                    "data": [],
+                    "total": 0,
+                    "error": "Upcoming renewals require mendr_window_days or mendr_renewal_from / mendr_renewal_to.",
+                })
 
             # Accurate total when no search (avoids wrong estimates on Clients page)
             accurate_total = None
@@ -1008,9 +1209,12 @@ def get_clients():
                 try:
                     if is_group and USE_GROUP_AGGREGATE and actual_view == target_view:
                         gcol = _get_group_by_column()
-                        cursor.execute(f"SELECT COUNT(DISTINCT {gcol}) FROM {actual_view}{where_clause}")
+                        cursor.execute(
+                            f"SELECT COUNT(DISTINCT {gcol}) FROM {actual_view}{where_clause}",
+                            bind,
+                        )
                     else:
-                        cursor.execute(f"SELECT COUNT(*) FROM {actual_view}{where_clause}")
+                        cursor.execute(f"SELECT COUNT(*) FROM {actual_view}{where_clause}", bind)
                     accurate_total = cursor.fetchone()[0]
                 except Exception:
                     pass
@@ -1054,10 +1258,15 @@ def get_clients():
             )
             if use_select_star:
                 try:
+                    _inner_order = "1"
+                    if is_mortgage and actual_view == target_view and (
+                        mendr_window_days_int is not None or mendr_renewal_range or mendr_renewal_on
+                    ):
+                        _inner_order = f"TRUNC({_mortgage_renewal_date_sql_expr()})"
                     sql = f"""
                         SELECT * FROM (
                             SELECT a.*, ROWNUM rnum FROM (
-                                SELECT * FROM {actual_view}{where_clause} ORDER BY 1
+                                SELECT * FROM {actual_view}{where_clause} ORDER BY {_inner_order}
                             ) a WHERE ROWNUM <= :end_row
                         ) WHERE rnum > :start_row
                     """

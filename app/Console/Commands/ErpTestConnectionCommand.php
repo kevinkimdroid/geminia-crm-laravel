@@ -81,6 +81,7 @@ class ErpTestConnectionCommand extends Command
         $this->newLine();
         $this->info('All checks passed. ERP connection is OK.');
         $this->line('If the web app still shows "Oracle connection failed", clear config cache: php artisan config:clear');
+        $this->line('Mortgage renewals: php artisan erp:test-mortgage-renewals (filtered count must be less than full mortgage count).');
 
         return 0;
     }

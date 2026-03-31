@@ -47,7 +47,11 @@
     </div>
 </div>
 
-<p class="text-muted small mb-4">Quick access to support workflows. Start with Serve Client to search and assist, or jump to Clients to browse.</p>
+<p class="text-muted small mb-2">Quick access to support workflows. Start with Serve Client to search and assist, or jump to Clients to browse.</p>
+<p class="mb-4">
+    <a href="{{ route('support.mortgage-renewals') }}" class="text-decoration-none fw-semibold"><i class="bi bi-house-heart me-1"></i>Due for renewal (mortgage)</a>
+    <span class="text-muted small"> — Renewal dates due within the next 30 days (change the period on that page).</span>
+</p>
 <div class="row g-4">
     <div class="col-md-6 col-lg-4">
         <a href="{{ route('support.serve-client') }}" class="card support-quick-card text-decoration-none h-100" style="border:2px solid var(--geminia-primary);background:var(--geminia-primary-muted)">

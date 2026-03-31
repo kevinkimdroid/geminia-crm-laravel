@@ -1062,8 +1062,14 @@ class ErpClientService
     /**
      * Get clients from ERP HTTP API (ERP_CLIENTS_HTTP_URL).
      * Fast: no Oracle, no cache; direct API fetch. Supports limit, offset, search.
+     *
+     * @param  ?string  $mendrRenewalOn  ISO date (Y-m-d); mortgage only. Exact day (API mendr_renewal_on) if from/to omitted.
+     * @param  ?string  $mendrRenewalFrom  ISO start date inclusive (API mendr_renewal_from).
+     * @param  ?string  $mendrRenewalTo  ISO end date inclusive (API mendr_renewal_to). From/to together filter a range.
+     * @param  bool  $mortgageUpcomingRenewalsOnly  When true with system=mortgage, require from/to or mendrRenewalWindowDays. Sends mortgage_upcoming_renewals=1.
+     * @param  ?int  $mendrRenewalWindowDays  With system=mortgage: days from Oracle TRUNC(SYSDATE) for MENDR_RENEWAL_DATE (API mendr_window_days). Preferred for renewal dashboard.
      */
-    public function getClientsFromHttpApi(int $limit, int $offset, ?string $search = null, ?int $timeoutSeconds = null, bool $countOnly = false, ?string $system = null): array
+    public function getClientsFromHttpApi(int $limit, int $offset, ?string $search = null, ?int $timeoutSeconds = null, bool $countOnly = false, ?string $system = null, ?string $mendrRenewalOn = null, ?string $mendrRenewalFrom = null, ?string $mendrRenewalTo = null, bool $mortgageUpcomingRenewalsOnly = false, ?int $mendrRenewalWindowDays = null): array
     {
         try {
             if (in_array($system, ['mortgage', 'group_pension'], true) && ! $this->optionalClientsSegmentConfigured($system)) {
@@ -1072,6 +1078,20 @@ class ErpClientService
             $url = config('erp.clients_http_url');
             if (empty($url)) {
                 return ['data' => collect(), 'total' => 0, 'error' => 'ERP_CLIENTS_HTTP_URL is not set.'];
+            }
+
+            $renewalFromPre = $mendrRenewalFrom !== null && trim((string) $mendrRenewalFrom) !== '' ? trim((string) $mendrRenewalFrom) : '';
+            $renewalToPre = $mendrRenewalTo !== null && trim((string) $mendrRenewalTo) !== '' ? trim((string) $mendrRenewalTo) : '';
+            $rangeOkPre = $system === 'mortgage'
+                && preg_match('/^\d{4}-\d{2}-\d{2}$/', $renewalFromPre)
+                && preg_match('/^\d{4}-\d{2}-\d{2}$/', $renewalToPre);
+            $windowDaysPre = $mendrRenewalWindowDays !== null ? max(1, min(120, (int) $mendrRenewalWindowDays)) : null;
+            if ($mortgageUpcomingRenewalsOnly && $system === 'mortgage' && ! $rangeOkPre && $windowDaysPre === null) {
+                return [
+                    'data' => collect(),
+                    'total' => 0,
+                    'error' => 'Upcoming renewals require mendr_window_days or a valid mendr_renewal_from / mendr_renewal_to range. This list cannot show all mortgage policies.',
+                ];
             }
 
             $params = ['limit' => min($limit, 100), 'offset' => $offset];
@@ -1092,6 +1112,28 @@ class ErpClientService
             }
             if ($system && in_array($system, ['group', 'individual', 'mortgage', 'group_pension'], true)) {
                 $params['system'] = $system;
+            }
+            $renewalFrom = $mendrRenewalFrom !== null && trim((string) $mendrRenewalFrom) !== '' ? trim((string) $mendrRenewalFrom) : '';
+            $renewalTo = $mendrRenewalTo !== null && trim((string) $mendrRenewalTo) !== '' ? trim((string) $mendrRenewalTo) : '';
+            $renewalRangeOk = $system === 'mortgage'
+                && preg_match('/^\d{4}-\d{2}-\d{2}$/', $renewalFrom)
+                && preg_match('/^\d{4}-\d{2}-\d{2}$/', $renewalTo);
+            $windowDays = $mendrRenewalWindowDays !== null ? max(1, min(120, (int) $mendrRenewalWindowDays)) : null;
+            if ($windowDays !== null && $system === 'mortgage') {
+                $params['mendr_window_days'] = $windowDays;
+            }
+            // Always send from/to when valid — APIs that ignore mendr_window_days still must filter (avoid full mortgage list).
+            if ($renewalRangeOk) {
+                $params['mendr_renewal_from'] = $renewalFrom;
+                $params['mendr_renewal_to'] = $renewalTo;
+            } elseif ($system === 'mortgage' && $windowDays === null) {
+                $renewalOn = $mendrRenewalOn !== null && trim((string) $mendrRenewalOn) !== '' ? trim((string) $mendrRenewalOn) : '';
+                if ($renewalOn !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $renewalOn)) {
+                    $params['mendr_renewal_on'] = $renewalOn;
+                }
+            }
+            if ($mortgageUpcomingRenewalsOnly && $system === 'mortgage') {
+                $params['mortgage_upcoming_renewals'] = '1';
             }
 
             $timeout = $timeoutSeconds ?? (($search && trim($search) !== '') ? 30 : 15);
@@ -1197,6 +1239,11 @@ class ErpClientService
         $kraPin = $get(['kra_pin', 'kraPin']) ?? '';
         $prpDob = $get(['prp_dob', 'prpDob']) ?? null;
         $maturity = $get(['maturity', 'maturity_date', 'maturityDate']) ?? null;
+        $mendrKeys = ['mendr_renewal_date', 'mendrRenewalDate', 'MENDR_RENEWAL_DATE', 'renewal_date', 'next_renewal_date', 'RENEWAL_DATE'];
+        if ($system === 'mortgage') {
+            $mendrKeys = array_merge($mendrKeys, ['maturity_date', 'maturityDate', 'maturity']);
+        }
+        $mendrRenewalDate = $get($mendrKeys) ?? null;
         $effectiveDate = $get(['effective_date', 'effectiveDate', 'authorization_date']) ?? null;
         $paidMatAmt = $get(['bal', 'BAL', 'paid_mat_amt', 'paidMatAmt', 'production_amt']) ?? null;
         $checkoff = $get(['checkoff']) ?? null;
@@ -1228,6 +1275,7 @@ class ErpClientService
             'kra_pin' => $kraPin,
             'prp_dob' => $prpDob,
             'maturity' => $maturity,
+            'mendr_renewal_date' => $mendrRenewalDate,
             'effective_date' => $effectiveDate,
             'paid_mat_amt' => $paidMatAmt,
             'bal' => $get(['bal', 'BAL']) ?? $paidMatAmt,
