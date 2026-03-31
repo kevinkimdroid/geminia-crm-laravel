@@ -552,6 +552,24 @@ def _get_group_by_column_for_view(qualified: str):
     return POLICY_COL_GROUP
 
 
+def _policy_exact_match_predicate_for_view(qualified: str) -> str:
+    """
+    SQL predicate for exact policy match on LMS-style views: try every policy-like column that exists
+    (POL_POLICY_NO vs IPOL_POLICY_NO vs POLICY_NUMBER). Trims and upper-cases to avoid missed rows.
+    """
+    cols = _get_columns_for_qualified_view(qualified)
+    preds = []
+    for c in ("POL_POLICY_NO", "IPOL_POLICY_NO", "POLICY_NUMBER", "CONTRACT_NO", "SCHEME_NO"):
+        if c in cols:
+            preds.append(f"UPPER(TRIM({c})) = UPPER(TRIM(:policy))")
+    if not preds:
+        gcol = _get_group_by_column_for_view(qualified)
+        preds.append(f"UPPER(TRIM({gcol})) = UPPER(TRIM(:policy))")
+    if len(preds) == 1:
+        return preds[0]
+    return "(" + " OR ".join(preds) + ")"
+
+
 def _refine_search_columns_for_qualified_view(qualified, base_columns, env_override_key=None):
     """
     Keep only column names that exist on the given view. Avoids ORA-00904 when Group Life search
@@ -1020,8 +1038,9 @@ def get_clients():
     life_system_tag = system if system in ("mortgage", "group_pension") else None
     is_group = system == "group"
     is_mortgage = system == "mortgage"
-    # LMS_GROUP_MORTAGE_VIEW etc.: same column/search shape as Group Life, not individual CRM view
-    use_group_columns = is_group or is_mortgage
+    is_group_pension = system == "group_pension"
+    # LMS_GROUP_MORTAGE_VIEW / group pension views: same column/search shape as Group Life, not individual CRM view
+    use_group_columns = is_group or is_mortgage or is_group_pension
     columns = [c.strip() for c in (COLS_GROUP if use_group_columns else COLS).split(",")]
     if system == "individual":
         columns = _merge_individual_product_fallback_columns(columns)
@@ -1160,7 +1179,9 @@ def get_clients():
                 if is_group and actual_view == target_view:
                     conditions.append(f"{_get_group_by_column()} = :policy")
                 elif is_mortgage and actual_view == target_view:
-                    conditions.append(f"{_get_group_by_column_for_view(target_view)} = :policy")
+                    conditions.append(_policy_exact_match_predicate_for_view(target_view))
+                elif is_group_pension and actual_view == target_view:
+                    conditions.append(_policy_exact_match_predicate_for_view(target_view))
                 else:
                     conditions.append(f"{POLICY_COL} = :policy")
                 bind["policy"] = policy
@@ -1205,6 +1226,24 @@ def get_clients():
                     "error": "Upcoming renewals require mendr_window_days or mendr_renewal_from / mendr_renewal_to.",
                 })
 
+            # Accurate count for mortgage / group pension filtered lists (policy, renewal window, etc.)
+            if (
+                count_only
+                and where_clause
+                and (
+                    (is_mortgage and actual_view == target_view)
+                    or (is_group_pension and actual_view == target_view)
+                )
+            ):
+                try:
+                    cursor.execute(f"SELECT COUNT(*) FROM {actual_view}{where_clause}", bind)
+                    cnt = int(cursor.fetchone()[0])
+                    cursor.close()
+                    conn.close()
+                    return jsonify({"data": [], "total": cnt})
+                except oracledb.DatabaseError:
+                    pass
+
             # Accurate total when no search (avoids wrong estimates on Clients page)
             accurate_total = None
             if not search and not policy:
@@ -1232,6 +1271,11 @@ def get_clients():
                 and bool(_mortgage_view_q())
                 and os.environ.get("ERP_CLIENTS_MORTGAGE_USE_SELECT_STAR", "true").lower() in ("1", "true", "yes")
             )
+            use_group_pension_select_star = (
+                is_group_pension
+                and bool(_group_pension_view_q())
+                and os.environ.get("ERP_CLIENTS_GROUP_PENSION_USE_SELECT_STAR", "true").lower() in ("1", "true", "yes")
+            )
             if use_aggregate:
                 try:
                     data, total = _get_group_life_clients(limit, offset, search, policy)
@@ -1257,6 +1301,7 @@ def get_clients():
             use_select_star = (
                 (is_group and USE_GROUP_SELECT_STAR and actual_view == target_view and not USE_GROUP_AGGREGATE)
                 or (use_mortgage_select_star and actual_view == target_view)
+                or (use_group_pension_select_star and actual_view == target_view)
             )
             if use_select_star:
                 try:

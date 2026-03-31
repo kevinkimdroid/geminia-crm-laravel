@@ -1014,7 +1014,11 @@ class ErpClientService
                 }
             }
             if ($append->isNotEmpty()) {
-                $data = $data->merge($append)->values()->take($limit);
+                // Policy searches hit mortgage-only views: show those rows first so take(limit) does not drop them
+                // when Group/Individual fill the page with unrelated weak matches.
+                $data = $this->searchTermLooksLikePolicyNumber($searchTrim)
+                    ? $append->merge($data)->values()->take($limit)
+                    : $data->merge($append)->values()->take($limit);
             }
         }
 
@@ -1301,6 +1305,17 @@ class ErpClientService
             return false;
         }
         return (bool) preg_match('/^[A-Z]\d{9}[A-Z]$/i', trim((string) $val));
+    }
+
+    /** Same rule as policy= on HTTP API: policy-style tokens should surface mortgage/pension rows first on All-search. */
+    protected function searchTermLooksLikePolicyNumber(string $term): bool
+    {
+        $t = trim($term);
+        if ($t === '' || $this->isReceiptFormat($t) || $this->isPinFormat($t)) {
+            return false;
+        }
+
+        return (bool) preg_match('/^[A-Za-z0-9\-\/]+$/', $t);
     }
 
     /**
