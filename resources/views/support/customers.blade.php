@@ -25,15 +25,42 @@
 </div>
 
 @if ($clientsError ?? null)
+@php
+    $clientsErrorRaw = (string) ($clientsError ?? '');
+    $crmFallbackNote = ' Showing CRM contacts below (if any).';
+    $clientsErrorTechnical = str_ends_with($clientsErrorRaw, $crmFallbackNote)
+        ? substr($clientsErrorRaw, 0, -strlen($crmFallbackNote))
+        : $clientsErrorRaw;
+    $isErpQueryBindError = str_contains($clientsErrorTechnical, 'DPY-4008')
+        || str_contains($clientsErrorTechnical, 'no bind placeholder')
+        || preg_match('/\bDPY-\d+/i', $clientsErrorTechnical) === 1;
+    $isLikelyNetworkBlock = str_contains($clientsErrorTechnical, 'Connection refused')
+        || str_contains($clientsErrorTechnical, 'timed out')
+        || str_contains($clientsErrorTechnical, 'Could not resolve')
+        || str_contains($clientsErrorTechnical, 'cURL error')
+        || preg_match('/\bORA-12[56]\d{3}\b/', $clientsErrorTechnical) === 1;
+@endphp
 <div class="alert alert-warning alert-dismissible fade show d-flex align-items-center" role="alert">
     <i class="bi bi-exclamation-triangle-fill me-2"></i>
     <div class="flex-grow-1">
-        <strong>ERP/Oracle connection issue</strong><br>
-        <span class="small">{{ $clientsError }}</span>
-        @if(in_array($clientsSource ?? 'crm', ['erp_http', 'erp_sync']))
+        @if($isErpQueryBindError)
+        <strong>ERP client search failed</strong><br>
+        <span class="small">The ERP service returned a database error while loading clients (usually a temporary API bug or outdated <code>erp-clients-api</code>). Any CRM contacts in the list below are shown as a fallback—not a full ERP result. Ask IT to restart or redeploy <code>erp-clients-api</code> after updating it.</span>
+        <details class="small mt-2 mb-0"><summary class="text-muted" style="cursor: pointer;">Technical detail (for IT)</summary><code class="d-block mt-1 user-select-all text-break">{{ e($clientsErrorTechnical) }}</code></details>
+        @else
+        <strong>ERP / Oracle connection issue</strong><br>
+        <span class="small">{{ $clientsErrorRaw }}</span>
+        @if(in_array($clientsSource ?? 'crm', ['erp_http', 'erp_sync']) && $isLikelyNetworkBlock)
         <p class="small mb-0 mt-2 text-muted">
-            <strong>Fix:</strong> Ensure ERP API is running. On CentOS: <code>sudo setsebool -P httpd_can_network_connect 1</code> then <code>sudo systemctl restart httpd</code>
+            <strong>If this server uses Apache on CentOS/RHEL with SELinux:</strong> allow outbound connections from HTTPd, then restart Apache:
+            <code>sudo setsebool -P httpd_can_network_connect 1</code> and <code>sudo systemctl restart httpd</code>.
+            Otherwise confirm the ERP API process is running and reachable from this app.
         </p>
+        @elseif(in_array($clientsSource ?? 'crm', ['erp_http', 'erp_sync']))
+        <p class="small mb-0 mt-2 text-muted">
+            Ensure the <code>erp-clients-api</code> service is running and <code>ERP_CLIENTS_HTTP_URL</code> in <code>.env</code> points to it. Check the technical message above or your application logs.
+        </p>
+        @endif
         @endif
     </div>
     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>

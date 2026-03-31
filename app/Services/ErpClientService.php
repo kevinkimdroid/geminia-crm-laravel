@@ -876,16 +876,87 @@ class ErpClientService
     }
 
     /**
-     * Get clients for "All" filter: merge Group Life + Individual Life, interleaved.
-     * Ensures both types are differentiated and displayed when no system filter is set.
+     * Stream keys for Support → Clients → "All" (browse): group, individual, optional mortgage & group_pension.
      *
-     * "All" tab lists Group + Individual rows only (interleaved). total = group+ind for pagination.
-     * grand_total = group+ind+mortgage+pension (when views configured) so the stat matches all segments.
+     * @return list<string>
+     */
+    protected function mergedAllClientStreams(): array
+    {
+        $streams = ['group', 'individual'];
+        if ($this->optionalClientsSegmentConfigured('mortgage')) {
+            $streams[] = 'mortgage';
+        }
+        if ($this->optionalClientsSegmentConfigured('group_pension')) {
+            $streams[] = 'group_pension';
+        }
+
+        return $streams;
+    }
+
+    /**
+     * "All" tab with no search: round-robin across group, individual, mortgage, group_pension (each segment if configured).
+     *
+     * @return array{data: \Illuminate\Support\Collection, total: int, error: string|null, grand_total: int}
+     */
+    protected function getClientsForListViewMergedRoundRobin(int $limit, int $offset): array
+    {
+        $streams = $this->mergedAllClientStreams();
+        $n = count($streams);
+        $perStreamSkip = [];
+        for ($s = 0; $s < $n; $s++) {
+            $perStreamSkip[$s] = intdiv($offset + $n - 1 - $s, $n);
+        }
+        $fetchCount = min(100, max($limit, (int) ceil($limit / $n) + 6));
+
+        $buffers = [];
+        $firstError = null;
+        foreach ($streams as $idx => $sys) {
+            $res = $this->getClientsFromHttpApi($fetchCount, $perStreamSkip[$idx], null, null, false, $sys);
+            $buffers[$idx] = $res['data']->values()->all();
+            if ($firstError === null && ! empty($res['error'])) {
+                $firstError = $res['error'];
+            }
+        }
+
+        $merged = [];
+        for ($g = $offset; $g < $offset + $limit; $g++) {
+            $s = $g % $n;
+            $localIdx = intdiv($g - $s, $n);
+            $bufIdx = $localIdx - $perStreamSkip[$s];
+            if ($bufIdx >= 0 && $bufIdx < count($buffers[$s])) {
+                $merged[] = $buffers[$s][$bufIdx];
+            }
+        }
+        $data = collect($merged);
+
+        $total = 0;
+        foreach ($streams as $sys) {
+            $c = $this->getClientsFromHttpApi(1, 0, null, null, true, $sys);
+            if (empty($c['error'])) {
+                $total += (int) ($c['total'] ?? 0);
+            }
+        }
+
+        return [
+            'data' => $data,
+            'total' => $total,
+            'grand_total' => $total,
+            'error' => $firstError,
+        ];
+    }
+
+    /**
+     * Get clients for "All" filter: merge segments so every configured life system appears (browse + search).
      *
      * @return array{data: \Illuminate\Support\Collection, total: int, error: string|null, grand_total: int}
      */
     protected function getClientsForListViewMerged(int $limit, int $offset, ?string $search): array
     {
+        $searchTrim = trim((string) ($search ?? ''));
+        if ($searchTrim === '') {
+            return $this->getClientsForListViewMergedRoundRobin($limit, $offset);
+        }
+
         $groupOffset = (int) floor($offset / 2);
         $individualOffset = (int) floor(($offset + 1) / 2);
         $groupLimit = (int) (floor(($offset + $limit) / 2) - floor($offset / 2));
@@ -910,23 +981,58 @@ class ErpClientService
         }
         $data = collect(array_slice($merged, 0, $limit));
 
+        if ($searchTrim !== '') {
+            $dedupe = [];
+            foreach ($data as $row) {
+                $p = strtolower(trim((string) ($row->policy_number ?? $row->policy_no ?? '')));
+                $ls = strtolower(trim((string) ($row->life_system ?? '')));
+                if ($p !== '') {
+                    $dedupe[$ls.'|'.$p] = true;
+                }
+            }
+            $append = collect();
+            foreach (['mortgage', 'group_pension'] as $seg) {
+                if (! $this->optionalClientsSegmentConfigured($seg)) {
+                    continue;
+                }
+                $more = $this->getClientsFromHttpApi(100, 0, $searchTrim, null, false, $seg);
+                if (! empty($more['error']) || $more['data']->isEmpty()) {
+                    continue;
+                }
+                foreach ($more['data'] as $row) {
+                    $p = strtolower(trim((string) ($row->policy_number ?? $row->policy_no ?? '')));
+                    $ls = strtolower(trim((string) ($row->life_system ?? $seg)));
+                    if ($p === '') {
+                        continue;
+                    }
+                    $k = $ls.'|'.$p;
+                    if (isset($dedupe[$k])) {
+                        continue;
+                    }
+                    $dedupe[$k] = true;
+                    $append->push($row);
+                }
+            }
+            if ($append->isNotEmpty()) {
+                $data = $data->merge($append)->values()->take($limit);
+            }
+        }
+
         $groupTotal = (int) ($groupResult['total'] ?? 0);
         $indTotal = (int) ($indResult['total'] ?? 0);
-        $total = $groupTotal + $indTotal;
+        $extraSegTotal = 0;
+        foreach (['mortgage', 'group_pension'] as $seg) {
+            if (! $this->optionalClientsSegmentConfigured($seg)) {
+                continue;
+            }
+            $c = $this->getClientsFromHttpApi(1, 0, $searchTrim, null, true, $seg);
+            if (empty($c['error'])) {
+                $extraSegTotal += (int) ($c['total'] ?? 0);
+            }
+        }
+        // Total rows across segments for this search (pagination / stat); mortgage rows are not double-counted vs $append.
+        $total = $groupTotal + $indTotal + $extraSegTotal;
         $grandTotal = $total;
-
-        if ($this->optionalClientsSegmentConfigured('mortgage')) {
-            $m = $this->getClientsFromHttpApi(1, 0, $search, null, true, 'mortgage');
-            if (! $m['error']) {
-                $grandTotal += (int) ($m['total'] ?? 0);
-            }
-        }
-        if ($this->optionalClientsSegmentConfigured('group_pension')) {
-            $gp = $this->getClientsFromHttpApi(1, 0, $search, null, true, 'group_pension');
-            if (! $gp['error']) {
-                $grandTotal += (int) ($gp['total'] ?? 0);
-            }
-        }
 
         $error = $groupResult['error'] ?: $indResult['error'];
 
@@ -1105,7 +1211,7 @@ class ErpClientService
                 if (
                     in_array($system, ['group', 'mortgage', 'group_pension'], true)
                     && ! $this->isReceiptFormat($searchTrimmed)
-                    && preg_match('/^[A-Za-z0-9\-]+$/', $searchTrimmed)
+                    && preg_match('/^[A-Za-z0-9\-\/]+$/', $searchTrimmed)
                 ) {
                     $params['policy'] = $searchTrimmed;
                 }

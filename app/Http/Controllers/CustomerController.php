@@ -172,9 +172,9 @@ class CustomerController extends Controller
             && ! $search && ! $system;
 
         if ($useErp && ! $lazyLoad) {
-            // Never cache when system filter (Group Life / Individual Life) is active – always fresh data
+            // Never cache with a segment filter, any non-empty search, or merged “All” could hide fresh mortgage rows.
             $skipCache = in_array($system, ['group', 'individual', 'mortgage', 'group_pension'], true)
-                || ($system === 'group' && $search && strlen(trim((string) $search)) >= 2);
+                || trim((string) ($search ?? '')) !== '';
             if ($skipCache) {
                 $result = $this->erp->getClientsForListView($perPage, $offset, $search, $system);
             } else {
@@ -249,8 +249,8 @@ class CustomerController extends Controller
 
         $clientsGrandTotal = null;
         if ($useErp) {
-            // Never cache when system filter (Group Life / Individual Life) is active – always fresh data
-            $skipCache = in_array($system, ['group', 'individual', 'mortgage', 'group_pension'], true);
+            $skipCache = in_array($system, ['group', 'individual', 'mortgage', 'group_pension'], true)
+                || trim((string) ($search ?? '')) !== '';
             if ($skipCache) {
                 $result = $this->erp->getClientsForListView($perPage, $offset, $search, $system);
             } else {

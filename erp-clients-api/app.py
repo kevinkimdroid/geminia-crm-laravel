@@ -1164,7 +1164,9 @@ def get_clients():
                 else:
                     conditions.append(f"{POLICY_COL} = :policy")
                 bind["policy"] = policy
-            if search and scols:
+            # Laravel sends both policy= (exact) and search= (same string). AND-ing policy = X with
+            # LIKE on name columns fails when X does not appear in names — e.g. GL-GLA-00024.
+            if search and scols and not policy:
                 search_conds = [f"{c} LIKE :search" for c in scols]
                 conditions.append("(" + " OR ".join(search_conds) + ")")
                 bind["search"] = f"%{search}%"
@@ -1340,7 +1342,9 @@ def get_clients():
                             except oracledb.DatabaseError:
                                 continue
                         else:
-                            if search and search_columns:
+                            # Only use LIKE :search fallbacks when there is no :policy in bind — otherwise SQL has
+                            # no :policy placeholder and oracledb raises DPY-4008.
+                            if search and search_columns and not policy:
                                 group_search = [["POLICY_NUMBER", "POL_PREPARED_BY", "INTERMEDIARY", "KRA_PIN"], ["POLICY_NUMBER"]]
                                 ind_search = [["POLICY_NUMBER", "LIFE_ASSURED", "POL_PREPARED_BY", "INTERMEDIARY", "KRA_PIN"], ["POLICY_NUMBER", "LIFE_ASSURED"]]
                                 for search_cols_try in (group_search if use_group_columns else ind_search):
@@ -1361,7 +1365,10 @@ def get_clients():
                                 else:
                                     pass
                             try:
-                                where_star = where_clause if not search else ""
+                                # Never drop where_clause when search is set: Laravel sends both policy= and search=
+                                # for the same term; stripping the WHERE removed :policy / :search from SQL and caused
+                                # DPY-4008 (bind present but no placeholder).
+                                where_star = where_clause
                                 sql = f"""
                                     SELECT * FROM (
                                         SELECT a.*, ROWNUM rnum FROM (
