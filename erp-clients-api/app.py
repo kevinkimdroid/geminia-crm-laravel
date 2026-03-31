@@ -537,6 +537,17 @@ def _get_columns_for_qualified_view(qualified: str):
         return fallback
 
 
+def _bind_subset_for_sql(sql: str, bind: dict) -> dict:
+    """
+    python-oracledb (thin) raises DPY-4008 if bind vars include names not present in the SQL text.
+    Group product filters (gf0, …) and ROWNUM binds must not leak into COUNT-only statements, etc.
+    """
+    if not bind:
+        return bind
+    names = set(re.findall(r":([a-zA-Z_][a-zA-Z0-9_]*)", sql))
+    return {k: v for k, v in bind.items() if k in names}
+
+
 def _get_group_by_column_for_view(qualified: str):
     """Policy column for group-shaped views (e.g. LMS_GROUP_MORTAGE_VIEW), using that view's columns."""
     cols = _get_columns_for_qualified_view(qualified)
@@ -555,16 +566,20 @@ def _get_group_by_column_for_view(qualified: str):
 def _policy_exact_match_predicate_for_view(qualified: str) -> str:
     """
     SQL predicate for exact policy match on LMS-style views: try every policy-like column that exists
-    (POL_POLICY_NO vs IPOL_POLICY_NO vs POLICY_NUMBER). Trims and upper-cases to avoid missed rows.
+    (POL_POLICY_NO vs IPOL_POLICY_NO vs POLICY_NUMBER). TO_CHAR avoids ORA-00932 when a column is numeric.
     """
     cols = _get_columns_for_qualified_view(qualified)
     preds = []
     for c in ("POL_POLICY_NO", "IPOL_POLICY_NO", "POLICY_NUMBER", "CONTRACT_NO", "SCHEME_NO"):
         if c in cols:
-            preds.append(f"UPPER(TRIM({c})) = UPPER(TRIM(:policy))")
+            preds.append(
+                f"UPPER(TRIM(TO_CHAR({c}))) = UPPER(TRIM(TO_CHAR(:policy)))"
+            )
     if not preds:
         gcol = _get_group_by_column_for_view(qualified)
-        preds.append(f"UPPER(TRIM({gcol})) = UPPER(TRIM(:policy))")
+        preds.append(
+            f"UPPER(TRIM(TO_CHAR({gcol}))) = UPPER(TRIM(TO_CHAR(:policy)))"
+        )
     if len(preds) == 1:
         return preds[0]
     return "(" + " OR ".join(preds) + ")"
@@ -1236,7 +1251,8 @@ def get_clients():
                 )
             ):
                 try:
-                    cursor.execute(f"SELECT COUNT(*) FROM {actual_view}{where_clause}", bind)
+                    _cnt_sql = f"SELECT COUNT(*) FROM {actual_view}{where_clause}"
+                    cursor.execute(_cnt_sql, _bind_subset_for_sql(_cnt_sql, bind))
                     cnt = int(cursor.fetchone()[0])
                     cursor.close()
                     conn.close()
@@ -1250,12 +1266,14 @@ def get_clients():
                 try:
                     if is_group and USE_GROUP_AGGREGATE and actual_view == target_view:
                         gcol = _get_group_by_column()
+                        _cnt_sql = f"SELECT COUNT(DISTINCT {gcol}) FROM {actual_view}{where_clause}"
                         cursor.execute(
-                            f"SELECT COUNT(DISTINCT {gcol}) FROM {actual_view}{where_clause}",
-                            bind,
+                            _cnt_sql,
+                            _bind_subset_for_sql(_cnt_sql, bind),
                         )
                     else:
-                        cursor.execute(f"SELECT COUNT(*) FROM {actual_view}{where_clause}", bind)
+                        _cnt_sql = f"SELECT COUNT(*) FROM {actual_view}{where_clause}"
+                        cursor.execute(_cnt_sql, _bind_subset_for_sql(_cnt_sql, bind))
                     accurate_total = cursor.fetchone()[0]
                 except Exception:
                     pass
@@ -1317,7 +1335,7 @@ def get_clients():
                             ) a WHERE ROWNUM <= :end_row
                         ) WHERE rnum > :start_row
                     """
-                    cursor.execute(sql, bind)
+                    cursor.execute(sql, _bind_subset_for_sql(sql, bind))
                     rows = cursor.fetchall()
                     if cursor.description:
                         actual_columns = [d[0] for d in cursor.description if d[0] and str(d[0]).upper() != "RNUM"]
@@ -1349,7 +1367,7 @@ def get_clients():
                             ) a WHERE ROWNUM <= :end_row
                         ) WHERE rnum > :start_row
                     """
-                    cursor.execute(sql, bind)
+                    cursor.execute(sql, _bind_subset_for_sql(sql, bind))
                 except oracledb.DatabaseError as e:
                     err_str = str(e)
                     if "ORA-00904" in err_str or "invalid identifier" in err_str.lower():
@@ -1382,7 +1400,7 @@ def get_clients():
                                         ) a WHERE ROWNUM <= :end_row
                                     ) WHERE rnum > :start_row
                                 """
-                                cursor.execute(sql, bind)
+                                cursor.execute(sql, _bind_subset_for_sql(sql, bind))
                                 break
                             except oracledb.DatabaseError:
                                 continue
@@ -1403,7 +1421,7 @@ def get_clients():
                                                 ) a WHERE ROWNUM <= :end_row
                                             ) WHERE rnum > :start_row
                                         """
-                                        cursor.execute(sql, bind)
+                                        cursor.execute(sql, _bind_subset_for_sql(sql, bind))
                                         break
                                     except oracledb.DatabaseError:
                                         continue
@@ -1421,7 +1439,7 @@ def get_clients():
                                         ) a WHERE ROWNUM <= :end_row
                                     ) WHERE rnum > :start_row
                                 """
-                                cursor.execute(sql, bind)
+                                cursor.execute(sql, _bind_subset_for_sql(sql, bind))
                                 if cursor.description:
                                     actual_columns = [d[0] for d in cursor.description if d[0] and str(d[0]).upper() != "RNUM"]
                                 else:
@@ -1444,7 +1462,7 @@ def get_clients():
                             ) a WHERE ROWNUM <= :end_row
                         ) WHERE rnum > :start_row
                     """
-                    cursor.execute(sql, bind)
+                    cursor.execute(sql, _bind_subset_for_sql(sql, bind))
                     rows = cursor.fetchall()
                 except oracledb.DatabaseError:
                     pass

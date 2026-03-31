@@ -33,6 +33,7 @@
         : $clientsErrorRaw;
     $isErpQueryBindError = str_contains($clientsErrorTechnical, 'DPY-4008')
         || str_contains($clientsErrorTechnical, 'no bind placeholder')
+        || str_contains($clientsErrorTechnical, 'ORA-00932')
         || preg_match('/\bDPY-\d+/i', $clientsErrorTechnical) === 1;
     $isLikelyNetworkBlock = str_contains($clientsErrorTechnical, 'Connection refused')
         || str_contains($clientsErrorTechnical, 'timed out')
