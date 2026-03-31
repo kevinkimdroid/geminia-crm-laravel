@@ -743,6 +743,45 @@ class ErpClientService
     }
 
     /**
+     * Family / prefix token (e.g. GL-GLA-): uses LIKE on ERP, not exact policy=.
+     */
+    protected function isPrefixStylePolicySearch(string $term): bool
+    {
+        $t = trim($term);
+        if ($t === '') {
+            return false;
+        }
+
+        return $this->searchTermLooksLikePolicyNumber($t)
+            && ! $this->shouldSendExactPolicyParamForSegmentSearch($t);
+    }
+
+    /**
+     * @param  \Illuminate\Support\Collection<int, object>  $rows
+     * @return \Illuminate\Support\Collection<int, object>
+     */
+    protected function dedupeClientsByPolicyAndSystem(Collection $rows): Collection
+    {
+        $seen = [];
+        $out = collect();
+        foreach ($rows as $row) {
+            $p = strtolower(trim((string) ($row->policy_number ?? $row->policy_no ?? '')));
+            $ls = strtolower(trim((string) ($row->life_system ?? '')));
+            if ($p === '') {
+                continue;
+            }
+            $k = $ls.'|'.$p;
+            if (isset($seen[$k])) {
+                continue;
+            }
+            $seen[$k] = true;
+            $out->push($row);
+        }
+
+        return $out;
+    }
+
+    /**
      * Resolve which table/view to use for clients list based on life system filter.
      *
      * @return string Schema-qualified table or view name
@@ -957,6 +996,22 @@ class ErpClientService
             return $this->getClientsForListViewMergedRoundRobin($limit, $offset);
         }
 
+        // Prefix / family (e.g. GL-GLA-): load pension + mortgage first so Group Life / Individual never hide LMS-only rows.
+        $prefixStyle = $this->isPrefixStylePolicySearch($searchTrim);
+        $prefixBaseline = collect();
+        if ($prefixStyle) {
+            foreach (['group_pension', 'mortgage'] as $seg) {
+                if (! $this->optionalClientsSegmentConfigured($seg)) {
+                    continue;
+                }
+                $more = $this->getClientsFromHttpApi(100, 0, $searchTrim, null, false, $seg);
+                if (empty($more['error']) && $more['data']->isNotEmpty()) {
+                    $prefixBaseline = $prefixBaseline->merge($more['data']);
+                }
+            }
+            $prefixBaseline = $this->dedupeClientsByPolicyAndSystem($prefixBaseline);
+        }
+
         $groupOffset = (int) floor($offset / 2);
         $individualOffset = (int) floor(($offset + 1) / 2);
         $groupLimit = (int) (floor(($offset + $limit) / 2) - floor($offset / 2));
@@ -981,7 +1036,12 @@ class ErpClientService
         }
         $data = collect(array_slice($merged, 0, $limit));
 
-        if ($searchTrim !== '') {
+        if ($prefixBaseline->isNotEmpty()) {
+            $data = $this->dedupeClientsByPolicyAndSystem($prefixBaseline->merge($data))->values()->take($limit);
+        }
+
+        $skipExtraSegmentFetch = $prefixStyle && $prefixBaseline->isNotEmpty();
+        if ($searchTrim !== '' && ! $skipExtraSegmentFetch) {
             $dedupe = [];
             foreach ($data as $row) {
                 $p = strtolower(trim((string) ($row->policy_number ?? $row->policy_no ?? '')));
@@ -1014,8 +1074,7 @@ class ErpClientService
                 }
             }
             if ($append->isNotEmpty()) {
-                // Policy searches hit mortgage-only views: show those rows first so take(limit) does not drop them
-                // when Group/Individual fill the page with unrelated weak matches.
+                // Policy-style tokens: show mortgage/pension hits first so take(limit) does not drop them.
                 $data = $this->searchTermLooksLikePolicyNumber($searchTrim)
                     ? $append->merge($data)->values()->take($limit)
                     : $data->merge($append)->values()->take($limit);
