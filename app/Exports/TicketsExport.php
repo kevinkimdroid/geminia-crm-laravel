@@ -2,14 +2,18 @@
 
 namespace App\Exports;
 
+use App\Exports\Concerns\WithExcelDateValueBinder;
 use Maatwebsite\Excel\Concerns\FromArray;
+use Maatwebsite\Excel\Concerns\WithColumnWidths;
+use Maatwebsite\Excel\Concerns\WithCustomValueBinder;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithStyles;
-use Maatwebsite\Excel\Concerns\WithColumnWidths;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
-class TicketsExport implements FromArray, WithHeadings, WithStyles, WithColumnWidths
+class TicketsExport implements FromArray, WithHeadings, WithStyles, WithColumnWidths, WithCustomValueBinder
 {
+    use WithExcelDateValueBinder;
+
     public function __construct(protected array $rows)
     {
     }

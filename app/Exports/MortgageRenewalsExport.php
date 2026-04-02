@@ -2,15 +2,19 @@
 
 namespace App\Exports;
 
+use App\Exports\Concerns\WithExcelDateValueBinder;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\FromCollection;
+use Maatwebsite\Excel\Concerns\WithCustomValueBinder;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithStyles;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
-class MortgageRenewalsExport implements FromCollection, WithHeadings, WithStyles
+class MortgageRenewalsExport implements FromCollection, WithHeadings, WithStyles, WithCustomValueBinder
 {
+    use WithExcelDateValueBinder;
+
     public function __construct(protected Collection $rows)
     {
     }

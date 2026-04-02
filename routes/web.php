@@ -187,12 +187,14 @@ Route::get('/settings/layout-editor/module/{tabid}', [\App\Http\Controllers\Layo
 Route::post('/settings/layout-editor/field', [\App\Http\Controllers\LayoutEditorController::class, 'updateField'])->name('settings.layout-editor.field.update');
 Route::get('/reports/sla-broken', [\App\Http\Controllers\ReportsController::class, 'slaBroken'])->name('reports.sla-broken');
 Route::get('/reports/ticket-aging', [\App\Http\Controllers\ReportsController::class, 'ticketAging'])->name('reports.ticket-aging');
+Route::get('/reports/tickets-by-date', [\App\Http\Controllers\ReportsController::class, 'ticketsByDate'])->name('reports.tickets-by-date');
 Route::get('/reports/contacts-summary', [\App\Http\Controllers\ReportsController::class, 'contactsSummary'])->name('reports.contacts-summary');
 Route::get('/reports/calls-summary', [\App\Http\Controllers\ReportsController::class, 'callsSummary'])->name('reports.calls-summary');
 Route::get('/reports/reassignment-audit', [\App\Http\Controllers\ReportsController::class, 'reassignmentAudit'])->name('reports.reassignment-audit');
 Route::get('/reports/export/reassignment-audit', [\App\Http\Controllers\ReportsController::class, 'exportReassignmentAudit'])->name('reports.export.reassignment-audit');
 Route::get('/reports/export/sla-broken', [\App\Http\Controllers\ReportsController::class, 'exportSlaBroken'])->name('reports.export.sla-broken');
 Route::get('/reports/export/ticket-aging', [\App\Http\Controllers\ReportsController::class, 'exportTicketAging'])->name('reports.export.ticket-aging');
+Route::get('/reports/export/tickets-by-date', [\App\Http\Controllers\ReportsController::class, 'exportTicketsByDate'])->name('reports.export.tickets-by-date');
 Route::get('/reports/export/sales-by-person', [\App\Http\Controllers\ReportsController::class, 'exportSalesByPerson'])->name('reports.export.sales-by-person');
 Route::get('/reports/export/pipeline-by-stage', [\App\Http\Controllers\ReportsController::class, 'exportPipelineByStage'])->name('reports.export.pipeline-by-stage');
 Route::get('/reports/export/all-excel', [\App\Http\Controllers\ReportsController::class, 'exportAllExcel'])->name('reports.export.all-excel');

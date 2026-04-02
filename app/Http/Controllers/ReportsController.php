@@ -6,10 +6,13 @@ use App\Exports\PipelineByStageExport;
 use App\Exports\SalesByPersonExport;
 use App\Exports\SlaBrokenExport;
 use App\Exports\TicketAgingExport;
+use App\Exports\TicketsByDateRangeExport;
 use App\Services\CrmService;
 use App\Services\TicketSlaService;
 use App\Services\UserDepartmentService;
 use Illuminate\Http\Request;
+use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Response;
 use Illuminate\View\View;
 use Maatwebsite\Excel\Facades\Excel;
@@ -45,6 +48,119 @@ class ReportsController
             'tickets' => $tickets,
             'days' => $days,
         ]);
+    }
+
+    public function ticketsByDate(CrmService $crm, Request $request, UserDepartmentService $userDept): View
+    {
+        $dateFrom = (string) $request->get('date_from', now()->startOfMonth()->format('Y-m-d'));
+        $dateTo = (string) $request->get('date_to', now()->format('Y-m-d'));
+        if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateFrom)) {
+            $dateFrom = now()->startOfMonth()->format('Y-m-d');
+        }
+        if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateTo)) {
+            $dateTo = now()->format('Y-m-d');
+        }
+        if ($dateFrom > $dateTo) {
+            [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
+        }
+
+        $statusRaw = $request->get('status');
+        $status = is_string($statusRaw) && trim($statusRaw) !== '' ? trim($statusRaw) : null;
+        $searchRaw = $request->get('search');
+        $search = is_string($searchRaw) && trim($searchRaw) !== '' ? trim($searchRaw) : null;
+        $onlyWithContact = $request->boolean('only_with_contact');
+
+        $ownerFilter = crm_owner_filter();
+        $assignedTo = $ownerFilter ?? ($request->filled('assigned_to') ? (int) $request->get('assigned_to') : null);
+
+        $page = max(1, (int) $request->get('page', 1));
+        $perPage = max(10, min(200, (int) ($request->get('per_page') ?: 50)));
+        $offset = ($page - 1) * $perPage;
+
+        $total = $crm->countTicketsByDateRange($dateFrom, $dateTo, $status, $search, $assignedTo, null, $onlyWithContact);
+        $rowCollection = $crm->getTicketsByDateRange($dateFrom, $dateTo, $perPage, $offset, $status, $search, $assignedTo, null, $onlyWithContact);
+
+        $userIds = $rowCollection->pluck('smownerid')->filter()->unique()->values()->all();
+        $departments = $userDept->getDepartmentsForUsers($userIds);
+        $tickets = $rowCollection->map(fn ($t) => (object) array_merge((array) $t, [
+            'owner_department' => isset($t->smownerid) ? ($departments[$t->smownerid] ?? null) : null,
+        ]));
+
+        $ticketsPaginator = new LengthAwarePaginator(
+            $tickets,
+            $total,
+            $perPage,
+            $page,
+            ['path' => $request->url(), 'query' => $request->query()]
+        );
+
+        $usersList = Cache::remember('ticket_assign_users', 300, fn () => $crm->getActiveUsers());
+
+        return view('reports.tickets-by-date', [
+            'tickets' => $ticketsPaginator,
+            'dateFrom' => $dateFrom,
+            'dateTo' => $dateTo,
+            'status' => $status,
+            'search' => $search,
+            'onlyWithContact' => $onlyWithContact,
+            'assignedTo' => $assignedTo,
+            'ownerFilter' => $ownerFilter,
+            'perPage' => $perPage,
+            'users' => $usersList,
+        ]);
+    }
+
+    public function exportTicketsByDate(CrmService $crm, UserDepartmentService $userDept, Request $request)
+    {
+        $dateFrom = (string) $request->get('date_from', now()->startOfMonth()->format('Y-m-d'));
+        $dateTo = (string) $request->get('date_to', now()->format('Y-m-d'));
+        if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateFrom)) {
+            $dateFrom = now()->startOfMonth()->format('Y-m-d');
+        }
+        if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateTo)) {
+            $dateTo = now()->format('Y-m-d');
+        }
+        if ($dateFrom > $dateTo) {
+            [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
+        }
+
+        $statusRaw = $request->get('status');
+        $status = is_string($statusRaw) && trim($statusRaw) !== '' ? trim($statusRaw) : null;
+        $searchRaw = $request->get('search');
+        $search = is_string($searchRaw) && trim($searchRaw) !== '' ? trim($searchRaw) : null;
+        $onlyWithContact = $request->boolean('only_with_contact');
+
+        $ownerFilter = crm_owner_filter();
+        $assignedTo = $ownerFilter ?? ($request->filled('assigned_to') ? (int) $request->get('assigned_to') : null);
+
+        $limit = min(50000, max(100, (int) $request->get('limit', 20000)));
+        $rows = $crm->getTicketsByDateRange($dateFrom, $dateTo, $limit, 0, $status, $search, $assignedTo, null, $onlyWithContact);
+
+        $userIds = $rows->pluck('smownerid')->filter()->unique()->values()->all();
+        $departments = $userDept->getDepartmentsForUsers($userIds);
+
+        $exportRows = $rows->map(fn ($t) => [
+            $t->ticket_no ?? 'TT'.($t->ticketid ?? ''),
+            $t->title ?? '',
+            $t->status ?? '',
+            $t->priority ?? '',
+            $t->category ?? '',
+            trim(($t->contact_first ?? '').' '.($t->contact_last ?? '')) ?: '',
+            $t->createdtime ?? '',
+            $t->modifiedtime ?? '',
+            trim(($t->owner_first ?? '').' '.($t->owner_last ?? '')) ?: 'Unassigned',
+            $departments[$t->smownerid ?? 0] ?? '',
+            $t->source ?? '',
+        ])->toArray();
+
+        $filename = 'tickets-'.$dateFrom.'-to-'.$dateTo;
+        if ($request->get('format') === 'xlsx') {
+            return Excel::download(new TicketsByDateRangeExport($exportRows), $filename.'.xlsx');
+        }
+
+        return $this->csvResponse($exportRows, [
+            'Ticket', 'Title', 'Status', 'Priority', 'Category', 'Contact', 'Created', 'Last modified', 'Assigned to', 'User dept', 'Source',
+        ], $filename);
     }
 
     public function contactsSummary(CrmService $crm, Request $request): View

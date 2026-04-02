@@ -9,7 +9,7 @@ use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithStyles;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
-class TicketAgingExport implements FromArray, WithHeadings, WithStyles, WithCustomValueBinder
+class TicketsByDateRangeExport implements FromArray, WithHeadings, WithStyles, WithCustomValueBinder
 {
     use WithExcelDateValueBinder;
 
@@ -24,7 +24,19 @@ class TicketAgingExport implements FromArray, WithHeadings, WithStyles, WithCust
 
     public function headings(): array
     {
-        return ['Ticket', 'Title', 'Status', 'Category', 'Contact', 'Created', 'Assigned To', 'User Dept'];
+        return [
+            'Ticket',
+            'Title',
+            'Status',
+            'Priority',
+            'Category',
+            'Contact',
+            'Created',
+            'Last modified',
+            'Assigned to',
+            'User dept',
+            'Source',
+        ];
     }
 
     public function styles(Worksheet $sheet): array

@@ -1030,6 +1030,154 @@ class CrmService
     }
 
     /**
+     * Base query: HelpDesk tickets whose created date (calendar day) falls in [dateFrom, dateTo] inclusive.
+     */
+    protected function ticketsByDateRangeBaseQuery(
+        string $dateFrom,
+        string $dateTo,
+        ?string $status = null,
+        ?string $search = null,
+        ?int $assignedTo = null,
+        ?int $ownerId = null,
+        bool $onlyWithContact = false,
+    ) {
+        $query = DB::connection('vtiger')
+            ->table('vtiger_troubletickets as t')
+            ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
+            ->leftJoin('vtiger_contactdetails as c', 't.contact_id', '=', 'c.contactid')
+            ->leftJoin('vtiger_contactscf as cf', 't.contact_id', '=', 'cf.contactid')
+            ->leftJoin('vtiger_users as u', 'e.smownerid', '=', 'u.id')
+            ->leftJoin('vtiger_users as creator', 'e.smcreatorid', '=', 'creator.id')
+            ->where('e.deleted', 0)
+            ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
+            ->whereRaw('DATE(e.createdtime) >= ?', [$dateFrom])
+            ->whereRaw('DATE(e.createdtime) <= ?', [$dateTo]);
+
+        if ($onlyWithContact) {
+            $query->whereNotNull('t.contact_id')->where('t.contact_id', '>', 0);
+        }
+
+        if ($status === 'Unassigned') {
+            $query->where(function ($q) {
+                $q->whereNull('t.contact_id')->orWhere('t.contact_id', '<=', 0);
+            });
+        } elseif ($status && trim($status) !== '') {
+            $query->where('t.status', $status);
+        }
+
+        $effectiveAssignee = $ownerId ?? $assignedTo;
+        if ($effectiveAssignee !== null && $effectiveAssignee > 0) {
+            $query->where('e.smownerid', $effectiveAssignee);
+        }
+
+        if ($search && trim($search) !== '') {
+            $term = '%' . trim($search) . '%';
+            $query->where(function ($q) use ($term) {
+                $q->where('t.title', 'like', $term)
+                    ->orWhere('t.ticket_no', 'like', $term)
+                    ->orWhere('c.firstname', 'like', $term)
+                    ->orWhere('c.lastname', 'like', $term)
+                    ->orWhere('cf.cf_860', 'like', $term)
+                    ->orWhere('cf.cf_856', 'like', $term)
+                    ->orWhere('cf.cf_872', 'like', $term)
+                    ->orWhere('u.first_name', 'like', $term)
+                    ->orWhere('u.last_name', 'like', $term)
+                    ->orWhere('u.user_name', 'like', $term)
+                    ->orWhere('creator.first_name', 'like', $term)
+                    ->orWhere('creator.last_name', 'like', $term)
+                    ->orWhere('creator.user_name', 'like', $term);
+            });
+        }
+
+        return $query;
+    }
+
+    /**
+     * @return \Illuminate\Support\Collection<int, object>
+     */
+    public function getTicketsByDateRange(
+        string $dateFrom,
+        string $dateTo,
+        int $limit = 200,
+        int $offset = 0,
+        ?string $status = null,
+        ?string $search = null,
+        ?int $assignedTo = null,
+        ?int $ownerId = null,
+        bool $onlyWithContact = false,
+    ) {
+        try {
+            $query = $this->ticketsByDateRangeBaseQuery(
+                $dateFrom,
+                $dateTo,
+                $status,
+                $search,
+                $assignedTo,
+                $ownerId,
+                $onlyWithContact
+            )->select(
+                't.ticketid',
+                't.ticket_no',
+                't.title',
+                't.status',
+                't.priority',
+                't.category',
+                't.contact_id',
+                'e.createdtime',
+                'e.modifiedtime',
+                'e.smownerid',
+                'e.source',
+                'c.firstname as contact_first',
+                'c.lastname as contact_last',
+                'cf.cf_860',
+                'cf.cf_856',
+                'cf.cf_872',
+                'u.first_name as owner_first',
+                'u.last_name as owner_last',
+                'u.user_name as owner_username',
+                'creator.first_name as assigned_by_first',
+                'creator.last_name as assigned_by_last',
+                'creator.user_name as assigned_by_username',
+            );
+
+            return $query->orderByDesc('e.createdtime')
+                ->offset($offset)
+                ->limit($limit)
+                ->get();
+        } catch (\Throwable $e) {
+            Log::warning('CrmService::getTicketsByDateRange: ' . $e->getMessage());
+
+            return collect();
+        }
+    }
+
+    public function countTicketsByDateRange(
+        string $dateFrom,
+        string $dateTo,
+        ?string $status = null,
+        ?string $search = null,
+        ?int $assignedTo = null,
+        ?int $ownerId = null,
+        bool $onlyWithContact = false,
+    ): int {
+        try {
+            return (int) $this->ticketsByDateRangeBaseQuery(
+                $dateFrom,
+                $dateTo,
+                $status,
+                $search,
+                $assignedTo,
+                $ownerId,
+                $onlyWithContact
+            )->count();
+        } catch (\Throwable $e) {
+            Log::warning('CrmService::countTicketsByDateRange: ' . $e->getMessage());
+
+            return 0;
+        }
+    }
+
+    /**
      * Get tickets for a specific contact (client).
      */
     public function getTicketsForContact(int $contactId, int $limit = 200, ?int $ownerId = null)
