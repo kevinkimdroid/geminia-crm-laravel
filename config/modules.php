@@ -17,6 +17,7 @@ return [
         'marketing' => 'Campaigns',
         'marketing.social-media' => null, // Custom module - always visible (not in standard Vtiger profiles)
         'marketing.campaigns' => 'Campaigns',
+        'marketing.broadcast' => null,
         'support' => 'HelpDesk',
     'support.tickets' => 'HelpDesk',
     'support.serve-client' => null,
@@ -58,6 +59,7 @@ return [
                 'children' => [
                     ['key' => 'marketing.social-media', 'label' => 'Social Media', 'icon' => 'bi-facebook', 'route' => 'marketing.social-media'],
                     ['key' => 'marketing.campaigns', 'label' => 'Campaigns', 'icon' => 'bi-megaphone', 'route' => 'marketing.campaigns.index'],
+                    ['key' => 'marketing.broadcast', 'label' => 'Email & SMS broadcast', 'icon' => 'bi-broadcast', 'route' => 'marketing.broadcast'],
                     ['key' => 'leads', 'label' => 'Leads', 'icon' => 'bi-table', 'route' => 'leads.index'],
                 ],
             ],

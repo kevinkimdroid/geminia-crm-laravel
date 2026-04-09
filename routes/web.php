@@ -84,6 +84,8 @@ Route::get('/social-auth/{platform}/redirect', [SocialAuthController::class, 're
 Route::get('/social-auth/{platform}/callback', [SocialAuthController::class, 'callback'])->name('social-auth.callback');
 Route::post('/social-auth/{platform}/disconnect', [SocialAuthController::class, 'disconnect'])->name('social-auth.disconnect');
 Route::prefix('marketing')->name('marketing.')->group(function () {
+    Route::get('broadcast', [\App\Http\Controllers\MassBroadcastController::class, 'index'])->name('broadcast');
+    Route::post('broadcast/send', [\App\Http\Controllers\MassBroadcastController::class, 'send'])->name('broadcast.send');
     Route::resource('campaigns', \App\Http\Controllers\CampaignController::class)->parameters(['campaigns' => 'campaign']);
 });
 Route::get('/support', fn () => view('support', ['ticketCounts' => app(\App\Services\CrmService::class)->getTicketCountsByStatus()]))->name('support');

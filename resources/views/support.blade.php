@@ -101,6 +101,34 @@
             </div>
         </a>
     </div>
+    @if(isset($can) && ($can('marketing.campaigns') || $can('marketing.social-media') || $can('marketing.broadcast') || $can('support.customers')))
+    <div class="col-md-6 col-lg-4">
+        <a href="{{ route('marketing.broadcast') }}" class="card support-quick-card text-decoration-none h-100" style="border-color:var(--geminia-primary);">
+            <div class="card-body d-flex align-items-center gap-3">
+                <div class="support-quick-icon" style="background:rgba(14,67,133,0.15)"><i class="bi bi-broadcast"></i></div>
+                <div>
+                    <h6 class="mb-1 fw-semibold">Email &amp; SMS broadcast</h6>
+                    <p class="text-muted small mb-0">Mass message selected contacts</p>
+                </div>
+                <i class="bi bi-chevron-right ms-auto text-primary"></i>
+            </div>
+        </a>
+    </div>
+    @endif
+    @if(isset($can) && $can('support.sms-notifier'))
+    <div class="col-md-6 col-lg-4">
+        <a href="{{ route('support.sms-notifier') }}" class="card support-quick-card text-decoration-none h-100">
+            <div class="card-body d-flex align-items-center gap-3">
+                <div class="support-quick-icon"><i class="bi bi-chat-dots-fill"></i></div>
+                <div>
+                    <h6 class="mb-1">SMS notifier</h6>
+                    <p class="text-muted small mb-0">Bulk SMS via Advanta</p>
+                </div>
+                <i class="bi bi-chevron-right ms-auto text-muted"></i>
+            </div>
+        </a>
+    </div>
+    @endif
     <div class="col-md-6 col-lg-4">
         <a href="{{ route('support.maturities') }}" class="card support-quick-card text-decoration-none h-100" style="border-color:var(--geminia-primary);">
             <div class="card-body d-flex align-items-center gap-3">

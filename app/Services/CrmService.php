@@ -718,6 +718,353 @@ class CrmService
     }
 
     /**
+     * Contacts for mass broadcast UI: same as getCustomers with optional CRM source / client-type filters.
+     *
+     * @param  string|null  $clientType  "all", "s|{record_source}", or "t|{cf value}" when BROADCAST_CONTACT_TYPE_CF is set
+     * @param  list<int>|null  $excludeContactIds  Explicit contact ids to omit from the list (e.g. recent broadcast recipients)
+     */
+    public function getCustomersForBroadcast(
+        int $limit = 250,
+        int $offset = 0,
+        ?string $search = null,
+        ?int $ownerId = null,
+        string $orderBy = 'name',
+        ?string $clientType = null,
+        ?array $excludeContactIds = null,
+    ) {
+        $cfCol = $this->broadcastContactTypeColumn();
+        [$sourceFilter, $typeVal, $lifeSystem] = $this->parseBroadcastClientType((string) ($clientType ?? 'all'), $cfCol);
+
+        if ($lifeSystem !== null) {
+            $erp = app(ErpClientService::class);
+            if (! $erp->isClientsViewBackedByErp()) {
+                return collect();
+            }
+
+            try {
+                $fetchCap = min(max($limit * 4, $limit + 40), 400);
+                $result = $erp->getClientsForListView($fetchCap, $offset, $search !== '' && $search !== null ? $search : null, $lifeSystem);
+                $out = collect();
+                $seen = [];
+                foreach ($result['data'] as $row) {
+                    if ($out->count() >= $limit) {
+                        break;
+                    }
+                    $policy = trim((string) ($row->policy_no ?? $row->policy_number ?? ''));
+                    if ($policy === '') {
+                        continue;
+                    }
+                    $contact = $this->findContactByPolicyNumber($policy);
+                    if (! $contact) {
+                        continue;
+                    }
+                    $cid = (int) $contact->contactid;
+                    if (isset($seen[$cid])) {
+                        continue;
+                    }
+                    if ($ownerId !== null && (int) ($contact->smownerid ?? 0) !== $ownerId) {
+                        continue;
+                    }
+                    if ($excludeContactIds !== null && $excludeContactIds !== []
+                        && in_array($cid, $excludeContactIds, true)) {
+                        continue;
+                    }
+                    $seen[$cid] = true;
+                    $out->push($contact);
+                }
+
+                return $out;
+            } catch (\Throwable $e) {
+                Log::warning('CrmService::getCustomersForBroadcast (life system): ' . $e->getMessage());
+
+                return collect();
+            }
+        }
+
+        try {
+            $query = DB::connection('vtiger')
+                ->table('vtiger_contactdetails as c')
+                ->join('vtiger_crmentity as e', 'c.contactid', '=', 'e.crmid')
+                ->leftJoin('vtiger_users as u', 'e.smownerid', '=', 'u.id');
+
+            if ($cfCol !== null && $typeVal !== null) {
+                $query->leftJoin('vtiger_contactscf as cfseg', 'c.contactid', '=', 'cfseg.contactid');
+            }
+
+            $query->where('e.deleted', 0)
+                ->whereIn('e.setype', ['Contacts', 'Contact']);
+
+            if ($ownerId !== null) {
+                $query->where('e.smownerid', $ownerId);
+            }
+            if ($sourceFilter !== null) {
+                $query->where('e.source', $sourceFilter);
+            }
+            if ($cfCol !== null && $typeVal !== null) {
+                $query->where("cfseg.{$cfCol}", $typeVal);
+            }
+
+            if ($excludeContactIds !== null && $excludeContactIds !== []) {
+                $excludeContactIds = array_values(array_unique(array_filter(array_map('intval', $excludeContactIds))));
+                if ($excludeContactIds !== []) {
+                    $query->whereNotIn('c.contactid', $excludeContactIds);
+                }
+            }
+
+            $query->select([
+                'c.contactid',
+                'c.firstname',
+                'c.lastname',
+                'c.email',
+                'c.mobile',
+                'c.phone',
+                'e.smownerid',
+                'e.source',
+                'u.first_name as owner_first',
+                'u.last_name as owner_last',
+                'u.user_name as owner_username',
+            ]);
+
+            if ($search && trim($search) !== '') {
+                $term = '%' . trim($search) . '%';
+                $searchLower = strtolower(trim($search));
+                $exactTerm = $searchLower;
+                $words = array_filter(preg_split('/\s+/', $searchLower, -1, PREG_SPLIT_NO_EMPTY));
+
+                $query->where(function ($q) use ($term, $exactTerm) {
+                    $q->where('c.firstname', 'like', $term)
+                        ->orWhere('c.lastname', 'like', $term)
+                        ->orWhere('c.email', 'like', $term)
+                        ->orWhere('c.mobile', 'like', $term);
+
+                    $conn = \DB::connection('vtiger');
+                    $concatFirstLast = $conn->getDriverName() === 'sqlite'
+                        ? "TRIM(COALESCE(c.firstname,'') || ' ' || COALESCE(c.lastname,''))"
+                        : "CONCAT(TRIM(COALESCE(c.firstname,'')), ' ', TRIM(COALESCE(c.lastname,'')))";
+                    $concatLastFirst = $conn->getDriverName() === 'sqlite'
+                        ? "TRIM(COALESCE(c.lastname,'') || ' ' || COALESCE(c.firstname,''))"
+                        : "CONCAT(TRIM(COALESCE(c.lastname,'')), ' ', TRIM(COALESCE(c.firstname,'')))";
+                    $likeTerm = '%' . $exactTerm . '%';
+                    $q->orWhereRaw("(LOWER({$concatFirstLast}) LIKE ? OR LOWER({$concatLastFirst}) LIKE ?)", [$likeTerm, $likeTerm]);
+                    $q->orWhereRaw("(LOWER({$concatFirstLast}) = ? OR LOWER({$concatLastFirst}) = ?)", [$exactTerm, $exactTerm]);
+                });
+
+                if (count($words) > 1) {
+                    foreach ($words as $word) {
+                        $wordTerm = '%' . $word . '%';
+                        $query->where(function ($q) use ($wordTerm) {
+                            $q->where('c.firstname', 'like', $wordTerm)
+                                ->orWhere('c.lastname', 'like', $wordTerm);
+                        });
+                    }
+                }
+
+                $conn = \DB::connection('vtiger');
+                $concatFirstLast = $conn->getDriverName() === 'sqlite'
+                    ? "TRIM(COALESCE(c.firstname,'') || ' ' || COALESCE(c.lastname,''))"
+                    : "CONCAT(TRIM(COALESCE(c.firstname,'')), ' ', TRIM(COALESCE(c.lastname,'')))";
+                $concatLastFirst = $conn->getDriverName() === 'sqlite'
+                    ? "TRIM(COALESCE(c.lastname,'') || ' ' || COALESCE(c.firstname,''))"
+                    : "CONCAT(TRIM(COALESCE(c.lastname,'')), ' ', TRIM(COALESCE(c.firstname,'')))";
+                $exactOrderBy = "(CASE WHEN (LOWER({$concatFirstLast}) = ? OR LOWER({$concatLastFirst}) = ?) THEN 0 ELSE 1 END)";
+                $query->orderByRaw($exactOrderBy . ' ASC', [$exactTerm, $exactTerm]);
+            }
+
+            if ($orderBy === 'name') {
+                $query->orderBy('c.firstname')->orderBy('c.lastname');
+            } elseif (! $search || trim($search) === '') {
+                $query->orderByDesc('e.createdtime');
+            }
+
+            return $query->offset($offset)->limit($limit)->get();
+        } catch (\Throwable $e) {
+            Log::warning('CrmService::getCustomersForBroadcast: ' . $e->getMessage());
+
+            return collect();
+        }
+    }
+
+    /**
+     * Keep only contact IDs that match the broadcast segment (after Excel / checkbox merge).
+     *
+     * @param  array<int>  $contactIds
+     * @return array<int>
+     */
+    public function filterContactIdsByBroadcastClientType(array $contactIds, ?string $clientType): array
+    {
+        $contactIds = array_values(array_unique(array_filter(array_map('intval', $contactIds))));
+        if ($contactIds === []) {
+            return [];
+        }
+
+        $cfCol = $this->broadcastContactTypeColumn();
+        [$sourceFilter, $typeVal, $lifeSystem] = $this->parseBroadcastClientType((string) ($clientType ?? 'all'), $cfCol);
+
+        if ($lifeSystem !== null) {
+            $erp = app(ErpClientService::class);
+            if (! $erp->isClientsViewBackedByErp()) {
+                return [];
+            }
+            $policyByContact = $this->getContactPolicyNumbersByIds($contactIds);
+            $policies = array_values(array_filter($policyByContact));
+            $allowedList = $erp->filterPoliciesMatchingLifeSystemSegment($policies, $lifeSystem);
+            $allowedNorm = [];
+            foreach ($allowedList as $p) {
+                $allowedNorm[trim(preg_replace('/\s+/', '', (string) $p))] = true;
+            }
+            $kept = [];
+            foreach ($contactIds as $id) {
+                $pol = $policyByContact[$id] ?? null;
+                if ($pol === null || $pol === '') {
+                    continue;
+                }
+                $key = trim(preg_replace('/\s+/', '', $pol));
+                if (isset($allowedNorm[$key])) {
+                    $kept[] = $id;
+                }
+            }
+
+            return $kept;
+        }
+
+        if ($sourceFilter === null && $typeVal === null) {
+            return $contactIds;
+        }
+
+        try {
+            $q = DB::connection('vtiger')
+                ->table('vtiger_contactdetails as c')
+                ->join('vtiger_crmentity as e', 'c.contactid', '=', 'e.crmid')
+                ->where('e.deleted', 0)
+                ->whereIn('e.setype', ['Contacts', 'Contact'])
+                ->whereIn('c.contactid', $contactIds);
+
+            if ($sourceFilter !== null) {
+                $q->where('e.source', $sourceFilter);
+            }
+            if ($cfCol !== null && $typeVal !== null) {
+                $q->join('vtiger_contactscf as cfseg', 'c.contactid', '=', 'cfseg.contactid')
+                    ->where("cfseg.{$cfCol}", $typeVal);
+            }
+
+            return $q->pluck('c.contactid')->map(fn ($id) => (int) $id)->unique()->values()->all();
+        } catch (\Throwable $e) {
+            Log::warning('CrmService::filterContactIdsByBroadcastClientType: ' . $e->getMessage());
+
+            return $contactIds;
+        }
+    }
+
+    /**
+     * Distinct non-empty vtiger_crmentity.source values for Contacts.
+     *
+     * @return list<string>
+     */
+    public function getDistinctContactRecordSources(): array
+    {
+        try {
+            return DB::connection('vtiger')
+                ->table('vtiger_crmentity as e')
+                ->where('e.deleted', 0)
+                ->whereIn('e.setype', ['Contacts', 'Contact'])
+                ->whereNotNull('e.source')
+                ->where('e.source', '!=', '')
+                ->distinct()
+                ->orderBy('e.source')
+                ->pluck('e.source')
+                ->map(fn ($s) => trim((string) $s))
+                ->filter()
+                ->unique()
+                ->values()
+                ->all();
+        } catch (\Throwable $e) {
+            Log::warning('CrmService::getDistinctContactRecordSources: ' . $e->getMessage());
+
+            return [];
+        }
+    }
+
+    /**
+     * Distinct values for configured client-type custom field.
+     *
+     * @return list<string>
+     */
+    public function getDistinctBroadcastContactTypeValues(): array
+    {
+        $col = $this->broadcastContactTypeColumn();
+        if ($col === null) {
+            return [];
+        }
+
+        try {
+            return DB::connection('vtiger')
+                ->table('vtiger_contactscf as cf')
+                ->join('vtiger_contactdetails as c', 'cf.contactid', '=', 'c.contactid')
+                ->join('vtiger_crmentity as e', 'c.contactid', '=', 'e.crmid')
+                ->where('e.deleted', 0)
+                ->whereIn('e.setype', ['Contacts', 'Contact'])
+                ->whereNotNull("cf.{$col}")
+                ->where("cf.{$col}", '!=', '')
+                ->distinct()
+                ->orderBy("cf.{$col}")
+                ->pluck("cf.{$col}")
+                ->map(fn ($v) => trim((string) $v))
+                ->filter()
+                ->unique()
+                ->values()
+                ->all();
+        } catch (\Throwable $e) {
+            Log::warning('CrmService::getDistinctBroadcastContactTypeValues: ' . $e->getMessage());
+
+            return [];
+        }
+    }
+
+    protected function broadcastContactTypeColumn(): ?string
+    {
+        $raw = config('mass_broadcast.contact_type_cf');
+        $raw = $raw ? trim((string) $raw) : '';
+        if ($raw === '' || ! preg_match('/^cf_\d+$/i', $raw)) {
+            return null;
+        }
+
+        return strtolower($raw);
+    }
+
+    /**
+     * @return array{0: ?string, 1: ?string, 2: ?string} [crm source, cf value, life system: group|individual|mortgage|group_pension]
+     */
+    protected function parseBroadcastClientType(string $clientType, ?string $cfCol): array
+    {
+        if ($clientType === '' || $clientType === 'all') {
+            return [null, null, null];
+        }
+        if (str_starts_with($clientType, 'l|')) {
+            $v = trim(substr($clientType, 2));
+            if (in_array($v, ['group', 'individual', 'mortgage', 'group_pension'], true)) {
+                return [null, null, $v];
+            }
+
+            return [null, null, null];
+        }
+        if (str_starts_with($clientType, 's|')) {
+            $v = trim(substr($clientType, 2));
+
+            return [$v !== '' ? $v : null, null, null];
+        }
+        if (str_starts_with($clientType, 't|')) {
+            $v = trim(substr($clientType, 2));
+            if ($v === '' || $cfCol === null) {
+                return [null, null, null];
+            }
+
+            return [null, $v, null];
+        }
+
+        return [null, null, null];
+    }
+
+    /**
      * Get a single contact by ID (for ticket create when contact may not be in paginated list).
      */
     public function getContactById(int $contactId): ?object
@@ -734,6 +1081,37 @@ class CrmService
         } catch (\Throwable $e) {
             Log::warning('CrmService::getContactById: ' . $e->getMessage());
             return null;
+        }
+    }
+
+    /**
+     * Load multiple contacts by ID (for mass email/SMS). Omits deleted or missing rows.
+     *
+     * @param  array<int>  $contactIds
+     * @return \Illuminate\Support\Collection<int, object>
+     */
+    public function getContactsByIds(array $contactIds)
+    {
+        $contactIds = array_values(array_unique(array_filter(array_map('intval', $contactIds))));
+        if ($contactIds === []) {
+            return collect();
+        }
+
+        try {
+            return DB::connection('vtiger')
+                ->table('vtiger_contactdetails as c')
+                ->join('vtiger_crmentity as e', 'c.contactid', '=', 'e.crmid')
+                ->where('e.deleted', 0)
+                ->whereIn('e.setype', ['Contacts', 'Contact'])
+                ->whereIn('c.contactid', $contactIds)
+                ->select('c.contactid', 'c.firstname', 'c.lastname', 'c.email', 'c.mobile', 'c.phone')
+                ->orderBy('c.lastname')
+                ->orderBy('c.firstname')
+                ->get();
+        } catch (\Throwable $e) {
+            Log::warning('CrmService::getContactsByIds: ' . $e->getMessage());
+
+            return collect();
         }
     }
 
@@ -779,6 +1157,50 @@ class CrmService
             Log::warning('CrmService::getContactPolicyNumber: ' . $e->getMessage());
 
             return null;
+        }
+    }
+
+    /**
+     * @param  list<int>  $contactIds
+     * @return array<int, ?string> contactid => policy or null
+     */
+    public function getContactPolicyNumbersByIds(array $contactIds): array
+    {
+        $contactIds = array_values(array_unique(array_filter(array_map('intval', $contactIds))));
+        if ($contactIds === []) {
+            return [];
+        }
+
+        try {
+            $rows = DB::connection('vtiger')
+                ->table('vtiger_contactdetails as c')
+                ->join('vtiger_crmentity as e', 'c.contactid', '=', 'e.crmid')
+                ->leftJoin('vtiger_contactscf as cf', 'c.contactid', '=', 'cf.contactid')
+                ->where('e.deleted', 0)
+                ->whereIn('e.setype', ['Contacts', 'Contact'])
+                ->whereIn('c.contactid', $contactIds)
+                ->select('c.contactid', 'cf.cf_860', 'cf.cf_856', 'cf.cf_872')
+                ->get();
+
+            $map = [];
+            foreach ($contactIds as $id) {
+                $map[$id] = null;
+            }
+            foreach ($rows as $row) {
+                $policy = $this->pickPolicyExcludingPin(
+                    $row->cf_860 ?? null,
+                    $row->cf_856 ?? null,
+                    $row->cf_872 ?? null
+                );
+                $policy = $policy !== null ? trim((string) $policy) : '';
+                $map[(int) $row->contactid] = $policy !== '' ? $policy : null;
+            }
+
+            return $map;
+        } catch (\Throwable $e) {
+            Log::warning('CrmService::getContactPolicyNumbersByIds: ' . $e->getMessage());
+
+            return array_fill_keys($contactIds, null);
         }
     }
 
@@ -2209,6 +2631,7 @@ class CrmService
                 ->table('vtiger_contactdetails as c')
                 ->join('vtiger_crmentity as e', 'c.contactid', '=', 'e.crmid')
                 ->leftJoin('vtiger_contactscf as cf', 'c.contactid', '=', 'cf.contactid')
+                ->leftJoin('vtiger_users as u', 'e.smownerid', '=', 'u.id')
                 ->where('e.deleted', 0)
                 ->whereIn('e.setype', ['Contacts', 'Contact'])
                 ->where(function ($q) use ($term) {
@@ -2217,7 +2640,18 @@ class CrmService
                         ->orWhere('cf.cf_852', 'like', $term)
                         ->orWhere('cf.cf_872', 'like', $term);
                 })
-                ->select('c.contactid', 'c.firstname', 'c.lastname', 'c.email', 'c.mobile', 'c.phone')
+                ->select([
+                    'c.contactid',
+                    'c.firstname',
+                    'c.lastname',
+                    'c.email',
+                    'c.mobile',
+                    'c.phone',
+                    'e.smownerid',
+                    'u.first_name as owner_first',
+                    'u.last_name as owner_last',
+                    'u.user_name as owner_username',
+                ])
                 ->first();
             return $row;
         } catch (\Throwable $e) {

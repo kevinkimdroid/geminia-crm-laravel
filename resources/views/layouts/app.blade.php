@@ -320,6 +320,11 @@
                         <i class="bi bi-megaphone"></i><span>Campaigns</span>
                     </a>
                     @endif
+                    @if($can('marketing.campaigns') || $can('marketing.social-media') || $can('marketing.broadcast'))
+                    <a href="{{ route('marketing.broadcast') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('marketing.broadcast*') ? 'active' : '' }}">
+                        <i class="bi bi-broadcast"></i><span>Broadcast</span>
+                    </a>
+                    @endif
                 </div>
                 @endif
                 @if($can('tickets') || $can('support'))
@@ -343,6 +348,9 @@
                     @endif
                     @if($can('support.customers'))
                     <a href="{{ route('support.customers') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('support.customers') || request()->routeIs('support.clients.*') ? 'active' : '' }}"><i class="bi bi-people"></i><span>Clients</span></a>
+                    @endif
+                    @if($can('support.customers') && ! ($can('leads') || $can('marketing')))
+                    <a href="{{ route('marketing.broadcast') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('marketing.broadcast*') ? 'active' : '' }}"><i class="bi bi-broadcast"></i><span>Broadcast</span></a>
                     @endif
                     @if($can('tickets'))
                     <a href="{{ route('support.maturities') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('support.maturities') ? 'active' : '' }}"><i class="bi bi-calendar-event"></i><span>Maturities</span></a>

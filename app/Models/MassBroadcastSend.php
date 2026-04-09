@@ -4,14 +4,15 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-class SmsLog extends Model
+class MassBroadcastSend extends Model
 {
+    protected $table = 'mass_broadcast_sends';
+
     protected $fillable = [
         'contact_id',
-        'phone',
-        'message',
-        'status',
-        'error_message',
+        'channel',
+        'content_digest',
+        'subject_snapshot',
         'user_id',
         'sent_at',
     ];

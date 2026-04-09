@@ -731,7 +731,7 @@ class ErpClientService
      * Mortgage / Group Pension list tabs require explicit Oracle view names in .env.
      * When unset, those tabs show no rows (we do not fall back to the individual view).
      */
-    protected function optionalClientsSegmentConfigured(?string $system): bool
+    public function optionalClientsSegmentConfigured(?string $system): bool
     {
         if ($system === 'mortgage') {
             return trim((string) config('erp.clients_mortgage_view')) !== '';
@@ -741,6 +741,116 @@ class ErpClientService
         }
 
         return true;
+    }
+
+    /**
+     * Same eligibility as Support → Clients when loading from ERP / cache / HTTP API (not plain CRM-only).
+     */
+    public function isClientsViewBackedByErp(): bool
+    {
+        if (! config('erp.enabled', true)) {
+            return false;
+        }
+
+        $source = config('erp.clients_view_source', 'crm');
+        if (! in_array($source, ['erp', 'erp_sync', 'erp_http'], true)) {
+            return false;
+        }
+
+        if ($source === 'erp_http') {
+            return trim((string) config('erp.clients_http_url')) !== '';
+        }
+
+        if (in_array($source, ['erp_sync'], true)) {
+            return true;
+        }
+
+        return $this->isConfigured();
+    }
+
+    /**
+     * Policies that appear in the given life-system segment (same rules as Support → Clients pills).
+     *
+     * @param  list<string>  $policyNumbers
+     * @return list<string>
+     */
+    public function filterPoliciesMatchingLifeSystemSegment(array $policyNumbers, string $system): array
+    {
+        $policyNumbers = array_values(array_unique(array_filter(array_map(
+            static fn ($p) => trim(preg_replace('/\s+/', '', (string) $p)),
+            $policyNumbers
+        ))));
+        if ($policyNumbers === []) {
+            return [];
+        }
+
+        if (! in_array($system, ['group', 'individual', 'mortgage', 'group_pension'], true)) {
+            return [];
+        }
+
+        if (in_array($system, ['mortgage', 'group_pension'], true) && ! $this->optionalClientsSegmentConfigured($system)) {
+            return [];
+        }
+
+        $source = config('erp.clients_view_source', 'crm');
+
+        if ($source === 'erp_sync' && Schema::hasTable('erp_clients_cache')) {
+            $allowed = [];
+            $rows = DB::table('erp_clients_cache')->whereIn('policy_number', $policyNumbers)->get();
+            foreach ($rows as $row) {
+                $pn = trim((string) ($row->policy_number ?? ''));
+                if ($pn === '') {
+                    continue;
+                }
+                if ($this->getLifeSystemFromProduct($row->product ?? null) === $system) {
+                    $allowed[] = $pn;
+                }
+            }
+
+            return array_values(array_unique($allowed));
+        }
+
+        if ($source === 'erp_http') {
+            $allowed = [];
+            foreach ($policyNumbers as $p) {
+                if ($p === '') {
+                    continue;
+                }
+                $res = $this->getClientsFromHttpApi(15, 0, $p, 10, false, $system);
+                $hit = false;
+                foreach ($res['data'] as $obj) {
+                    $rowPol = trim((string) ($obj->policy_no ?? $obj->policy_number ?? ''));
+                    if ($rowPol !== '' && strcasecmp($rowPol, $p) === 0) {
+                        $hit = true;
+                        break;
+                    }
+                }
+                if ($hit) {
+                    $allowed[] = $p;
+                }
+            }
+
+            return $allowed;
+        }
+
+        if ($source === 'erp' && $this->isConfigured()) {
+            try {
+                $table = $this->resolveClientsListTable($system);
+                $policyCol = 'POLICY_NUMBER';
+                $found = DB::connection('erp')->table($table)->whereIn($policyCol, $policyNumbers)->pluck($policyCol)->all();
+
+                return array_values(array_unique(array_map('strval', $found)));
+            } catch (\Throwable $e) {
+                Log::warning('ErpClientService::filterPoliciesMatchingLifeSystemSegment: Oracle failed', [
+                    'message' => $e->getMessage(),
+                    'system' => $system,
+                ]);
+
+                return [];
+            }
+        }
+
+        return [];
     }
 
     /**

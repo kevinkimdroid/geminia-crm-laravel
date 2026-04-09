@@ -28,7 +28,7 @@ class AppServiceProvider extends ServiceProvider
             return "<?php echo app(\App\Support\ViteAssets::class)->toHtml({$expression}); ?>";
         });
 
-        View::composer(['layouts.app', 'dashboard'], function ($view) {
+        View::composer(['layouts.app', 'dashboard', 'marketing', 'support'], function ($view) {
             try {
                 $view->with('leadsTodayCount', Cache::remember(
                     'geminia_leads_today_' . now()->format('Y-m-d'),
@@ -62,7 +62,7 @@ class AppServiceProvider extends ServiceProvider
             }
 
             try {
-                $layoutData = Cache::remember('geminia_user_layout_' . $user->id, 600, function () use ($user) {
+                $layoutData = Cache::remember('geminia_user_layout_v2_' . $user->id, 600, function () use ($user) {
                     return [
                         'role' => ($user->primary_role ? $user->primary_role->rolename : null) ?? '—',
                         'allowed' => $user->getAllowedModules(),

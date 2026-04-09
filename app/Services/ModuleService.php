@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\DB;
  */
 class ModuleService
 {
-    protected string $cacheKey = 'geminia_enabled_modules';
+    protected string $cacheKey = 'geminia_enabled_modules_v2';
 
     /**
      * Default module definitions (matches Vtiger-style module list).
@@ -28,13 +28,14 @@ class ModuleService
             ['key' => 'tools.mail-manager', 'label' => 'Mail Manager', 'icon' => 'bi-envelope-at', 'sort' => 8],
             ['key' => 'reports', 'label' => 'Reports', 'icon' => 'bi-file-text', 'sort' => 9],
             ['key' => 'marketing.campaigns', 'label' => 'Campaigns', 'icon' => 'bi-megaphone', 'sort' => 10],
-            ['key' => 'marketing.social-media', 'label' => 'Webmails / Social', 'icon' => 'bi-globe', 'sort' => 11],
-            ['key' => 'support.customers', 'label' => 'Clients', 'icon' => 'bi-people', 'sort' => 12],
-            ['key' => 'tools.pbx-manager', 'label' => 'PBX Manager', 'icon' => 'bi-telephone', 'sort' => 13],
-            ['key' => 'tools.pdf-maker', 'label' => 'PDF Maker', 'icon' => 'bi-file-pdf', 'sort' => 14],
-            ['key' => 'tools.recycle-bin', 'label' => 'Recycle Bin', 'icon' => 'bi-trash', 'sort' => 15],
-            ['key' => 'support.sms-notifier', 'label' => 'SMS Notifier', 'icon' => 'bi-chat-dots', 'sort' => 16],
-            ['key' => 'compliance.complaints', 'label' => 'Complaint Register', 'icon' => 'bi-clipboard2-data', 'sort' => 17],
+            ['key' => 'marketing.broadcast', 'label' => 'Email & SMS broadcast', 'icon' => 'bi-broadcast', 'sort' => 11],
+            ['key' => 'marketing.social-media', 'label' => 'Webmails / Social', 'icon' => 'bi-globe', 'sort' => 12],
+            ['key' => 'support.customers', 'label' => 'Clients', 'icon' => 'bi-people', 'sort' => 13],
+            ['key' => 'tools.pbx-manager', 'label' => 'PBX Manager', 'icon' => 'bi-telephone', 'sort' => 14],
+            ['key' => 'tools.pdf-maker', 'label' => 'PDF Maker', 'icon' => 'bi-file-pdf', 'sort' => 15],
+            ['key' => 'tools.recycle-bin', 'label' => 'Recycle Bin', 'icon' => 'bi-trash', 'sort' => 16],
+            ['key' => 'support.sms-notifier', 'label' => 'SMS Notifier', 'icon' => 'bi-chat-dots', 'sort' => 17],
+            ['key' => 'compliance.complaints', 'label' => 'Complaint Register', 'icon' => 'bi-clipboard2-data', 'sort' => 18],
         ];
     }
 

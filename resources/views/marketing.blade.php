@@ -42,12 +42,55 @@
         </div>
     </div>
     <div class="col-12">
-        <div class="card p-4">
-            <div class="text-center py-5">
-                <i class="bi bi-megaphone-fill text-muted" style="font-size:3rem"></i>
-                <p class="text-muted mt-2 mb-0">Marketing automation and campaigns coming soon.</p>
+        <div class="row g-4">
+            @if($can('marketing.campaigns') || $can('marketing.social-media') || $can('marketing.broadcast') || $can('support.customers'))
+            <div class="col-md-6 col-lg-4">
+                <a href="{{ route('marketing.broadcast') }}" class="card p-4 h-100 text-decoration-none" style="border:2px solid var(--geminia-primary, #0E4385);border-radius:16px;color:inherit;">
+                    <div class="d-flex align-items-center gap-3">
+                        <div class="rounded-3 d-flex align-items-center justify-content-center" style="width:56px;height:56px;background:var(--geminia-primary-muted, rgba(14,67,133,0.12));color:var(--geminia-primary, #0E4385);font-size:1.5rem;"><i class="bi bi-broadcast"></i></div>
+                        <div>
+                            <h6 class="fw-bold mb-1">Email &amp; SMS broadcast</h6>
+                            <p class="text-muted small mb-0">Mass message contacts (same mail &amp; Advanta SMS as elsewhere).</p>
+                        </div>
+                        <i class="bi bi-chevron-right ms-auto text-primary"></i>
+                    </div>
+                </a>
             </div>
+            @endif
+            @if($can('marketing.campaigns'))
+            <div class="col-md-6 col-lg-4">
+                <a href="{{ route('marketing.campaigns.index') }}" class="card p-4 h-100 text-decoration-none" style="border-radius:16px;border:1px solid var(--card-border, rgba(14,67,133,0.12));color:inherit;">
+                    <div class="d-flex align-items-center gap-3">
+                        <div class="rounded-3 d-flex align-items-center justify-content-center bg-light text-primary" style="width:56px;height:56px;font-size:1.5rem;"><i class="bi bi-megaphone"></i></div>
+                        <div>
+                            <h6 class="fw-bold mb-1">Campaigns</h6>
+                            <p class="text-muted small mb-0">Create and manage marketing campaigns.</p>
+                        </div>
+                        <i class="bi bi-chevron-right ms-auto text-muted"></i>
+                    </div>
+                </a>
+            </div>
+            @endif
+            @if($can('marketing.social-media'))
+            <div class="col-md-6 col-lg-4">
+                <a href="{{ route('marketing.social-media') }}" class="card p-4 h-100 text-decoration-none" style="border-radius:16px;border:1px solid var(--card-border, rgba(14,67,133,0.12));color:inherit;">
+                    <div class="d-flex align-items-center gap-3">
+                        <div class="rounded-3 d-flex align-items-center justify-content-center bg-light text-primary" style="width:56px;height:56px;font-size:1.5rem;"><i class="bi bi-facebook"></i></div>
+                        <div>
+                            <h6 class="fw-bold mb-1">Social media</h6>
+                            <p class="text-muted small mb-0">Schedule and monitor posts.</p>
+                        </div>
+                        <i class="bi bi-chevron-right ms-auto text-muted"></i>
+                    </div>
+                </a>
+            </div>
+            @endif
         </div>
+        @if(!($can('marketing.campaigns') || $can('marketing.social-media') || $can('marketing.broadcast') || $can('support.customers')))
+        <div class="card p-4 mt-2">
+            <div class="text-center py-4 text-muted small">You do not have access to marketing tools. Ask an administrator to enable Campaigns or related modules for your role.</div>
+        </div>
+        @endif
     </div>
 </div>
 @endsection

@@ -100,7 +100,7 @@ class VtigerUser extends Authenticatable
      */
     public function getAllowedModules(): array
     {
-        return Cache::remember('geminia_allowed_modules_' . $this->id, 600, function () {
+        return Cache::remember('geminia_allowed_modules_v2_' . $this->id, 600, function () {
             return $this->fetchAllowedModules();
         });
     }
