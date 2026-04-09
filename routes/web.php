@@ -148,6 +148,8 @@ Route::middleware('admin')->group(function () {
 Route::get('/settings', fn () => redirect()->route('settings.crm'))->name('settings');
 Route::get('/settings/crm', [\App\Http\Controllers\SettingsController::class, 'crm'])->name('settings.crm');
 Route::post('/settings/users/{user}/send-reset-link', [\App\Http\Controllers\UserManagementController::class, 'sendResetLink'])->name('settings.users.send-reset-link');
+Route::get('/settings/users/create', [\App\Http\Controllers\UserManagementController::class, 'create'])->name('settings.users.create');
+Route::post('/settings/users', [\App\Http\Controllers\UserManagementController::class, 'store'])->name('settings.users.store');
 Route::get('/settings/users/{user}/edit', [\App\Http\Controllers\UserManagementController::class, 'edit'])->name('settings.users.edit');
 Route::put('/settings/users/{user}', [\App\Http\Controllers\UserManagementController::class, 'update'])->name('settings.users.update');
 Route::put('/settings/users/{user}/department', [\App\Http\Controllers\UserManagementController::class, 'updateDepartment'])->name('settings.users.update-department');

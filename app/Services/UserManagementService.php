@@ -21,8 +21,10 @@ class UserManagementService
 
     /**
      * Generate a password reset token for a user and send the reset email.
+     *
+     * @param  bool  $isNewAccount  Welcome / first-time password setup (e.g. after admin creates the user).
      */
-    public function sendPasswordResetEmail(object $user): bool
+    public function sendPasswordResetEmail(object $user, bool $isNewAccount = false): bool
     {
         $email = trim($user->email1 ?? '');
         if ($email === '') {
@@ -51,19 +53,32 @@ class UserManagementService
             return false;
         }
 
-        $userName = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) ?: $user->user_name;
+        $displayName = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) ?: $user->user_name;
+        $loginUsername = $user->user_name ?? '';
         $baseUrl = rtrim(config('services.password_reset.base_url') ?? config('app.url', ''), '/');
         $resetUrl = $baseUrl . '/password/reset?token=' . urlencode($token) . '&email=' . urlencode($email);
         $appName = config('app.name', 'Geminia Life');
 
-        $subject = 'Reset your password — ' . $appName;
-        $body = "Hello {$userName},\n\n"
-            . "A password reset was requested for your account. Click the link below to set a new password:\n\n"
-            . "{$resetUrl}\n\n"
-            . "This link expires in {$this->tokenExpiryMinutes} minutes. If you did not request this, please ignore this email.\n\n"
-            . "Kind regards,\n{$appName}";
+        if ($isNewAccount) {
+            $subject = 'Set your password — ' . $appName;
+            $body = "Hello {$displayName},\n\n"
+                . "An account has been created for you on {$appName}. "
+                . "Your username for sign-in is: {$loginUsername}\n\n"
+                . "Use the link below to choose your password:\n\n"
+                . "{$resetUrl}\n\n"
+                . "This link expires in {$this->tokenExpiryMinutes} minutes. "
+                . "If you were not expecting this message, contact your administrator.\n\n"
+                . "Kind regards,\n{$appName}";
+        } else {
+            $subject = 'Reset your password — ' . $appName;
+            $body = "Hello {$displayName},\n\n"
+                . "A password reset was requested for your account. Click the link below to set a new password:\n\n"
+                . "{$resetUrl}\n\n"
+                . "This link expires in {$this->tokenExpiryMinutes} minutes. If you did not request this, please ignore this email.\n\n"
+                . "Kind regards,\n{$appName}";
+        }
 
-        return $this->send($email, $userName, $subject, $body);
+        return $this->send($email, $displayName, $subject, $body);
     }
 
     /**

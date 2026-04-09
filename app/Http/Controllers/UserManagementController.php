@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\VtigerRole;
 use App\Models\VtigerUser;
 use App\Services\CrmService;
 use App\Services\UserDepartmentService;
@@ -17,6 +18,120 @@ use Illuminate\View\View;
 
 class UserManagementController extends Controller
 {
+    public function create(): View
+    {
+        $departmentsList = app(UserDepartmentService::class)->getDepartmentsList();
+        $roles = VtigerRole::on('vtiger')->orderBy('rolename')->get();
+
+        return view('settings.sections.user-create', [
+            'departmentsList' => $departmentsList,
+            'roles' => $roles,
+        ]);
+    }
+
+    public function store(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'user_name' => [
+                'required',
+                'string',
+                'max:60',
+                'regex:/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/',
+                function (string $attribute, mixed $value, \Closure $fail): void {
+                    $exists = DB::connection('vtiger')
+                        ->table('vtiger_users')
+                        ->where('user_name', $value)
+                        ->where('deleted', 0)
+                        ->exists();
+                    if ($exists) {
+                        $fail('This username is already taken.');
+                    }
+                },
+            ],
+            'first_name' => 'required|string|max:40',
+            'last_name' => 'required|string|max:80',
+            'email1' => [
+                'required',
+                'email',
+                'max:100',
+                function (string $attribute, mixed $value, \Closure $fail): void {
+                    $exists = DB::connection('vtiger')
+                        ->table('vtiger_users')
+                        ->where('email1', $value)
+                        ->where('deleted', 0)
+                        ->exists();
+                    if ($exists) {
+                        $fail('A user with this email already exists.');
+                    }
+                },
+            ],
+            'role_id' => 'required|string',
+            'department' => 'nullable|string|max:100',
+        ]);
+
+        $roleOk = VtigerRole::on('vtiger')->where('roleid', $validated['role_id'])->exists();
+        if (! $roleOk) {
+            return back()->withErrors(['role_id' => 'The selected role is invalid.'])->withInput();
+        }
+
+        // Placeholder password: unknown to anyone; user sets a real password via the emailed link.
+        $placeholderHash = password_hash(bin2hex(random_bytes(32)), PASSWORD_DEFAULT);
+        $accessKey = strtoupper(bin2hex(random_bytes(8)));
+
+        $userId = null;
+
+        DB::connection('vtiger')->transaction(function () use ($validated, $placeholderHash, $accessKey, &$userId): void {
+            $userId = (int) DB::connection('vtiger')
+                ->table('vtiger_users')
+                ->insertGetId([
+                    'user_name' => $validated['user_name'],
+                    'user_password' => $placeholderHash,
+                    'confirm_password' => $placeholderHash,
+                    'crypt_type' => 'PHASH',
+                    'first_name' => $validated['first_name'],
+                    'last_name' => $validated['last_name'],
+                    'email1' => $validated['email1'],
+                    'status' => 'Active',
+                    'is_admin' => 'off',
+                    'accesskey' => $accessKey,
+                ]);
+
+            DB::connection('vtiger')->table('vtiger_user2role')->updateOrInsert(
+                ['userid' => $userId],
+                ['roleid' => $validated['role_id']]
+            );
+        });
+
+        $userDept = app(UserDepartmentService::class);
+        if ($userId && ! empty(trim($validated['department'] ?? ''))) {
+            $userDept->setDepartment($userId, trim($validated['department']));
+        }
+
+        $listUrl = route('settings.crm', ['section' => 'users']);
+        $displayName = $validated['first_name'] . ' ' . $validated['last_name'];
+        $emailSent = false;
+        if ($userId) {
+            $newUser = VtigerUser::on('vtiger')->find($userId);
+            if ($newUser) {
+                $emailSent = app(UserManagementService::class)->sendPasswordResetEmail($newUser, true);
+            }
+        }
+
+        if ($emailSent) {
+            return redirect($listUrl)->with(
+                'success',
+                'User "' . $displayName . '" was created. A password setup email was sent to ' . $validated['email1'] . '.'
+            );
+        }
+
+        return redirect($listUrl)
+            ->with('success', 'User "' . $displayName . '" was created.')
+            ->with(
+                'error',
+                'The password setup email could not be sent. Check mail configuration, or use Reset next to this user to resend the link.'
+            );
+    }
+
     public function sendResetLink(Request $request, int $user): RedirectResponse
     {
         $targetUser = VtigerUser::on('vtiger')
@@ -171,7 +286,7 @@ class UserManagementController extends Controller
         return redirect($redirect)->with('success', $msg);
     }
 
-    public function reactivate(int $user): RedirectResponse
+    public function reactivate(Request $request, int $user): RedirectResponse
     {
         $targetUser = VtigerUser::on('vtiger')->where('id', $user)->firstOrFail();
 

@@ -11,7 +11,12 @@
         <h5 class="fw-bold mb-1" style="color:var(--geminia-text)">Users</h5>
         <p class="text-muted small mb-0">Assign users and roles.</p>
     </div>
-    <a href="{{ route('settings.crm') }}?section=roles" class="btn btn-sm" style="background:var(--geminia-primary);color:#fff;border-radius:8px">Manage Roles</a>
+    <div class="d-flex flex-wrap gap-2">
+        <a href="{{ route('settings.users.create') }}" class="btn btn-sm btn-outline-primary" style="border-radius:8px">
+            <i class="bi bi-person-plus me-1"></i>Add user
+        </a>
+        <a href="{{ route('settings.crm') }}?section=roles" class="btn btn-sm" style="background:var(--geminia-primary);color:#fff;border-radius:8px">Manage Roles</a>
+    </div>
 </div>
 
 @if (session('success'))

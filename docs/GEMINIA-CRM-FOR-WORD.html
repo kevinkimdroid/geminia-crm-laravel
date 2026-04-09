@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Geminia CRM (Laravel) — Overview</title>
+<style>
+body { font-family: Calibri, Arial, sans-serif; font-size: 11pt; line-height: 1.35; max-width: 7in; margin: 1in auto; color: #000; }
+h1 { font-size: 16pt; margin-top: 0; }
+h2 { font-size: 13pt; margin-top: 1.2em; border-bottom: 1px solid #333; padding-bottom: 2px; }
+p { margin: 0.5em 0; }
+ul { margin: 0.4em 0; padding-left: 1.25em; }
+li { margin: 0.2em 0; }
+table { border-collapse: collapse; width: 100%; margin: 0.6em 0; font-size: 11pt; }
+th, td { border: 1px solid #333; padding: 6px 8px; text-align: left; vertical-align: top; }
+th { background: #f0f0f0; }
+.note { font-style: italic; margin: 0.8em 0; }
+.box { background: #f8f8f8; border: 1px solid #ccc; padding: 10px 12px; margin: 1em 0; }
+</style>
+</head>
+<body>
+
+<h1>Geminia CRM (Laravel) — Overview for stakeholders</h1>
+
+<div class="box">
+<p><strong>Open in Microsoft Word:</strong> Right-click this file → Open with → Word. Then edit and use <em>File → Save As → Word Document (.docx)</em>.</p>
+<p>This page uses simple headings and tables so Word keeps the structure when you save.</p>
+</div>
+
+<h2>What this document is</h2>
+<p>Plain summary of how the new Laravel CRM compares to the old Vtiger-based CRM: improvements, new features, and remaining gaps.</p>
+<p><strong>Project:</strong> Geminia CRM (Laravel)<br>
+<strong>Compared to:</strong> Legacy Geminia CRM (Vtiger: PHP, Smarty, vtiger MySQL database)</p>
+
+<h2>1. Executive summary</h2>
+<p>The new CRM replaces the older Vtiger-based stack with Laravel 11 and Blade, while keeping the <strong>same MySQL vtiger database</strong> for core CRM data. That avoids duplicate records and allows running both systems side by side during migration.</p>
+<p><strong>Where the new system is stronger</strong></p>
+<ul>
+  <li>Modern framework, easier long-term maintenance</li>
+  <li>Stronger web security (e.g. CSRF, structured auth, password reset)</li>
+  <li>Documented deployment (Composer, build step, migrations)</li>
+  <li>Business-specific features: ERP clients, maturities, marketing, PBX, complaints, ticket SLA tooling</li>
+</ul>
+<p><strong>Where legacy may still cover more</strong></p>
+<ul>
+  <li>Full calendar parity, products/quotes/orders/invoices in Laravel</li>
+  <li>Deep Vtiger items unless rebuilt: workflows, custom views, related lists, full document/email parity</li>
+</ul>
+
+<h2>2. Technical comparison</h2>
+<table>
+  <tr><th>Topic</th><th>Legacy (Vtiger)</th><th>New (Laravel)</th></tr>
+  <tr><td>Framework</td><td>Vtiger / custom PHP, Smarty</td><td>Laravel 11, Blade</td></tr>
+  <tr><td>Database</td><td>MySQL vtiger schema</td><td>Same vtiger DB; extra Laravel tables for new features</td></tr>
+  <tr><td>Users / login</td><td>vtiger_users, legacy passwords</td><td>Laravel auth + Vtiger adapter; forgot/reset password</td></tr>
+  <tr><td>Templates</td><td>Smarty</td><td>Blade</td></tr>
+  <tr><td>Deploy</td><td>Vtiger-style</td><td>Composer, npm build, Artisan migrations, caches</td></tr>
+</table>
+
+<h2>3. Core CRM in Laravel today</h2>
+<ul>
+  <li><strong>Authentication</strong> — login, logout, password forgot/reset</li>
+  <li><strong>Dashboard</strong> — Vtiger data where applicable</li>
+  <li><strong>Contacts</strong> — CRUD, follow-ups, campaigns</li>
+  <li><strong>Leads</strong> — full CRUD</li>
+  <li><strong>Tickets</strong> — CRUD, export, close, reassign, comments</li>
+  <li><strong>Deals</strong> — full CRUD</li>
+  <li><strong>Activities</strong> — create/list + APIs</li>
+  <li><strong>Search</strong> — global search</li>
+  <li><strong>Support / customers</strong> — ERP-aware views, serve-client flows</li>
+  <li><strong>Reports</strong> — SLA, aging, tickets by date, exports, etc.</li>
+  <li><strong>Settings (partial)</strong> — users, departments, groups, automation, PBX, SLA, layout, roles</li>
+</ul>
+<p class="note">MIGRATION_PLAN.md in the repo is an older checklist; some “pending” rows there are already implemented.</p>
+
+<h2>4. New capabilities (beyond typical Vtiger)</h2>
+<table>
+  <tr><th>Area</th><th>What was introduced</th></tr>
+  <tr><td>ERP / Oracle</td><td>Client cache, Python/Artisan sync, HTTP API, bulk import API</td></tr>
+  <tr><td>Maturities</td><td>Cache, renewal tracking, mortgage renewals, discharge voucher PDF/email, exports</td></tr>
+  <tr><td>Marketing</td><td>Campaigns, social scheduling, accounts/interactions, webhooks, OAuth</td></tr>
+  <tr><td>Compliance</td><td>Complaints module, export; mail manager links</td></tr>
+  <tr><td>Telephony</td><td>PBX: calls, recordings, extension mapping, claims</td></tr>
+  <tr><td>Mail</td><td>Mail manager: fetch, ticket from email</td></tr>
+  <tr><td>Documents</td><td>Email templates, PDF maker, PDF protect</td></tr>
+  <tr><td>SMS</td><td>Notifier and logs</td></tr>
+  <tr><td>Tickets</td><td>SLA, automation, reassignments, comments, feedback</td></tr>
+  <tr><td>Engagement</td><td>Follow-ups; campaign–contact links</td></tr>
+  <tr><td>Configuration</td><td>Module registry, CRM settings, departments</td></tr>
+  <tr><td>Public / API</td><td>Feedback forms and API</td></tr>
+</table>
+<p>See also: MIGRATION_PLAN.md, ERP_SETUP.md, scripts/README_SYNC.md, DEPLOYMENT.md</p>
+
+<h2>5. Gaps to plan for</h2>
+<p>Legacy Vtiger may still be needed until Laravel covers:</p>
+<ul>
+  <li>Full calendar/events UI parity</li>
+  <li>Products, quotes, sales orders, invoices</li>
+  <li>Deep parity: quick create everywhere, custom views, related lists, import/export everywhere, documents, full email client, workflows, cron, dashboard widgets like Vtiger</li>
+</ul>
+
+<h2>6. One-line conclusion</h2>
+<p><strong>The Laravel CRM modernizes the platform, adds insurance and operations features, and shares one database with Vtiger; full replacement of every legacy module remains a phased effort.</strong></p>
+
+<p style="margin-top: 2em; font-size: 10pt; color: #444;">Geminia CRM — Laravel. Content aligned with repository as of last file update.</p>
+
+</body>
+</html>
