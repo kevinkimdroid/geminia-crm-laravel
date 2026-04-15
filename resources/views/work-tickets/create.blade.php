@@ -74,7 +74,7 @@
             <div class="small text-muted mt-2">
                 Manager is assigned automatically from reporting lines.
                 @if($canManageReportingLines ?? false)
-                Admin can update mappings in <a href="{{ route('work-tickets.reporting-lines') }}">Reporting Lines</a>.
+                Admin can update mappings in <a href="{{ route('setup.users') }}">Setup Users</a>.
                 @endif
             </div>
 

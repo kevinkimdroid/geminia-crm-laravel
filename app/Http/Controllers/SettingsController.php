@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\CrmSetting;
 use App\Models\Department;
+use App\Models\UserReportingLine;
 use App\Models\VtigerProfile;
 use App\Models\VtigerRole;
 use App\Models\VtigerTab;
@@ -67,6 +68,12 @@ class SettingsController extends Controller
                 ->pluck('roleid', 'userid')
                 ->toArray();
             $data['roles'] = VtigerRole::on('vtiger')->orderBy('rolename')->get();
+            $data['reportingLines'] = UserReportingLine::query()->pluck('manager_id', 'user_id')->toArray();
+            $data['reportingManagerOptions'] = VtigerUser::on('vtiger')
+                ->where('status', 'Active')
+                ->orderBy('first_name')
+                ->orderBy('last_name')
+                ->get(['id', 'first_name', 'last_name', 'user_name']);
         } elseif ($section === 'departments') {
             $data['departments'] = Department::orderBy('sort_order')->orderBy('name')->get();
             $data['userCounts'] = DB::table('user_departments')->selectRaw('department, count(*) as cnt')->groupBy('department')->pluck('cnt', 'department')->toArray();

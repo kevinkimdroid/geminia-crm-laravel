@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\UserReportingLine;
 use App\Models\VtigerRole;
 use App\Models\VtigerUser;
 use App\Services\CrmService;
@@ -209,6 +210,48 @@ class UserManagementController extends Controller
         }
         return redirect($this->safeRedirect($request))
             ->with('success', 'Department updated.');
+    }
+
+    public function updateReportingManager(Request $request, int $user): RedirectResponse
+    {
+        $targetUser = VtigerUser::on('vtiger')
+            ->where('id', $user)
+            ->where('status', 'Active')
+            ->firstOrFail();
+
+        $validated = $request->validate([
+            'manager_id' => 'nullable|integer|min:1',
+        ]);
+
+        $managerId = !empty($validated['manager_id']) ? (int) $validated['manager_id'] : null;
+        if ($managerId !== null) {
+            if ($managerId === (int) $targetUser->id) {
+                return redirect($this->safeRedirect($request))
+                    ->with('error', 'A user cannot report to themselves.');
+            }
+
+            $managerExists = VtigerUser::on('vtiger')
+                ->where('id', $managerId)
+                ->where('status', 'Active')
+                ->exists();
+
+            if (! $managerExists) {
+                return redirect($this->safeRedirect($request))
+                    ->with('error', 'Selected manager is not an active user.');
+            }
+        }
+
+        if ($managerId === null) {
+            UserReportingLine::query()->where('user_id', (int) $targetUser->id)->delete();
+        } else {
+            UserReportingLine::query()->updateOrCreate(
+                ['user_id' => (int) $targetUser->id],
+                ['manager_id' => $managerId]
+            );
+        }
+
+        return redirect($this->safeRedirect($request))
+            ->with('success', 'Reporting manager updated.');
     }
 
     public function offboard(int $user): View|RedirectResponse

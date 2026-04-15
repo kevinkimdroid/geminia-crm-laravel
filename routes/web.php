@@ -153,7 +153,7 @@ Route::get('/reports', [\App\Http\Controllers\ReportsController::class, 'index']
 
 Route::middleware('admin')->group(function () {
 Route::get('/settings', fn () => redirect()->route('settings.crm'))->name('settings');
-Route::get('/work-tickets/reporting-lines', [\App\Http\Controllers\WorkTicketController::class, 'reportingLines'])->name('work-tickets.reporting-lines');
+Route::get('/work-tickets/reporting-lines', fn () => redirect()->route('setup.users'))->name('work-tickets.reporting-lines');
 Route::post('/work-tickets/reporting-lines', [\App\Http\Controllers\WorkTicketController::class, 'saveReportingLines'])->name('work-tickets.reporting-lines.save');
 Route::get('/settings/crm', [\App\Http\Controllers\SettingsController::class, 'crm'])->name('settings.crm');
 Route::post('/settings/users/{user}/send-reset-link', [\App\Http\Controllers\UserManagementController::class, 'sendResetLink'])->name('settings.users.send-reset-link');
@@ -162,6 +162,7 @@ Route::post('/settings/users', [\App\Http\Controllers\UserManagementController::
 Route::get('/settings/users/{user}/edit', [\App\Http\Controllers\UserManagementController::class, 'edit'])->name('settings.users.edit');
 Route::put('/settings/users/{user}', [\App\Http\Controllers\UserManagementController::class, 'update'])->name('settings.users.update');
 Route::put('/settings/users/{user}/department', [\App\Http\Controllers\UserManagementController::class, 'updateDepartment'])->name('settings.users.update-department');
+Route::put('/settings/users/{user}/reporting-manager', [\App\Http\Controllers\UserManagementController::class, 'updateReportingManager'])->name('settings.users.update-reporting-manager');
 Route::get('/settings/users/{user}/offboard', [\App\Http\Controllers\UserManagementController::class, 'offboard'])->name('settings.users.offboard');
 Route::post('/settings/users/{user}/offboard', [\App\Http\Controllers\UserManagementController::class, 'offboardSubmit'])->name('settings.users.offboard.submit');
 Route::post('/settings/users/{user}/reactivate', [\App\Http\Controllers\UserManagementController::class, 'reactivate'])->name('settings.users.reactivate');
@@ -224,7 +225,10 @@ Route::put('/settings/profiles/{profile}', [\App\Http\Controllers\ProfileControl
 Route::middleware('admin')->prefix('setup')->name('setup.')->group(function () {
     Route::get('/', [SetupController::class, 'index'])->name('index');
     Route::get('/users', [SetupController::class, 'users'])->name('users');
+    Route::get('/users/export', [SetupController::class, 'exportUsers'])->name('users.export');
     Route::post('/users/role', [SetupController::class, 'updateUserRole'])->name('users.update-role');
+    Route::post('/users/reporting-manager', [SetupController::class, 'updateUserReportingManager'])->name('users.update-reporting-manager');
+    Route::post('/users/reporting-managers', [SetupController::class, 'updateUserReportingManagersBulk'])->name('users.update-reporting-managers');
     Route::get('/roles', [SetupController::class, 'roles'])->name('roles');
     Route::get('/roles/{roleId}/modules', [SetupController::class, 'editRoleModules'])->name('roles.modules');
     Route::post('/roles/{roleId}/modules', [SetupController::class, 'updateRoleModules'])->name('roles.modules.update');

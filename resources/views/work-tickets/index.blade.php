@@ -10,7 +10,7 @@
     </div>
     <div class="d-flex gap-2">
         @if($canSeeAll ?? false)
-        <a href="{{ route('work-tickets.reporting-lines') }}" class="btn btn-outline-secondary">
+        <a href="{{ route('setup.users') }}" class="btn btn-outline-secondary">
             <i class="bi bi-diagram-3 me-1"></i> Reporting Lines
         </a>
         @endif

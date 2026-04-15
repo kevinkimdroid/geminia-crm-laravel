@@ -15,6 +15,9 @@
         <a href="{{ route('settings.users.create') }}" class="btn btn-sm btn-outline-primary" style="border-radius:8px">
             <i class="bi bi-person-plus me-1"></i>Add user
         </a>
+        <a href="{{ route('setup.users') }}" class="btn btn-sm btn-outline-secondary" style="border-radius:8px">
+            <i class="bi bi-diagram-3 me-1"></i>Reporting lines
+        </a>
         <a href="{{ route('settings.crm') }}?section=roles" class="btn btn-sm" style="background:var(--geminia-primary);color:#fff;border-radius:8px">Manage Roles</a>
     </div>
 </div>
@@ -95,6 +98,7 @@
                 <th class="col-email">Email</th>
                 <th class="col-username">Username</th>
                 <th class="col-dept">Department</th>
+                <th class="col-reporting">Reports To</th>
                 <th class="col-role">Current Role</th>
                 <th class="col-action">Action</th>
             </tr>
@@ -132,6 +136,32 @@
                     </form>
                     @else
                         <span class="text-muted">{{ ($userDepartments ?? [])[$user->id] ?? '—' }}</span>
+                    @endif
+                </td>
+                <td class="col-reporting">
+                    @if (!$isInactive)
+                    <form id="reporting-form-{{ $user->id }}" action="{{ route('settings.users.update-reporting-manager', $user->id) }}" method="POST" class="d-inline-flex align-items-center gap-2" style="flex-wrap:nowrap">
+                        @csrf
+                        @method('PUT')
+                        <input type="hidden" name="redirect" value="{{ request()->fullUrl() }}">
+                        <select name="manager_id" class="form-select form-select-sm" style="min-width:170px">
+                            <option value="">— Not set —</option>
+                            @foreach(($reportingManagerOptions ?? []) as $mgr)
+                                @continue((int) $mgr->id === (int) $user->id)
+                                <option value="{{ $mgr->id }}" {{ (int) (($reportingLines ?? [])[$user->id] ?? 0) === (int) $mgr->id ? 'selected' : '' }}>
+                                    {{ trim(($mgr->first_name ?? '') . ' ' . ($mgr->last_name ?? '')) ?: ($mgr->user_name ?? ('User #' . $mgr->id)) }}
+                                </option>
+                            @endforeach
+                        </select>
+                        <button type="submit" form="reporting-form-{{ $user->id }}" name="save_reporting" value="1" class="btn btn-sm" style="background:var(--geminia-primary);color:#fff;border-radius:8px;padding:.25rem .65rem;white-space:nowrap">Save</button>
+                    </form>
+                    @else
+                        @php $rid = (int) (($reportingLines ?? [])[$user->id] ?? 0); @endphp
+                        @if($rid > 0)
+                            <span class="text-muted">User #{{ $rid }}</span>
+                        @else
+                            <span class="text-muted">—</span>
+                        @endif
                     @endif
                 </td>
                 @php
@@ -189,7 +219,7 @@
             </tr>
             @empty
             <tr>
-                <td colspan="6" class="text-center py-5 text-muted">
+                <td colspan="7" class="text-center py-5 text-muted">
                     <i class="bi bi-people display-6 d-block mb-2"></i>
                     No users found. Try different search terms or clear filters.
                 </td>
@@ -203,6 +233,7 @@
 .users-table-wrapper { max-height: calc(100vh - 380px); overflow-y: auto; }
 .users-table-wrapper thead th { position: sticky; top: 0; background: #f8fafc !important; z-index: 1; box-shadow: 0 1px 0 var(--geminia-border); }
 .col-dept { min-width: 220px; }
+.col-reporting { min-width: 250px; }
 </style>
 @push('scripts')
 <script>
