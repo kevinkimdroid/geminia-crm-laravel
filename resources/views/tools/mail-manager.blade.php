@@ -36,6 +36,36 @@
     </div>
 @endif
 
+@php
+    $mailHealth = $mailFetchHealth ?? [];
+    $lastSuccess = !empty($mailHealth['last_success_at']) ? \Carbon\Carbon::parse($mailHealth['last_success_at']) : null;
+    $lastAttempt = !empty($mailHealth['last_attempt_at']) ? \Carbon\Carbon::parse($mailHealth['last_attempt_at']) : null;
+    $healthIsOk = ($mailHealth['status'] ?? 'unknown') === 'ok';
+    $healthIsStale = (bool) ($mailHealth['is_stale'] ?? true);
+    $staleMinutes = (int) ($mailHealth['stale_minutes'] ?? 15);
+@endphp
+
+<div class="alert {{ ($healthIsOk && !$healthIsStale) ? 'alert-info' : 'alert-warning' }} py-2 d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div class="small">
+        <strong>Mail Fetch Health:</strong>
+        @if($healthIsStale)
+            <span class="fw-semibold text-warning-emphasis">Stale</span> (no successful fetch in {{ $staleMinutes }}+ min).
+        @endif
+        @if($lastSuccess)
+            Last success {{ $lastSuccess->diffForHumans() }} ({{ $lastSuccess->format('M d, Y H:i') }})
+            · fetched {{ (int) ($mailHealth['fetched'] ?? 0) }}, stored {{ (int) ($mailHealth['stored'] ?? 0) }}
+        @else
+            No successful fetch recorded yet.
+        @endif
+        @if($lastAttempt)
+            · last attempt {{ $lastAttempt->diffForHumans() }}
+        @endif
+        @if(!empty($mailHealth['error']))
+            · error: {{ \Illuminate\Support\Str::limit($mailHealth['error'], 180) }}
+        @endif
+    </div>
+</div>
+
 {{-- Fixed-height container: only inner panels scroll, not the page --}}
 <div class="mail-manager-panels d-flex border rounded overflow-hidden bg-white shadow-sm">
     {{-- Left: Email list --}}

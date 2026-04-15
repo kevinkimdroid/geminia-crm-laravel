@@ -18,8 +18,19 @@ class WorkTicket extends Model
         'reporting_manager_id',
         'created_by',
         'due_date',
+        'tat_hours',
+        'tat_due_at',
+        'tat_breached_at',
         'started_at',
         'completed_at',
+    ];
+
+    protected $casts = [
+        'due_date' => 'date',
+        'tat_due_at' => 'datetime',
+        'tat_breached_at' => 'datetime',
+        'started_at' => 'datetime',
+        'completed_at' => 'datetime',
     ];
 
     public function updates(): HasMany

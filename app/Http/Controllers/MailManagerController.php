@@ -3,8 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Services\MailService;
+use App\Support\MailFetchHealth;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\View\View;
 
@@ -73,6 +75,14 @@ class MailManagerController extends Controller
             $selectedEmail = $this->mailService->getEmail($selected);
         }
 
+        $mailFetchHealth = MailFetchHealth::get();
+        $staleMinutes = max(1, (int) config('email-service.health_stale_minutes', 15));
+        $lastSuccess = ! empty($mailFetchHealth['last_success_at'])
+            ? Carbon::parse($mailFetchHealth['last_success_at'])
+            : null;
+        $mailFetchHealth['is_stale'] = ! $lastSuccess || $lastSuccess->lt(now()->subMinutes($staleMinutes));
+        $mailFetchHealth['stale_minutes'] = $staleMinutes;
+
         return view('tools.mail-manager', [
             'emails' => $emails,
             'total' => $total,
@@ -84,6 +94,7 @@ class MailManagerController extends Controller
             'selectedEmail' => $selectedEmail,
             'useMicrosoftGraph' => $this->mailService->useMicrosoftGraph(),
             'useEmailService' => $this->mailService->useHttpEmailService(),
+            'mailFetchHealth' => $mailFetchHealth,
         ]);
     }
 
@@ -178,6 +189,7 @@ class MailManagerController extends Controller
         try {
             $result = $this->mailService->fetchAndStoreEmails('INBOX', $limit);
         } catch (\Throwable $e) {
+            MailFetchHealth::markFailure($e->getMessage(), 'manual');
             if (strpos($e->getMessage(), 'NOOP completed') !== false) {
                 $hint = $this->mailService->useMicrosoftGraph()
                     ? 'Check MSGRAPH_* config in .env.'
@@ -188,9 +200,11 @@ class MailManagerController extends Controller
         }
 
         if (!empty($result['errors'])) {
+            MailFetchHealth::markFailure(implode(' ', $result['errors']), 'manual');
             return back()->with('error', implode(' ', $result['errors']));
         }
 
+        MailFetchHealth::markSuccess($result, 'manual');
         Cache::forget('geminia_emails_count');
         $msg = "Fetched {$result['fetched']} emails, stored {$result['stored']} new.";
         return back()->with('success', $msg);

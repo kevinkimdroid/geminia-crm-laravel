@@ -42,12 +42,17 @@
                 </div>
                 <div class="col-md-3">
                     <label class="form-label fw-semibold">Priority <span class="text-danger">*</span></label>
-                    <select name="priority" class="form-select" required>
+                    <select name="priority" id="prioritySelect" class="form-select" required>
                         @foreach(['Low', 'Medium', 'High', 'Urgent'] as $priority)
                         <option value="{{ $priority }}" {{ old('priority', 'Medium') === $priority ? 'selected' : '' }}>{{ $priority }}</option>
                         @endforeach
                     </select>
                     @error('priority')<div class="text-danger small mt-1">{{ $message }}</div>@enderror
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">TAT (hours) <span class="text-danger">*</span></label>
+                    <input type="number" min="1" max="720" step="1" name="tat_hours" id="tatHoursInput" value="{{ old('tat_hours') }}" class="form-control" required>
+                    @error('tat_hours')<div class="text-danger small mt-1">{{ $message }}</div>@enderror
                 </div>
                 <div class="col-md-3">
                     <label class="form-label fw-semibold">Assignee <span class="text-danger">*</span></label>
@@ -78,6 +83,10 @@
                 @endif
             </div>
 
+            <div class="small text-muted mt-1">
+                TAT defaults by priority: Urgent 8h, High 24h, Medium 48h, Low 72h.
+            </div>
+
             <div class="mt-3">
                 <label class="form-label fw-semibold">Description</label>
                 <textarea name="description" rows="4" class="form-control" placeholder="Add details and expected output...">{{ old('description') }}</textarea>
@@ -103,6 +112,9 @@
 <script>
 (function() {
     const assignee = document.querySelector('select[name="assignee_id"]');
+    const priority = document.getElementById('prioritySelect');
+    const tatInput = document.getElementById('tatHoursInput');
+    const tatByPriority = @json($tatByPriority ?? []);
     const managerIdInput = document.getElementById('reportingManagerId');
     const managerDisplay = document.getElementById('reportingManagerDisplay');
     const userNamesById = @json($userNamesById ?? []);
@@ -120,8 +132,23 @@
         }
     }
 
+    function updateTatFromPriority() {
+        if (!priority || !tatInput) return;
+        const selectedPriority = priority.value || 'Medium';
+        const recommended = parseInt(tatByPriority[selectedPriority] || '48', 10);
+        if (!tatInput.value || tatInput.dataset.autofilled !== 'manual') {
+            tatInput.value = recommended;
+            tatInput.dataset.autofilled = 'auto';
+        }
+    }
+
+    tatInput?.addEventListener('input', function() {
+        this.dataset.autofilled = 'manual';
+    });
+    priority?.addEventListener('change', updateTatFromPriority);
     assignee?.addEventListener('change', updateManagerFromAssignee);
     updateManagerFromAssignee();
+    updateTatFromPriority();
 })();
 </script>
 @endsection

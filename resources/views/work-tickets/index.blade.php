@@ -33,7 +33,7 @@
     <div class="col-sm-6 col-lg-2"><div class="card border-0 shadow-sm"><div class="card-body py-3"><div class="text-muted small">In Progress</div><div class="h5 mb-0">{{ $stats['in_progress'] ?? 0 }}</div></div></div></div>
     <div class="col-sm-6 col-lg-2"><div class="card border-0 shadow-sm"><div class="card-body py-3"><div class="text-muted small">Blocked</div><div class="h5 mb-0 text-danger">{{ $stats['blocked'] ?? 0 }}</div></div></div></div>
     <div class="col-sm-6 col-lg-2"><div class="card border-0 shadow-sm"><div class="card-body py-3"><div class="text-muted small">Done</div><div class="h5 mb-0 text-success">{{ $stats['done'] ?? 0 }}</div></div></div></div>
-    <div class="col-sm-6 col-lg-2"><div class="card border-0 shadow-sm"><div class="card-body py-3"><div class="text-muted small">Due Today</div><div class="h5 mb-0">{{ $stats['due_today'] ?? 0 }}</div></div></div></div>
+    <div class="col-sm-6 col-lg-2"><div class="card border-0 shadow-sm"><div class="card-body py-3"><div class="text-muted small">TAT Breached</div><div class="h5 mb-0 text-danger">{{ $stats['tat_breached'] ?? 0 }}</div></div></div></div>
 </div>
 
 <div class="card border-0 shadow-sm">
@@ -86,7 +86,9 @@
                     <th>Priority</th>
                     <th>Assignee</th>
                     <th>Reporting To</th>
-                    <th>Due Date</th>
+                    <th>TAT</th>
+                    <th>TAT Due</th>
+                    <th>SLA</th>
                     <th>Updated</th>
                 </tr>
             </thead>
@@ -116,12 +118,33 @@
                             <span class="text-muted">—</span>
                         @endif
                     </td>
-                    <td>{{ $ticket->due_date ? \Carbon\Carbon::parse($ticket->due_date)->format('d M Y') : '—' }}</td>
+                    <td>{{ (int) ($ticket->tat_hours ?? 0) > 0 ? ((int) $ticket->tat_hours . 'h') : '—' }}</td>
+                    <td class="text-nowrap">{{ $ticket->tat_due_at ? \Carbon\Carbon::parse($ticket->tat_due_at)->format('d M Y H:i') : '—' }}</td>
+                    <td>
+                        @php
+                            $tatDueAt = !empty($ticket->tat_due_at) ? \Carbon\Carbon::parse($ticket->tat_due_at) : null;
+                            $tatBreached = false;
+                            if ($tatDueAt) {
+                                if (($ticket->status ?? '') === 'Done' && !empty($ticket->completed_at)) {
+                                    $tatBreached = \Carbon\Carbon::parse($ticket->completed_at)->gt($tatDueAt);
+                                } elseif (($ticket->status ?? '') !== 'Done') {
+                                    $tatBreached = now()->gt($tatDueAt);
+                                }
+                            }
+                        @endphp
+                        @if(!$tatDueAt)
+                            <span class="badge bg-secondary">No TAT</span>
+                        @elseif($tatBreached)
+                            <span class="badge bg-danger">Breached</span>
+                        @else
+                            <span class="badge bg-success">Within TAT</span>
+                        @endif
+                    </td>
                     <td class="text-muted small">{{ $ticket->updated_at?->diffForHumans() }}</td>
                 </tr>
                 @empty
                 <tr>
-                    <td colspan="8" class="text-center py-5 text-muted">
+                    <td colspan="10" class="text-center py-5 text-muted">
                         <i class="bi bi-kanban fs-3 d-block mb-2"></i>
                         No work tickets found for this view.
                     </td>

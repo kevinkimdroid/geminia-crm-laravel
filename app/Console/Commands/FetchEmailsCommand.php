@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Services\MailService;
+use App\Support\MailFetchHealth;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
 
@@ -24,15 +25,19 @@ class FetchEmailsCommand extends Command
         try {
             $result = $mailService->fetchAndStoreEmails('INBOX', $limit);
         } catch (\Throwable $e) {
+            MailFetchHealth::markFailure($e->getMessage(), 'scheduler');
             $this->error('Fetch failed: ' . $e->getMessage());
             return self::FAILURE;
         }
 
         $this->info("Fetched: {$result['fetched']}, Stored: {$result['stored']} new.");
         if (! empty($result['errors'])) {
+            MailFetchHealth::markFailure(implode(' ', $result['errors']), 'scheduler');
             foreach ($result['errors'] as $err) {
                 $this->warn("  - {$err}");
             }
+        } else {
+            MailFetchHealth::markSuccess($result, 'scheduler');
         }
 
         Cache::forget('geminia_emails_count');

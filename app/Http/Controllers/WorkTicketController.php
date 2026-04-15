@@ -81,6 +81,18 @@ class WorkTicketController extends Controller
             'blocked' => (clone $statBase)->where('status', 'Blocked')->count(),
             'done' => (clone $statBase)->where('status', 'Done')->count(),
             'due_today' => (clone $statBase)->whereDate('due_date', now()->toDateString())->count(),
+            'tat_breached' => (clone $statBase)
+                ->whereNotNull('tat_due_at')
+                ->where(function (Builder $q): void {
+                    $q->where(function (Builder $open): void {
+                        $open->where('status', '!=', 'Done')->where('tat_due_at', '<', now());
+                    })->orWhere(function (Builder $closed): void {
+                        $closed->where('status', 'Done')
+                            ->whereNotNull('completed_at')
+                            ->whereColumn('completed_at', '>', 'tat_due_at');
+                    });
+                })
+                ->count(),
         ];
 
         return view('work-tickets.index', [
@@ -116,6 +128,7 @@ class WorkTicketController extends Controller
             'managerMap' => $managerMap,
             'userNamesById' => $userNamesById,
             'canManageReportingLines' => $user->isAdministrator(),
+            'tatByPriority' => $this->getPriorityTatMap(),
         ]);
     }
 
@@ -132,12 +145,16 @@ class WorkTicketController extends Controller
             'assignee_id' => 'required|integer|min:1',
             'reporting_manager_id' => 'nullable|integer|min:1',
             'due_date' => 'nullable|date',
+            'tat_hours' => 'nullable|integer|min:1|max:720',
             'initial_update' => 'nullable|string|max:20000',
         ]);
 
         $status = $validated['status'];
         $now = now();
         $assigneeId = (int) $validated['assignee_id'];
+        $tatHours = !empty($validated['tat_hours']) ? (int) $validated['tat_hours'] : $this->getTatHoursForPriority((string) $validated['priority']);
+        $tatDueAt = $now->copy()->addHours($tatHours);
+        $dueDate = $validated['due_date'] ?? $tatDueAt->toDateString();
         $autoManagerId = UserReportingLine::query()
             ->where('user_id', $assigneeId)
             ->value('manager_id');
@@ -152,10 +169,15 @@ class WorkTicketController extends Controller
             // Auto-assign reporting manager from mapping table.
             'reporting_manager_id' => $autoManagerId ? (int) $autoManagerId : (!empty($validated['reporting_manager_id']) ? (int) $validated['reporting_manager_id'] : null),
             'created_by' => (int) $user->id,
-            'due_date' => $validated['due_date'] ?? null,
+            'due_date' => $dueDate,
+            'tat_hours' => $tatHours,
+            'tat_due_at' => $tatDueAt,
+            'tat_breached_at' => null,
             'started_at' => $status === 'In Progress' ? $now : null,
             'completed_at' => $status === 'Done' ? $now : null,
         ]);
+
+        $this->updateTatBreachState($ticket);
 
         if (!empty(trim((string) ($validated['initial_update'] ?? '')))) {
             WorkTicketUpdate::create([
@@ -337,8 +359,13 @@ class WorkTicketController extends Controller
             if ($statusAfterUpdate !== 'Done') {
                 $workTicket->completed_at = null;
             }
-            $workTicket->save();
         }
+        if (!$workTicket->tat_due_at && !empty($workTicket->tat_hours)) {
+            $workTicket->tat_due_at = $workTicket->created_at
+                ? $workTicket->created_at->copy()->addHours((int) $workTicket->tat_hours)
+                : now()->addHours((int) $workTicket->tat_hours);
+        }
+        $this->updateTatBreachState($workTicket);
 
         return redirect()
             ->route('work-tickets.show', $workTicket)
@@ -424,5 +451,47 @@ class WorkTicketController extends Controller
         }
 
         return sprintf('%s-%04d', $prefix, $next);
+    }
+
+    protected function getPriorityTatMap(): array
+    {
+        return [
+            'Urgent' => 8,
+            'High' => 24,
+            'Medium' => 48,
+            'Low' => 72,
+        ];
+    }
+
+    protected function getTatHoursForPriority(string $priority): int
+    {
+        $map = $this->getPriorityTatMap();
+        return $map[$priority] ?? 48;
+    }
+
+    protected function updateTatBreachState(WorkTicket $ticket): void
+    {
+        $dueAt = $ticket->tat_due_at;
+        if (!$dueAt && !empty($ticket->tat_hours)) {
+            $dueAt = ($ticket->created_at ?? now())->copy()->addHours((int) $ticket->tat_hours);
+            $ticket->tat_due_at = $dueAt;
+        }
+
+        if (!$dueAt) {
+            $ticket->save();
+            return;
+        }
+
+        $breachedAt = null;
+        if ((string) $ticket->status === 'Done') {
+            if ($ticket->completed_at && $ticket->completed_at->gt($dueAt)) {
+                $breachedAt = $ticket->completed_at;
+            }
+        } elseif (now()->gt($dueAt)) {
+            $breachedAt = now();
+        }
+
+        $ticket->tat_breached_at = $breachedAt;
+        $ticket->save();
     }
 }

@@ -13,6 +13,8 @@ return [
     'password' => env('MAIL_PASSWORD', ''),
     'sender' => env('EMAIL_SERVICE_SENDER', env('MAIL_USERNAME', '')),
     'fetch_limit' => (int) env('EMAIL_SERVICE_FETCH_LIMIT', 25),
+    // Mail health is marked stale when no successful fetch within N minutes.
+    'health_stale_minutes' => (int) env('MAIL_FETCH_STALE_MINUTES', 15),
     // Optional: override endpoint path (e.g. /api/v1/emails) if API uses different paths
     'fetch_endpoint' => env('EMAIL_SERVICE_FETCH_ENDPOINT', ''),
     // When true, fall back to IMAP if HTTP service is unreachable (connection timeout)

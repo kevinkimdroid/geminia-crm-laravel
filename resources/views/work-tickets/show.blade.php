@@ -40,10 +40,28 @@
                         'Cancelled' => 'bg-secondary',
                         default => 'bg-warning text-dark'
                     };
+                    $tatDueAt = $ticket->tat_due_at ? \Carbon\Carbon::parse($ticket->tat_due_at) : null;
+                    $tatBreached = false;
+                    if ($tatDueAt) {
+                        if (($ticket->status ?? '') === 'Done' && !empty($ticket->completed_at)) {
+                            $tatBreached = \Carbon\Carbon::parse($ticket->completed_at)->gt($tatDueAt);
+                        } elseif (($ticket->status ?? '') !== 'Done') {
+                            $tatBreached = now()->gt($tatDueAt);
+                        }
+                    }
                 @endphp
                 <div class="d-flex justify-content-between align-items-start mb-3">
                     <span class="badge {{ $statusClass }}">{{ $ticket->status }}</span>
                     <span class="badge text-bg-light border">{{ $ticket->priority }}</span>
+                </div>
+                <div class="mb-3">
+                    @if(!$tatDueAt)
+                        <span class="badge bg-secondary">No TAT configured</span>
+                    @elseif($tatBreached)
+                        <span class="badge bg-danger">TAT Breached</span>
+                    @else
+                        <span class="badge bg-success">Within TAT</span>
+                    @endif
                 </div>
                 <dl class="row mb-0 small">
                     <dt class="col-5 text-muted">Ticket #</dt>
@@ -62,6 +80,10 @@
                     <dd class="col-7">{{ $usersById[$ticket->created_by] ?? ('User #' . $ticket->created_by) }}</dd>
                     <dt class="col-5 text-muted">Due Date</dt>
                     <dd class="col-7">{{ $ticket->due_date ? \Carbon\Carbon::parse($ticket->due_date)->format('d M Y') : '—' }}</dd>
+                    <dt class="col-5 text-muted">TAT</dt>
+                    <dd class="col-7">{{ (int) ($ticket->tat_hours ?? 0) > 0 ? ((int) $ticket->tat_hours . 'h') : '—' }}</dd>
+                    <dt class="col-5 text-muted">TAT Due By</dt>
+                    <dd class="col-7">{{ $ticket->tat_due_at ? \Carbon\Carbon::parse($ticket->tat_due_at)->format('d M Y H:i') : '—' }}</dd>
                     <dt class="col-5 text-muted">Created</dt>
                     <dd class="col-7">{{ $ticket->created_at?->format('d M Y H:i') }}</dd>
                     <dt class="col-5 text-muted">Last Update</dt>
