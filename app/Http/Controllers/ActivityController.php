@@ -31,10 +31,19 @@ class ActivityController extends Controller
         $perPage = 25;
         $offset = ($page - 1) * $perPage;
 
-        $ownerId = crm_owner_filter();
+        $ownerScope = crm_owner_filter();
+        $vtigerUser = Auth::guard('vtiger')->user();
+        $assignedToFilter = null;
+        if ($vtigerUser?->isAdministrator() && $request->filled('assigned_to')) {
+            $aid = (int) $request->get('assigned_to');
+            $assignedToFilter = $aid > 0 ? $aid : null;
+        }
+
         $activities = collect();
+        $assigneeSummary = collect();
         if ($contactId || $ticketId) {
-            $activities = $this->crm->getActivities($perPage, $offset, $activityType, $status, $search, $contactId, $ticketId, $ownerId);
+            $activities = $this->crm->getActivities($perPage, $offset, $activityType, $status, $search, $contactId, $ticketId, $ownerScope, $assignedToFilter);
+            $assigneeSummary = $this->crm->getActivitiesAssigneeSummary($activityType, $status, $search, $contactId, $ticketId, $ownerScope);
         }
 
         try {
@@ -42,8 +51,8 @@ class ActivityController extends Controller
         } catch (\Throwable $e) {
             $users = collect();
         }
-        $contacts = $this->crm->getContacts(200, 0, $ownerId);
-        $tickets = $contactId ? $this->crm->getTicketsForContact($contactId, 200, $ownerId) : collect();
+        $contacts = $this->crm->getContacts(200, 0, $ownerScope);
+        $tickets = $contactId ? $this->crm->getTicketsForContact($contactId, 200, $ownerScope) : collect();
 
         return view('activities.index', [
             'activities' => $activities,
@@ -52,6 +61,9 @@ class ActivityController extends Controller
             'search' => $search,
             'contactId' => $contactId,
             'ticketId' => $ticketId,
+            'assignedToFilter' => $assignedToFilter,
+            'assigneeSummary' => $assigneeSummary,
+            'canFilterActivitiesByAssignee' => (bool) $vtigerUser?->isAdministrator(),
             'users' => $users,
             'contacts' => $contacts,
             'tickets' => $tickets,

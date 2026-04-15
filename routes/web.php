@@ -192,10 +192,15 @@ Route::post('/settings/layout-editor/field', [\App\Http\Controllers\LayoutEditor
 Route::get('/reports/sla-broken', [\App\Http\Controllers\ReportsController::class, 'slaBroken'])->name('reports.sla-broken');
 Route::get('/reports/ticket-aging', [\App\Http\Controllers\ReportsController::class, 'ticketAging'])->name('reports.ticket-aging');
 Route::get('/reports/tickets-by-date', [\App\Http\Controllers\ReportsController::class, 'ticketsByDate'])->name('reports.tickets-by-date');
+Route::get('/reports/management-usage', [\App\Http\Controllers\ReportsController::class, 'managementUsage'])->name('reports.management-usage');
+Route::get('/reports/assignment-handlers', [\App\Http\Controllers\ReportsController::class, 'assignmentHandlers'])->name('reports.assignment-handlers');
 Route::get('/reports/contacts-summary', [\App\Http\Controllers\ReportsController::class, 'contactsSummary'])->name('reports.contacts-summary');
 Route::get('/reports/calls-summary', [\App\Http\Controllers\ReportsController::class, 'callsSummary'])->name('reports.calls-summary');
 Route::get('/reports/reassignment-audit', [\App\Http\Controllers\ReportsController::class, 'reassignmentAudit'])->name('reports.reassignment-audit');
+Route::get('/reports/bounced-emails', [\App\Http\Controllers\ReportsController::class, 'bouncedEmailsReport'])->name('reports.bounced-emails');
+Route::get('/reports/export/management-usage', [\App\Http\Controllers\ReportsController::class, 'exportManagementUsage'])->name('reports.export.management-usage');
 Route::get('/reports/export/reassignment-audit', [\App\Http\Controllers\ReportsController::class, 'exportReassignmentAudit'])->name('reports.export.reassignment-audit');
+Route::get('/reports/export/assignment-handlers', [\App\Http\Controllers\ReportsController::class, 'exportAssignmentHandlers'])->name('reports.export.assignment-handlers');
 Route::get('/reports/export/sla-broken', [\App\Http\Controllers\ReportsController::class, 'exportSlaBroken'])->name('reports.export.sla-broken');
 Route::get('/reports/export/ticket-aging', [\App\Http\Controllers\ReportsController::class, 'exportTicketAging'])->name('reports.export.ticket-aging');
 Route::get('/reports/export/tickets-by-date', [\App\Http\Controllers\ReportsController::class, 'exportTicketsByDate'])->name('reports.export.tickets-by-date');

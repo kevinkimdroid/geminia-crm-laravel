@@ -62,6 +62,20 @@
             </a>
         </div>
         <div class="col-lg-4">
+            <a href="{{ route('reports.management-usage') }}" class="text-decoration-none">
+                <div class="card reports-audit-card h-100">
+                    <div class="card-body p-4">
+                        <div class="d-flex align-items-center justify-content-between mb-2">
+                            <span class="badge bg-primary bg-opacity-10 text-primary">Management</span>
+                            <i class="bi bi-arrow-right text-muted"></i>
+                        </div>
+                        <h6 class="card-title mb-2">Usage to date &amp; top issues</h6>
+                        <p class="text-muted small mb-0">Trend over time and most tracked vs reported issue categories.</p>
+                    </div>
+                </div>
+            </a>
+        </div>
+        <div class="col-lg-4">
             <a href="{{ route('reports.reassignment-audit') }}" class="text-decoration-none">
                 <div class="card reports-audit-card h-100">
                     <div class="card-body p-4">
@@ -75,12 +89,41 @@
                 </div>
             </a>
         </div>
+        <div class="col-lg-4">
+            <a href="{{ route('reports.assignment-handlers') }}" class="text-decoration-none">
+                <div class="card reports-audit-card h-100">
+                    <div class="card-body p-4">
+                        <div class="d-flex align-items-center justify-content-between mb-2">
+                            <span class="badge bg-primary bg-opacity-10 text-primary">Handlers</span>
+                            <i class="bi bi-arrow-right text-muted"></i>
+                        </div>
+                        <h6 class="card-title mb-2">Assignment Handlers Report</h6>
+                        <p class="text-muted small mb-0">Created, checked, authorized, and closed by per ticket.</p>
+                    </div>
+                </div>
+            </a>
+        </div>
+        <div class="col-lg-4">
+            <a href="{{ route('reports.bounced-emails') }}" class="text-decoration-none">
+                <div class="card reports-audit-card h-100">
+                    <div class="card-body p-4">
+                        <div class="d-flex align-items-center justify-content-between mb-2">
+                            <span class="badge bg-primary bg-opacity-10 text-primary">Email</span>
+                            <i class="bi bi-arrow-right text-muted"></i>
+                        </div>
+                        <h6 class="card-title mb-2">Bounced Emails Report</h6>
+                        <p class="text-muted small mb-0">Latest failed or bounced addresses for life@geminialife.co.ke.</p>
+                    </div>
+                </div>
+            </a>
+        </div>
     </div>
     <div class="d-flex flex-wrap gap-2 mt-2">
         <a href="{{ route('reports.export.sla-broken', ['format' => 'xlsx']) }}" class="btn btn-outline-primary btn-sm"><i class="bi bi-file-earmark-spreadsheet me-1"></i>Broken SLA</a>
         <a href="{{ route('reports.export.ticket-aging', ['format' => 'xlsx']) }}" class="btn btn-outline-primary btn-sm"><i class="bi bi-file-earmark-spreadsheet me-1"></i>Ticket Aging</a>
         <a href="{{ route('reports.export.tickets-by-date', array_merge(request()->only([]), ['date_from' => now()->startOfMonth()->format('Y-m-d'), 'date_to' => now()->format('Y-m-d'), 'format' => 'xlsx'])) }}" class="btn btn-outline-primary btn-sm"><i class="bi bi-file-earmark-spreadsheet me-1"></i>Tickets by date</a>
         <a href="{{ route('reports.export.reassignment-audit', ['format' => 'xlsx']) }}" class="btn btn-outline-primary btn-sm"><i class="bi bi-file-earmark-spreadsheet me-1"></i>Reassignment Audit</a>
+        <a href="{{ route('reports.bounced-emails') }}" class="btn btn-outline-primary btn-sm"><i class="bi bi-envelope-x me-1"></i>Bounced Emails (.xlsx)</a>
     </div>
 </div>
 

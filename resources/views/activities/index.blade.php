@@ -6,7 +6,10 @@
 <div class="page-header d-flex flex-wrap justify-content-between align-items-start gap-3">
     <div>
         <h1 class="page-title">Calendar & Activities</h1>
-        <p class="page-subtitle">Schedule meetings, events, and tasks.</p>
+        <p class="page-subtitle mb-0">Schedule meetings, events, and tasks.</p>
+        @if($canFilterActivitiesByAssignee ?? false)
+        <p class="page-subtitle small text-muted mt-1 mb-0">Use the team filter and Work by assignee to see how activities are spread across people.</p>
+        @endif
     </div>
     <div class="d-flex gap-2">
         <a href="{{ route('activities.create', ['type' => 'Event']) }}" class="btn btn-outline-secondary">
@@ -43,6 +46,7 @@
                 <div class="col"><span class="d-inline-flex align-items-center">Due Date <i class="bi bi-arrow-down-up ms-1"></i></span></div>
                 <div class="col"><span class="d-inline-flex align-items-center">Repeat <i class="bi bi-arrow-down-up ms-1"></i></span></div>
                 <div class="col"><span class="d-inline-flex align-items-center">Assigned To <i class="bi bi-arrow-down-up ms-1"></i></span></div>
+                <div class="col"><span class="d-inline-flex align-items-center">Last updated <i class="bi bi-arrow-down-up ms-1"></i></span></div>
             </div>
         </div>
         <form action="{{ route('activities.index') }}" method="GET" class="p-3 border-bottom bg-light" id="activitiesFilterForm">
@@ -88,17 +92,58 @@
                     <input type="text" name="search" class="form-control form-control-sm" placeholder="Subject" value="{{ $search ?? '' }}">
                 </div>
             </div>
+            @if($canFilterActivitiesByAssignee ?? false)
+            <div class="row g-2 align-items-end mb-2">
+                <div class="col-md-4 col-lg-3">
+                    <label class="form-label small fw-semibold mb-1">Team member</label>
+                    <select name="assigned_to" class="form-select form-select-sm">
+                        <option value="">Everyone (all assignees)</option>
+                        @foreach($users ?? [] as $u)
+                        <option value="{{ $u->id }}" {{ (int) ($assignedToFilter ?? 0) === (int) $u->id ? 'selected' : '' }}>{{ $u->full_name }}</option>
+                        @endforeach
+                    </select>
+                </div>
+            </div>
+            @endif
             <div class="row g-2 align-items-center">
                 <div class="col-auto">
                     <button type="submit" class="btn btn-success btn-sm"><i class="bi bi-search me-1"></i> Filter</button>
                 </div>
-                @if($contactId || $ticketId)
+                @if($contactId || $ticketId || (($canFilterActivitiesByAssignee ?? false) && ($assignedToFilter ?? null)))
                 <div class="col-auto">
                     <a href="{{ route('activities.index') }}" class="btn btn-outline-secondary btn-sm">Clear</a>
                 </div>
                 @endif
             </div>
         </form>
+        @if(($contactId || $ticketId) && ($assigneeSummary ?? collect())->isNotEmpty())
+        <div class="px-3 py-3 border-bottom bg-white">
+            <div class="small fw-bold text-uppercase text-muted mb-2" style="letter-spacing:0.07em; font-size: 0.68rem;">Work by assignee</div>
+            <p class="small text-muted mb-2">Activity counts for this client{{ $ticketId ? ' / ticket' : '' }} with your current type, status, and subject filters (not limited to one person).</p>
+            <div class="d-flex flex-wrap gap-2">
+                @foreach($assigneeSummary as $row)
+                @php
+                    $labelName = trim($row->assignee_name ?? '') ?: 'Unassigned';
+                    $filterParams = array_filter([
+                        'contact_id' => $contactId,
+                        'ticket_id' => $ticketId,
+                        'type' => $activityType,
+                        'status' => $status,
+                        'search' => $search,
+                        'assigned_to' => $row->smownerid,
+                    ], fn ($v) => $v !== null && $v !== '');
+                @endphp
+                @if($canFilterActivitiesByAssignee ?? false)
+                <a href="{{ route('activities.index', $filterParams) }}" class="badge activity-assignee-pill rounded-pill text-decoration-none">
+                    {{ $labelName }} <span class="opacity-75">·</span> {{ (int) $row->activity_count }}
+                </a>
+                @else
+                <span class="badge activity-assignee-pill rounded-pill">{{ $labelName }} <span class="opacity-75">·</span> {{ (int) $row->activity_count }}</span>
+                @endif
+                @endforeach
+            </div>
+        </div>
+        @endif
         {{-- Add Event / Add Task bar (below header, above table) --}}
         <div class="quick-create-bar d-flex flex-wrap align-items-center gap-2 p-3 border-bottom bg-white">
             <button type="button" class="btn btn-success btn-sm quick-create-trigger" data-type="Event">
@@ -128,10 +173,17 @@
                         <td class="activities-td text-nowrap">{{ $act->due_date ? date('d M Y', strtotime($act->due_date)) : '—' }}</td>
                         <td class="activities-td">{{ $act->recurringtype ?: '—' }}</td>
                         <td class="activities-td">{{ trim($act->assigned_to_name ?? '') ?: '—' }}</td>
+                        <td class="activities-td text-muted small text-nowrap">
+                            @if(!empty($act->modifiedtime))
+                                {{ \Carbon\Carbon::parse($act->modifiedtime)->diffForHumans() }}
+                            @else
+                                —
+                            @endif
+                        </td>
                     </tr>
                     @empty
                     <tr>
-                        <td colspan="8" class="text-center py-5">
+                        <td colspan="9" class="text-center py-5">
                             <div class="activities-empty-state">
                                 <div class="activities-empty-icon"><i class="bi bi-calendar3"></i></div>
                                 @if(!$contactId && !$ticketId)
@@ -351,6 +403,8 @@ document.getElementById('filterContactId')?.addEventListener('change', function(
 .activities-td { padding: 0.75rem 1rem; vertical-align: middle; }
 .activities-table tbody tr:hover { background: var(--primary-muted, rgba(14, 67, 133, 0.06)); }
 .activities-empty-icon { width: 80px; height: 80px; margin: 0 auto; background: var(--primary-light, rgba(14, 67, 133, 0.12)); border-radius: 20px; display: flex; align-items: center; justify-content: center; font-size: 2rem; color: var(--primary, #0E4385); }
+.activity-assignee-pill { font-weight: 600; padding: 0.4rem 0.75rem; background: var(--primary-muted, rgba(14, 67, 133, 0.12)); color: var(--primary, #0E4385); border: 1px solid rgba(14, 67, 133, 0.2); }
+a.activity-assignee-pill:hover { background: var(--primary, #0E4385); color: #fff; border-color: var(--primary, #0E4385); }
 #quickCreateModal .modal-content { border-radius: 16px; }
 </style>
 @endsection

@@ -16,6 +16,12 @@ use Illuminate\Support\Facades\Log;
  */
 class CrmService
 {
+    /** @var list<string> */
+    private const VTIGER_ACTIVITY_SETYPES = ['Task', 'Tasks', 'Events', 'Event', 'Calendar', 'cbCalendar'];
+
+    /** @var list<string> Activity types allowed in list / summary filters (UI + query). */
+    private const ACTIVITY_TYPES_FILTER = ['Task', 'Event', 'Meeting', 'Call'];
+
     public function getTicketCountsByStatus(?int $ownerId = null): array
     {
         if ($ownerId !== null) {
@@ -758,6 +764,9 @@ class CrmService
                     if (! $contact) {
                         continue;
                     }
+                    // Same source as Support → Clients: agent column is ERP intermediary, not Vtiger smowner.
+                    $contact->intermediary = trim((string) ($row->intermediary ?? ''));
+                    $contact->pol_prepared_by = trim((string) ($row->pol_prepared_by ?? ''));
                     $cid = (int) $contact->contactid;
                     if (isset($seen[$cid])) {
                         continue;
@@ -1946,75 +1955,135 @@ class CrmService
     }
 
     /**
+     * Resolve activity IDs linked to a contact and/or ticket (intersection when both).
+     *
+     * @return \Illuminate\Support\Collection<int>|null null when neither contact nor ticket is set
+     */
+    private function resolveActivityIdsForContactOrTicket(?int $contactId, ?int $ticketId): ?\Illuminate\Support\Collection
+    {
+        if (!$contactId && !$ticketId) {
+            return null;
+        }
+        if ($contactId && $ticketId) {
+            $contactIds = DB::connection('vtiger')->table('vtiger_seactivityrel')->where('crmid', $contactId)->pluck('activityid');
+            $ticketIds = DB::connection('vtiger')->table('vtiger_seactivityrel')->where('crmid', $ticketId)->pluck('activityid');
+
+            return $contactIds->intersect($ticketIds)->values();
+        }
+        if ($contactId) {
+            return DB::connection('vtiger')->table('vtiger_seactivityrel')->where('crmid', $contactId)->pluck('activityid');
+        }
+
+        return DB::connection('vtiger')->table('vtiger_seactivityrel')->where('crmid', $ticketId)->pluck('activityid');
+    }
+
+    /**
+     * Apply role scope (non-admin) or optional assignee filter (admin).
+     */
+    private function applyActivitySmownerScope($query, ?int $ownerScope, ?int $assignedToFilter): void
+    {
+        if ($ownerScope !== null && $ownerScope > 0) {
+            $query->where('e.smownerid', $ownerScope);
+
+            return;
+        }
+
+        if ($assignedToFilter !== null && $assignedToFilter > 0) {
+            $query->where('e.smownerid', $assignedToFilter);
+        }
+    }
+
+    private function applyActivityTypeStatusSearch($query, ?string $activityType, ?string $status, ?string $search): void
+    {
+        if ($activityType && in_array($activityType, self::ACTIVITY_TYPES_FILTER, true)) {
+            $query->where('a.activitytype', $activityType);
+        }
+
+        if ($status !== null && trim((string) $status) !== '') {
+            $query->where('a.status', 'like', '%' . trim((string) $status) . '%');
+        }
+
+        if ($search !== null && trim((string) $search) !== '') {
+            $query->where('a.subject', 'like', '%' . trim((string) $search) . '%');
+        }
+    }
+
+    /**
+     * One row per activity: core joins (no vtiger_seactivityrel fan-out).
+     *
+     * @param  \Illuminate\Support\Collection<int|string>  $activityIds
+     */
+    private function activitiesScopeQuery(\Illuminate\Support\Collection $activityIds, ?int $ownerScope, ?int $assignedToFilter): \Illuminate\Database\Query\Builder
+    {
+        $query = DB::connection('vtiger')
+            ->table('vtiger_activity as a')
+            ->join('vtiger_crmentity as e', 'a.activityid', '=', 'e.crmid')
+            ->leftJoin('vtiger_users as u', 'e.smownerid', '=', 'u.id')
+            ->where('e.deleted', 0)
+            ->whereIn('e.setype', self::VTIGER_ACTIVITY_SETYPES)
+            ->whereIn('a.activityid', $activityIds);
+
+        $this->applyActivitySmownerScope($query, $ownerScope, $assignedToFilter);
+
+        return $query;
+    }
+
+    /**
+     * Subquery: at most one linked contact per activity (avoids duplicate list rows from multiple vtiger_seactivityrel rows).
+     */
+    private function activityPrimaryContactSubquery(): \Illuminate\Database\Query\Builder
+    {
+        return DB::connection('vtiger')
+            ->table('vtiger_seactivityrel as rel')
+            ->join('vtiger_contactdetails as c', 'rel.crmid', '=', 'c.contactid')
+            ->select('rel.activityid', DB::raw('MIN(c.contactid) as contactid'))
+            ->groupBy('rel.activityid');
+    }
+
+    /**
      * Get activities filtered by client (contact) and/or ticket.
      * When contactId is set, only returns activities related to that contact.
      * When ticketId is set, only returns activities related to that ticket.
      * When both are set, returns activities related to both.
+     *
+     * Requires a contact or ticket context (no unscoped CRM-wide listing).
+     *
+     * @param  int|null  $ownerScope  From crm_owner_filter(); non-admins only see their records.
+     * @param  int|null  $assignedToFilter  When $ownerScope is null (admin), filter by assignee.
      */
-    public function getActivities(int $limit = 50, int $offset = 0, ?string $activityType = null, ?string $status = null, ?string $search = null, ?int $contactId = null, ?int $ticketId = null, ?int $ownerId = null)
+    public function getActivities(int $limit = 50, int $offset = 0, ?string $activityType = null, ?string $status = null, ?string $search = null, ?int $contactId = null, ?int $ticketId = null, ?int $ownerScope = null, ?int $assignedToFilter = null)
     {
         try {
-            $activityIds = null;
-            if ($contactId || $ticketId) {
-                if ($contactId && $ticketId) {
-                    $contactIds = DB::connection('vtiger')->table('vtiger_seactivityrel')->where('crmid', $contactId)->pluck('activityid');
-                    $ticketIds = DB::connection('vtiger')->table('vtiger_seactivityrel')->where('crmid', $ticketId)->pluck('activityid');
-                    $activityIds = $contactIds->intersect($ticketIds)->values();
-                } elseif ($contactId) {
-                    $activityIds = DB::connection('vtiger')->table('vtiger_seactivityrel')->where('crmid', $contactId)->pluck('activityid');
-                } else {
-                    $activityIds = DB::connection('vtiger')->table('vtiger_seactivityrel')->where('crmid', $ticketId)->pluck('activityid');
-                }
-                if ($activityIds->isEmpty()) {
-                    return collect();
-                }
+            $activityIds = $this->resolveActivityIdsForContactOrTicket($contactId, $ticketId);
+            if ($activityIds === null || $activityIds->isEmpty()) {
+                return collect();
             }
 
-            $query = DB::connection('vtiger')
-                ->table('vtiger_activity as a')
-                ->join('vtiger_crmentity as e', 'a.activityid', '=', 'e.crmid')
-                ->leftJoin('vtiger_users as u', 'e.smownerid', '=', 'u.id')
-                ->leftJoin('vtiger_seactivityrel as rel', 'a.activityid', '=', 'rel.activityid')
-                ->leftJoin('vtiger_contactdetails as c', 'rel.crmid', '=', 'c.contactid')
-                ->where('e.deleted', 0)
-                ->whereIn('e.setype', ['Task', 'Tasks', 'Events', 'Event', 'Calendar', 'cbCalendar'])
-                ->select(
-                    'a.activityid',
-                    'a.subject',
-                    'a.activitytype',
-                    'a.date_start',
-                    'a.due_date',
-                    'a.time_start',
-                    'a.time_end',
-                    'a.status',
-                    'a.eventstatus',
-                    'a.recurringtype',
-                    'e.smownerid',
-                    'rel.crmid as related_to_id',
-                    DB::raw("TRIM(CONCAT(COALESCE(c.firstname,''), ' ', COALESCE(c.lastname,''))) as related_to_name"),
-                    DB::raw("CONCAT(COALESCE(u.first_name,''), ' ', COALESCE(u.last_name,'')) as assigned_to_name")
-                );
+            $query = $this->activitiesScopeQuery($activityIds, $ownerScope, $assignedToFilter);
+            $query->leftJoinSub($this->activityPrimaryContactSubquery(), 'relc', function ($join) {
+                $join->on('a.activityid', '=', 'relc.activityid');
+            });
+            $query->leftJoin('vtiger_contactdetails as c', 'relc.contactid', '=', 'c.contactid');
 
-            if ($activityIds !== null) {
-                $query->whereIn('a.activityid', $activityIds);
-            }
+            $this->applyActivityTypeStatusSearch($query, $activityType, $status, $search);
 
-            if ($ownerId !== null && $ownerId > 0) {
-                $query->where('e.smownerid', $ownerId);
-            }
-
-            if ($activityType && in_array($activityType, ['Task', 'Event', 'Meeting', 'Call'])) {
-                $query->where('a.activitytype', $activityType);
-            }
-
-            if ($status && trim($status) !== '') {
-                $query->where('a.status', 'like', '%' . trim($status) . '%');
-            }
-
-            if ($search && trim($search) !== '') {
-                $term = '%' . trim($search) . '%';
-                $query->where('a.subject', 'like', $term);
-            }
+            $query->select(
+                'a.activityid',
+                'a.subject',
+                'a.activitytype',
+                'a.date_start',
+                'a.due_date',
+                'a.time_start',
+                'a.time_end',
+                'a.status',
+                'a.eventstatus',
+                'a.recurringtype',
+                'e.smownerid',
+                'e.modifiedtime',
+                'relc.contactid as related_to_id',
+                DB::raw("TRIM(CONCAT(COALESCE(c.firstname,''), ' ', COALESCE(c.lastname,''))) as related_to_name"),
+                DB::raw("TRIM(CONCAT(COALESCE(u.first_name,''), ' ', COALESCE(u.last_name,''))) as assigned_to_name")
+            );
 
             return $query->orderByDesc('a.date_start')
                 ->offset($offset)
@@ -2022,6 +2091,44 @@ class CrmService
                 ->get();
         } catch (\Throwable $e) {
             Log::warning('CrmService::getActivities: ' . $e->getMessage());
+            return collect();
+        }
+    }
+
+    /**
+     * Count activities per assignee for the same filters as getActivities (no pagination).
+     * Assignee breakdown always uses the full team for this context (caller passes list assignee filter only to getActivities).
+     *
+     * @return \Illuminate\Support\Collection<int, object{smownerid: int, activity_count: int, assignee_name: string}>
+     */
+    public function getActivitiesAssigneeSummary(
+        ?string $activityType = null,
+        ?string $status = null,
+        ?string $search = null,
+        ?int $contactId = null,
+        ?int $ticketId = null,
+        ?int $ownerScope = null
+    ) {
+        try {
+            $activityIds = $this->resolveActivityIdsForContactOrTicket($contactId, $ticketId);
+            if ($activityIds === null || $activityIds->isEmpty()) {
+                return collect();
+            }
+
+            $query = $this->activitiesScopeQuery($activityIds, $ownerScope, null);
+            $this->applyActivityTypeStatusSearch($query, $activityType, $status, $search);
+
+            return $query
+                ->select(
+                    'e.smownerid',
+                    DB::raw('COUNT(*) as activity_count'),
+                    DB::raw("MAX(TRIM(CONCAT(COALESCE(u.first_name,''), ' ', COALESCE(u.last_name,'')))) as assignee_name")
+                )
+                ->groupBy('e.smownerid')
+                ->orderByDesc('activity_count')
+                ->get();
+        } catch (\Throwable $e) {
+            Log::warning('CrmService::getActivitiesAssigneeSummary: ' . $e->getMessage());
             return collect();
         }
     }
@@ -2266,6 +2373,266 @@ class CrmService
                 'ticketsByCategory' => $this->getTicketsByCategory(),
             ];
         });
+    }
+
+    /**
+     * Get management usage report for a date range with daily trend and issue rankings.
+     */
+    public function getManagementUsageReport(string $dateFrom, string $dateTo): array
+    {
+        try {
+            $fromDate = preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateFrom) ? $dateFrom : now()->startOfYear()->format('Y-m-d');
+            $toDate = preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateTo) ? $dateTo : now()->format('Y-m-d');
+            if ($fromDate > $toDate) {
+                [$fromDate, $toDate] = [$toDate, $fromDate];
+            }
+
+            $fromStart = $fromDate . ' 00:00:00';
+            $toEnd = $toDate . ' 23:59:59';
+            $inactiveStatus = (string) config('tickets.inactive_status', 'Inactive');
+
+            $totalReported = DB::connection('vtiger')
+                ->table('vtiger_troubletickets as t')
+                ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
+                ->where('e.deleted', 0)
+                ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
+                ->whereBetween('e.createdtime', [$fromStart, $toEnd])
+                ->count();
+
+            $totalTracked = DB::connection('vtiger')
+                ->table('vtiger_troubletickets as t')
+                ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
+                ->where('e.deleted', 0)
+                ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
+                ->whereBetween('e.createdtime', [$fromStart, $toEnd])
+                ->whereNotIn('t.status', ['Closed', 'Resolved', $inactiveStatus])
+                ->count();
+
+            $dailyReportedRows = DB::connection('vtiger')
+                ->table('vtiger_troubletickets as t')
+                ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
+                ->where('e.deleted', 0)
+                ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
+                ->whereBetween('e.createdtime', [$fromStart, $toEnd])
+                ->selectRaw('DATE(e.createdtime) as d, COUNT(*) as cnt')
+                ->groupByRaw('DATE(e.createdtime)')
+                ->orderBy('d')
+                ->pluck('cnt', 'd')
+                ->toArray();
+
+            $dailyClosedRows = DB::connection('vtiger')
+                ->table('vtiger_troubletickets as t')
+                ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
+                ->where('e.deleted', 0)
+                ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
+                ->whereIn('t.status', ['Closed', 'Resolved'])
+                ->whereBetween('e.modifiedtime', [$fromStart, $toEnd])
+                ->selectRaw('DATE(e.modifiedtime) as d, COUNT(*) as cnt')
+                ->groupByRaw('DATE(e.modifiedtime)')
+                ->orderBy('d')
+                ->pluck('cnt', 'd')
+                ->toArray();
+
+            $daily = [];
+            $cursor = \Carbon\Carbon::parse($fromDate);
+            $end = \Carbon\Carbon::parse($toDate);
+            while ($cursor->lte($end)) {
+                $key = $cursor->format('Y-m-d');
+                $daily[] = [
+                    'date' => $key,
+                    'reported' => (int) ($dailyReportedRows[$key] ?? 0),
+                    'closed' => (int) ($dailyClosedRows[$key] ?? 0),
+                ];
+                $cursor->addDay();
+            }
+
+            $mostReported = DB::connection('vtiger')
+                ->table('vtiger_troubletickets as t')
+                ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
+                ->where('e.deleted', 0)
+                ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
+                ->whereBetween('e.createdtime', [$fromStart, $toEnd])
+                ->selectRaw('COALESCE(NULLIF(TRIM(t.category), ""), "General") as issue, COUNT(*) as cnt')
+                ->groupByRaw('COALESCE(NULLIF(TRIM(t.category), ""), "General")')
+                ->orderByDesc('cnt')
+                ->limit(10)
+                ->get()
+                ->map(fn ($r) => ['issue' => (string) $r->issue, 'count' => (int) $r->cnt])
+                ->toArray();
+
+            $mostTracked = DB::connection('vtiger')
+                ->table('vtiger_troubletickets as t')
+                ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
+                ->where('e.deleted', 0)
+                ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
+                ->whereBetween('e.createdtime', [$fromStart, $toEnd])
+                ->whereNotIn('t.status', ['Closed', 'Resolved', $inactiveStatus])
+                ->selectRaw('COALESCE(NULLIF(TRIM(t.category), ""), "General") as issue, COUNT(*) as cnt')
+                ->groupByRaw('COALESCE(NULLIF(TRIM(t.category), ""), "General")')
+                ->orderByDesc('cnt')
+                ->limit(10)
+                ->get()
+                ->map(fn ($r) => ['issue' => (string) $r->issue, 'count' => (int) $r->cnt])
+                ->toArray();
+
+            $ownerRows = DB::connection('vtiger')
+                ->table('vtiger_troubletickets as t')
+                ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
+                ->leftJoin('vtiger_users as u', 'e.smownerid', '=', 'u.id')
+                ->where('e.deleted', 0)
+                ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
+                ->whereBetween('e.createdtime', [$fromStart, $toEnd])
+                ->selectRaw('
+                    e.smownerid,
+                    COALESCE(NULLIF(TRIM(CONCAT(COALESCE(u.first_name, ""), " ", COALESCE(u.last_name, ""))), ""), u.user_name, "Unassigned") as owner_name,
+                    COUNT(*) as assigned_count,
+                    SUM(CASE WHEN t.status IN ("Closed","Resolved") THEN 1 ELSE 0 END) as closed_count,
+                    SUM(CASE WHEN t.status NOT IN ("Closed","Resolved", ?) THEN 1 ELSE 0 END) as active_count,
+                    AVG(CASE WHEN t.status IN ("Closed","Resolved") AND e.modifiedtime IS NOT NULL THEN TIMESTAMPDIFF(HOUR, e.createdtime, e.modifiedtime) ELSE NULL END) as avg_close_hours
+                ', [$inactiveStatus])
+                ->groupBy('e.smownerid', 'u.first_name', 'u.last_name', 'u.user_name')
+                ->orderByDesc('closed_count')
+                ->orderByDesc('assigned_count')
+                ->get();
+
+            $ownerCategoriesRows = DB::connection('vtiger')
+                ->table('vtiger_troubletickets as t')
+                ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
+                ->where('e.deleted', 0)
+                ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
+                ->whereBetween('e.createdtime', [$fromStart, $toEnd])
+                ->selectRaw('
+                    e.smownerid,
+                    COALESCE(NULLIF(TRIM(t.category), ""), "General") as issue,
+                    COUNT(*) as cnt
+                ')
+                ->groupBy('e.smownerid')
+                ->groupByRaw('COALESCE(NULLIF(TRIM(t.category), ""), "General")')
+                ->orderByDesc('cnt')
+                ->get();
+
+            $ownerTopCategory = [];
+            foreach ($ownerCategoriesRows as $row) {
+                $ownerId = (int) ($row->smownerid ?? 0);
+                if (! isset($ownerTopCategory[$ownerId])) {
+                    $ownerTopCategory[$ownerId] = [
+                        'issue' => (string) ($row->issue ?? 'General'),
+                        'count' => (int) ($row->cnt ?? 0),
+                    ];
+                }
+            }
+
+            $ownerPerformance = $ownerRows->map(function ($row) use ($ownerTopCategory) {
+                $ownerId = (int) ($row->smownerid ?? 0);
+                $assigned = (int) ($row->assigned_count ?? 0);
+                $closed = (int) ($row->closed_count ?? 0);
+                $closeRate = $assigned > 0 ? round(($closed / $assigned) * 100, 1) : 0.0;
+                $avgCloseHours = $row->avg_close_hours !== null ? round((float) $row->avg_close_hours, 1) : null;
+
+                return [
+                    'owner_id' => $ownerId,
+                    'owner_name' => (string) ($row->owner_name ?? 'Unassigned'),
+                    'assigned_count' => $assigned,
+                    'closed_count' => $closed,
+                    'active_count' => (int) ($row->active_count ?? 0),
+                    'close_rate' => $closeRate,
+                    'avg_close_hours' => $avgCloseHours,
+                    'top_issue' => $ownerTopCategory[$ownerId]['issue'] ?? 'General',
+                    'top_issue_count' => $ownerTopCategory[$ownerId]['count'] ?? 0,
+                ];
+            })->take(10)->values()->toArray();
+
+            $topPerformer = $ownerPerformance[0] ?? null;
+            $totalClosed = (int) collect($daily)->sum('closed');
+            $closureRate = $totalReported > 0 ? round(($totalClosed / $totalReported) * 100, 1) : 0.0;
+            $backlogRatio = $totalReported > 0 ? round(($totalTracked / $totalReported) * 100, 1) : 0.0;
+
+            $decisionSummary = [
+                'period' => $fromDate.' to '.$toDate,
+                'total_reported' => $totalReported,
+                'total_closed' => $totalClosed,
+                'total_tracked' => $totalTracked,
+                'closure_rate' => $closureRate,
+                'backlog_ratio' => $backlogRatio,
+                'health_status' => ($closureRate >= 75.0 && $backlogRatio <= 40.0) ? 'Healthy' : (($closureRate >= 55.0 && $backlogRatio <= 65.0) ? 'Watchlist' : 'Action Needed'),
+            ];
+
+            $improvementsDone = [];
+            if ($totalClosed > 0) {
+                $improvementsDone[] = 'Closed '.$totalClosed.' issues during the period, reducing customer wait time and improving service reliability.';
+            }
+            if ($closureRate >= 60.0) {
+                $improvementsDone[] = 'Closure efficiency reached '.$closureRate.'%, showing stronger case handling throughput.';
+            }
+            if ($topPerformer && (int) ($topPerformer['closed_count'] ?? 0) > 0) {
+                $improvementsDone[] = ($topPerformer['owner_name'] ?? 'Top assignee').' led execution with '.(int) ($topPerformer['closed_count'] ?? 0).' closures, helping stabilize operations.';
+            }
+
+            if (count($daily) >= 6) {
+                $mid = (int) floor(count($daily) / 2);
+                $firstHalf = array_slice($daily, 0, $mid);
+                $secondHalf = array_slice($daily, $mid);
+                $firstClosed = (int) collect($firstHalf)->sum('closed');
+                $secondClosed = (int) collect($secondHalf)->sum('closed');
+                if ($firstClosed > 0 && $secondClosed > $firstClosed) {
+                    $growth = round((($secondClosed - $firstClosed) / $firstClosed) * 100, 1);
+                    $improvementsDone[] = 'Closure momentum improved by '.$growth.'% in the second half of the period.';
+                }
+            }
+
+            $recommendations = [];
+            if (($totalTracked > max(10, (int) round($totalReported * 0.5)))) {
+                $recommendations[] = 'High open workload: re-balance active tickets across the team and enforce daily closure targets.';
+            }
+            if (! empty($mostTracked) && ! empty($mostReported) && ($mostTracked[0]['issue'] ?? '') === ($mostReported[0]['issue'] ?? '')) {
+                $recommendations[] = 'Top reported and tracked issue is the same category: create a root-cause fix plan and FAQ for this category.';
+            }
+            if ($topPerformer && (float) ($topPerformer['close_rate'] ?? 0) >= 70) {
+                $recommendations[] = 'Replicate top performer workflow through peer coaching and shared playbooks.';
+            }
+            if (empty($recommendations)) {
+                $recommendations[] = 'Maintain current trend and continue weekly review of closure rate, backlog, and top issue categories.';
+            }
+
+            return [
+                'dateFrom' => $fromDate,
+                'dateTo' => $toDate,
+                'totalReported' => $totalReported,
+                'totalTracked' => $totalTracked,
+                'daily' => $daily,
+                'mostReported' => $mostReported,
+                'mostTracked' => $mostTracked,
+                'ownerPerformance' => $ownerPerformance,
+                'topPerformer' => $topPerformer,
+                'decisionSummary' => $decisionSummary,
+                'improvementsDone' => $improvementsDone,
+                'recommendations' => $recommendations,
+            ];
+        } catch (\Throwable $e) {
+            Log::warning('CrmService::getManagementUsageReport: ' . $e->getMessage());
+            return [
+                'dateFrom' => $dateFrom,
+                'dateTo' => $dateTo,
+                'totalReported' => 0,
+                'totalTracked' => 0,
+                'daily' => [],
+                'mostReported' => [],
+                'mostTracked' => [],
+                'ownerPerformance' => [],
+                'topPerformer' => null,
+                'decisionSummary' => [
+                    'period' => $dateFrom.' to '.$dateTo,
+                    'total_reported' => 0,
+                    'total_closed' => 0,
+                    'total_tracked' => 0,
+                    'closure_rate' => 0.0,
+                    'backlog_ratio' => 0.0,
+                    'health_status' => 'No Data',
+                ],
+                'improvementsDone' => [],
+                'recommendations' => [],
+            ];
+        }
     }
 
     /**

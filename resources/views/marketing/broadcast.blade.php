@@ -219,7 +219,7 @@
                         <tr>
                             <th style="width:40px"></th>
                             <th>Name</th>
-                            <th>Agent</th>
+                            <th>Intermediary (Agent)</th>
                             <th>Email</th>
                             <th>Phone</th>
                             <th class="text-nowrap">Last mass email</th>
@@ -234,8 +234,18 @@
                                 $ph = trim($c->mobile ?? $c->phone ?? '');
                                 $hasEm = $em !== '' && filter_var($em, FILTER_VALIDATE_EMAIL);
                                 $hasPh = $ph !== '';
-                                $ownerLabel = trim(($c->owner_first ?? '') . ' ' . ($c->owner_last ?? ''));
-                                $ownerLabel = $ownerLabel !== '' ? $ownerLabel : (trim((string) ($c->owner_username ?? '')) ?: '—');
+                                $interm = trim((string) ($c->intermediary ?? ''));
+                                if ($interm !== '') {
+                                    $agentLabel = \Illuminate\Support\Str::limit($interm, 25);
+                                    $prep = trim((string) ($c->pol_prepared_by ?? ''));
+                                    $agentTitle = $prep !== ''
+                                        ? 'Intermediary: '.$interm.' · Prepared by: '.$prep
+                                        : $interm;
+                                } else {
+                                    $own = trim(($c->owner_first ?? '').' '.($c->owner_last ?? ''));
+                                    $agentLabel = $own !== '' ? $own : (trim((string) ($c->owner_username ?? '')) ?: '—');
+                                    $agentTitle = $agentLabel !== '—' ? 'CRM assigned to' : '';
+                                }
                                 $lb = $lastBroadcastByContact[$cid] ?? ['email' => null, 'sms' => null];
                             @endphp
                             <tr class="bc-row" data-has-email="{{ $hasEm ? '1' : '0' }}" data-has-phone="{{ $hasPh ? '1' : '0' }}">
@@ -244,12 +254,12 @@
                                         data-has-email="{{ $hasEm ? '1' : '0' }}" data-has-phone="{{ $hasPh ? '1' : '0' }}">
                                 </td>
                                 <td>{{ trim(($c->firstname ?? '') . ' ' . ($c->lastname ?? '')) }}</td>
-                                <td class="small">{{ $ownerLabel }}</td>
+                                <td class="small" @if ($agentTitle !== '') title="{{ $agentTitle }}" @endif>{{ $agentLabel }}</td>
                                 <td><span class="{{ $hasEm ? '' : 'text-muted' }}">{{ $em !== '' ? $em : '—' }}</span></td>
                                 <td><span class="{{ $hasPh ? '' : 'text-muted' }}">{{ $ph !== '' ? $ph : '—' }}</span></td>
                                 <td class="small">
                                     @if (!empty($broadcastHistoryReady) && !empty($lb['email']))
-                                        <span class="text-success" title="{{ $lb['email'] }}">{{ $lb['email']->diffForHumans() }}</span>
+                                        <span class="text-success" title="{{ $lb['email']->format('Y-m-d H:i') }}">{{ $lb['email']->diffForHumans() }}</span>
                                     @elseif (!empty($broadcastHistoryReady))
                                         <span class="text-muted">—</span>
                                     @else
