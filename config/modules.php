@@ -33,6 +33,7 @@ return [
         'tools.pdf-protect' => null,
         'tools.mail-manager' => null,
         'calendar' => null,
+        'work-tickets' => null,
         'reports' => 'Reports',
         'settings' => null,
         'settings.crm' => null,
@@ -65,6 +66,7 @@ return [
             ],
             ['key' => 'support', 'label' => 'Support', 'icon' => 'bi-headset', 'route' => 'support'],
             ['key' => 'tickets', 'label' => 'Tickets', 'icon' => 'bi-ticket-perforated-fill', 'route' => 'tickets.index'],
+            ['key' => 'work-tickets', 'label' => 'Work Tickets', 'icon' => 'bi-kanban-fill', 'route' => 'work-tickets.index'],
             ['key' => 'compliance.complaints', 'label' => 'Complaint Register', 'icon' => 'bi-clipboard2-data', 'route' => 'compliance.complaints.index'],
         ],
         'tools' => [

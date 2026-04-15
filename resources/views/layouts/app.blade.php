@@ -361,6 +361,14 @@
                     @endif
                 </div>
                 @endif
+                @if($can('work-tickets'))
+                <div class="app-nav-group">
+                    <div class="app-nav-label">Work Management</div>
+                    <a href="{{ route('work-tickets.index') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('work-tickets.*') ? 'active' : '' }}">
+                        <i class="bi bi-kanban-fill"></i><span>Work Tickets</span>
+                    </a>
+                </div>
+                @endif
                 <div class="app-nav-group">
                     <div class="app-nav-label">Tools</div>
                     @if($can('calendar'))
@@ -434,6 +442,9 @@
                             @endif
                             @if($can('tickets'))
                             <li><a class="dropdown-item py-2" href="{{ route('tickets.create') }}"><i class="bi bi-ticket-perforated me-2"></i>Ticket</a></li>
+                            @endif
+                            @if($can('work-tickets'))
+                            <li><a class="dropdown-item py-2" href="{{ route('work-tickets.create') }}"><i class="bi bi-kanban me-2"></i>Work Ticket</a></li>
                             @endif
                             @if($can('calendar'))
                             <li><a class="dropdown-item py-2" href="{{ route('activities.create', ['type' => 'Event']) }}"><i class="bi bi-calendar-event me-2"></i>Event</a></li>

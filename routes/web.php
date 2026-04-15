@@ -74,6 +74,11 @@ Route::get('/activities', [\App\Http\Controllers\ActivityController::class, 'ind
 Route::get('/activities/create', [\App\Http\Controllers\ActivityController::class, 'create'])->name('activities.create');
 Route::post('/activities', [\App\Http\Controllers\ActivityController::class, 'store'])->name('activities.store');
 Route::get('/api/contacts/{contact}/tickets', [\App\Http\Controllers\ActivityController::class, 'ticketsForContact'])->name('api.contacts.tickets');
+Route::get('/work-tickets', [\App\Http\Controllers\WorkTicketController::class, 'index'])->name('work-tickets.index');
+Route::get('/work-tickets/create', [\App\Http\Controllers\WorkTicketController::class, 'create'])->name('work-tickets.create');
+Route::post('/work-tickets', [\App\Http\Controllers\WorkTicketController::class, 'store'])->name('work-tickets.store');
+Route::get('/work-tickets/{workTicket}', [\App\Http\Controllers\WorkTicketController::class, 'show'])->name('work-tickets.show');
+Route::post('/work-tickets/{workTicket}/updates', [\App\Http\Controllers\WorkTicketController::class, 'storeUpdate'])->name('work-tickets.updates.store');
 
 Route::get('/marketing', fn () => view('marketing'))->name('marketing');
 Route::get('/marketing/social-media', [\App\Http\Controllers\SocialMediaController::class, 'index'])->name('marketing.social-media');
@@ -148,6 +153,8 @@ Route::get('/reports', [\App\Http\Controllers\ReportsController::class, 'index']
 
 Route::middleware('admin')->group(function () {
 Route::get('/settings', fn () => redirect()->route('settings.crm'))->name('settings');
+Route::get('/work-tickets/reporting-lines', [\App\Http\Controllers\WorkTicketController::class, 'reportingLines'])->name('work-tickets.reporting-lines');
+Route::post('/work-tickets/reporting-lines', [\App\Http\Controllers\WorkTicketController::class, 'saveReportingLines'])->name('work-tickets.reporting-lines.save');
 Route::get('/settings/crm', [\App\Http\Controllers\SettingsController::class, 'crm'])->name('settings.crm');
 Route::post('/settings/users/{user}/send-reset-link', [\App\Http\Controllers\UserManagementController::class, 'sendResetLink'])->name('settings.users.send-reset-link');
 Route::get('/settings/users/create', [\App\Http\Controllers\UserManagementController::class, 'create'])->name('settings.users.create');

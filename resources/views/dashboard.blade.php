@@ -101,6 +101,9 @@
             @if($pbxCanCall ?? false)
             <a href="{{ route('tools.pbx-manager') }}" class="dashboard-action-btn"><i class="bi bi-telephone"></i> Call</a>
             @endif
+            @if(($can ?? null) && $can('work-tickets'))
+            <a href="{{ route('work-tickets.index') }}" class="dashboard-action-btn dashboard-action-btn-primary"><i class="bi bi-kanban"></i> Work Tickets</a>
+            @endif
             <a href="{{ route('tickets.create') }}" class="dashboard-action-btn"><i class="bi bi-ticket-perforated"></i> New Ticket</a>
             <a href="{{ route('leads.create') }}" class="dashboard-action-btn"><i class="bi bi-plus-circle"></i> Add Lead</a>
             <a href="{{ route('contacts.index') }}" class="dashboard-action-btn"><i class="bi bi-person"></i> Contacts</a>
