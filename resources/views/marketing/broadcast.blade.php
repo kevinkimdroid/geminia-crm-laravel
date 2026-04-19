@@ -46,7 +46,7 @@
     <div class="row g-2 align-items-end">
         <div class="col-md-4">
             <label class="form-label small text-muted">Search contacts</label>
-            <input type="text" name="search" class="form-control" value="{{ $search ?? '' }}" placeholder="Name, email, or phone">
+            <input type="text" name="search" class="form-control" value="{{ $search ?? '' }}" placeholder="Name, policy number, email, or phone">
         </div>
         <div class="col-md-4">
             <label class="form-label small text-muted">Client segment / CRM source</label>
@@ -101,7 +101,17 @@
     <p class="small text-muted mb-3">Optional: set <code>BROADCAST_CONTACT_TYPE_CF</code> in <code>.env</code> (e.g. your Vtiger Contacts custom field <code>cf_912</code>) to filter by client type picklist values.</p>
 @endif
 
-<p class="text-muted small">Showing up to <strong>{{ $customers->count() }}</strong> contacts (max {{ $maxRecipients ?? 500 }} per send). Select below and/or upload an Excel/CSV list.</p>
+<p class="text-muted small">
+    Showing up to <strong>{{ $customers->count() }}</strong> unique contacts (max {{ $maxRecipients ?? 500 }} per send). Select below and/or upload an Excel/CSV list.
+    @if (!empty($duplicatesCollapsed))
+        <span class="d-block mt-1">Merged <strong>{{ (int) $duplicatesCollapsed }}</strong> duplicate row(s) that had the same name and matching email/phone.</span>
+    @endif
+</p>
+
+<div class="alert alert-info py-2 px-3 small">
+    <strong>Bulk send guide:</strong> For large campaigns (e.g. 700 clients), use <strong>Select all (with email)</strong> or upload a file, load a template, attach your circular, and send.
+    If you exceed the current max ({{ $maxRecipients ?? 500 }}), split into batches and keep <strong>Skip duplicate sends</strong> enabled.
+</div>
 
 <form method="POST" action="{{ route('marketing.broadcast.send') }}" id="broadcastForm" enctype="multipart/form-data">
     @csrf
@@ -152,16 +162,27 @@
     <div class="tab-content">
         <div class="tab-pane fade show active" id="pane-email" role="tabpanel">
             <div class="card p-4 mb-4">
+                <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+                    <span class="small text-muted">Quick templates:</span>
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="loadPensionTemplate">Load 2025 Pension template</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="clearEmailTemplate">Clear</button>
+                </div>
                 <div class="row g-3">
                     <div class="col-12">
                         <label class="form-label">Subject <span class="text-danger">*</span></label>
-                        <input type="text" name="subject" class="form-control" value="{{ old('subject') }}" maxlength="200" placeholder="e.g. Update from Geminia Life">
+                        <input type="text" name="subject" id="broadcastSubject" class="form-control" value="{{ old('subject') }}" maxlength="200" placeholder="e.g. Update from Geminia Life">
                         @error('subject')<div class="invalid-feedback d-block">{{ $message }}</div>@enderror
                     </div>
                     <div class="col-12">
                         <label class="form-label">Message <span class="text-danger">*</span></label>
-                        <textarea name="body" class="form-control" rows="8" placeholder="Plain text only. Placeholders: @{{first_name}}, @{{last_name}}, @{{name}}, @{{email}}">{{ old('body') }}</textarea>
+                        <textarea name="body" id="broadcastBody" class="form-control" rows="8" placeholder="Plain text only. Placeholders: @{{first_name}}, @{{last_name}}, @{{name}}, @{{email}}">{{ old('body') }}</textarea>
                         @error('body')<div class="invalid-feedback d-block">{{ $message }}</div>@enderror
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Attachment (optional)</label>
+                        <input type="file" name="email_attachment" id="emailAttachmentInput" class="form-control" accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.ppt,.pptx">
+                        <small class="text-muted d-block mt-1">Attached to every email recipient. Max 10MB. Allowed: PDF, Word, Excel, CSV, TXT, PowerPoint.</small>
+                        @error('email_attachment')<div class="invalid-feedback d-block">{{ $message }}</div>@enderror
                     </div>
                 </div>
             </div>
@@ -178,11 +199,19 @@
 
     <div class="card mb-4">
         <div class="card-body">
-            <label class="form-label fw-semibold">Upload recipient list (optional)</label>
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                <label class="form-label fw-semibold mb-0">Upload recipient list (optional)</label>
+                <a href="{{ route('marketing.broadcast.template') }}" class="btn btn-sm btn-outline-primary">
+                    <i class="bi bi-download me-1"></i> Download Excel template
+                </a>
+            </div>
             <input type="file" name="recipients_file" class="form-control" accept=".xlsx,.xls,.csv,.txt">
             <small class="text-muted d-block mt-2">
                 Excel or CSV: first row = headers. Recognised columns: <strong>Contact ID</strong> (or contactid), <strong>Email</strong>, <strong>Policy</strong> / policy number, <strong>Mobile</strong> or <strong>Phone</strong>.
                 Up to {{ $excelMaxRows ?? 5000 }} rows. Merged with any rows you tick in the table.
+            </small>
+            <small class="text-muted d-block mt-1">
+                Tip: if Contact ID is unknown, leave it blank and provide Email/Policy/Mobile. Invalid Contact IDs are skipped automatically.
             </small>
             @error('recipients_file')<div class="invalid-feedback d-block">{{ $message }}</div>@enderror
         </div>
@@ -219,6 +248,9 @@
                         <tr>
                             <th style="width:40px"></th>
                             <th>Name</th>
+                            <th>Policy</th>
+                            <th>Product</th>
+                            <th>System</th>
                             <th>Intermediary (Agent)</th>
                             <th>Email</th>
                             <th>Phone</th>
@@ -230,7 +262,46 @@
                         @forelse ($customers ?? [] as $c)
                             @php
                                 $cid = (int) $c->contactid;
-                                $em = trim($c->email ?? '');
+                                $fullName = trim(($c->firstname ?? '') . ' ' . ($c->lastname ?? ''));
+                                if ($fullName === '') {
+                                    $fullName = 'Contact #' . $cid;
+                                }
+                                $policyNo = trim((string) ($c->policy_number ?? $c->policy_no ?? ''));
+                                $product = trim((string) ($c->product ?? ''));
+                                $lifeSystem = trim((string) ($c->life_system ?? ''));
+                                $lifeSystemLabel = match ($lifeSystem) {
+                                    'group' => 'Group Life',
+                                    'individual' => 'Individual Life',
+                                    'mortgage' => 'Mortgage',
+                                    'group_pension' => 'Group Pension',
+                                    default => '—',
+                                };
+                                $emCandidates = [
+                                    trim((string) ($c->email ?? '')),
+                                    trim((string) ($c->otheremail ?? '')),
+                                    trim((string) ($c->secondaryemail ?? '')),
+                                    trim((string) ($c->email_adr ?? '')),
+                                    trim((string) ($c->client_email ?? '')),
+                                    trim((string) ($c->mem_email ?? '')),
+                                ];
+                                $em = '';
+                                foreach ($emCandidates as $cand) {
+                                    if ($cand === '') {
+                                        continue;
+                                    }
+                                    if (filter_var($cand, FILTER_VALIDATE_EMAIL)) {
+                                        $em = $cand;
+                                        break;
+                                    }
+                                    $parts = preg_split('/[;,\\s]+/', $cand, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+                                    foreach ($parts as $part) {
+                                        $candidate = trim((string) $part);
+                                        if ($candidate !== '' && filter_var($candidate, FILTER_VALIDATE_EMAIL)) {
+                                            $em = $candidate;
+                                            break 2;
+                                        }
+                                    }
+                                }
                                 $ph = trim($c->mobile ?? $c->phone ?? '');
                                 $hasEm = $em !== '' && filter_var($em, FILTER_VALIDATE_EMAIL);
                                 $hasPh = $ph !== '';
@@ -241,10 +312,14 @@
                                     $agentTitle = $prep !== ''
                                         ? 'Intermediary: '.$interm.' · Prepared by: '.$prep
                                         : $interm;
+                                } elseif (trim((string) ($c->pol_prepared_by ?? '')) !== '') {
+                                    $prepOnly = trim((string) ($c->pol_prepared_by ?? ''));
+                                    $agentLabel = \Illuminate\Support\Str::limit($prepOnly, 25);
+                                    $agentTitle = 'Prepared by: ' . $prepOnly;
                                 } else {
-                                    $own = trim(($c->owner_first ?? '').' '.($c->owner_last ?? ''));
-                                    $agentLabel = $own !== '' ? $own : (trim((string) ($c->owner_username ?? '')) ?: '—');
-                                    $agentTitle = $agentLabel !== '—' ? 'CRM assigned to' : '';
+                                    // Do not fallback to CRM owner in this column; it must represent ERP intermediary.
+                                    $agentLabel = '—';
+                                    $agentTitle = '';
                                 }
                                 $lb = $lastBroadcastByContact[$cid] ?? ['email' => null, 'sms' => null];
                             @endphp
@@ -253,7 +328,15 @@
                                     <input type="checkbox" class="form-check-input bc-check" name="contact_ids[]" value="{{ $c->contactid }}"
                                         data-has-email="{{ $hasEm ? '1' : '0' }}" data-has-phone="{{ $hasPh ? '1' : '0' }}">
                                 </td>
-                                <td>{{ trim(($c->firstname ?? '') . ' ' . ($c->lastname ?? '')) }}</td>
+                                <td>
+                                    {{ $fullName }}
+                                    @if ((int) ($c->duplicate_count ?? 0) > 0)
+                                        <span class="badge bg-light text-dark border ms-1" title="Duplicate rows merged in this list view">+{{ (int) $c->duplicate_count }}</span>
+                                    @endif
+                                </td>
+                                <td class="small">{{ $policyNo !== '' ? $policyNo : '—' }}</td>
+                                <td class="small">{{ $product !== '' ? $product : '—' }}</td>
+                                <td class="small">{{ $lifeSystemLabel }}</td>
                                 <td class="small" @if ($agentTitle !== '') title="{{ $agentTitle }}" @endif>{{ $agentLabel }}</td>
                                 <td><span class="{{ $hasEm ? '' : 'text-muted' }}">{{ $em !== '' ? $em : '—' }}</span></td>
                                 <td><span class="{{ $hasPh ? '' : 'text-muted' }}">{{ $ph !== '' ? $ph : '—' }}</span></td>
@@ -277,7 +360,7 @@
                                 </td>
                             </tr>
                         @empty
-                            <tr><td colspan="7" class="text-center text-muted py-4">
+                            <tr><td colspan="10" class="text-center text-muted py-4">
                                 @if (!empty($broadcastLifeSegmentNeedsErp))
                                     Enable an ERP-backed Clients source to use life-group filters, or choose &quot;All contacts&quot;.
                                 @else
@@ -304,9 +387,13 @@ document.addEventListener('DOMContentLoaded', function() {
     var tabSms = document.getElementById('tab-sms');
     var checks = document.querySelectorAll('.bc-check');
     var countEl = document.getElementById('bcCount');
+    var attachmentInput = document.getElementById('emailAttachmentInput');
+    var subjectInput = document.getElementById('broadcastSubject');
+    var bodyInput = document.getElementById('broadcastBody');
 
     function setChannel(ch) {
         if (channelInput) channelInput.value = ch;
+        if (attachmentInput) attachmentInput.disabled = ch === 'sms';
     }
     tabEmail && tabEmail.addEventListener('shown.bs.tab', function() { setChannel('email'); });
     tabSms && tabSms.addEventListener('shown.bs.tab', function() { setChannel('sms'); });
@@ -321,6 +408,7 @@ document.addEventListener('DOMContentLoaded', function() {
     tabSms && tabSms.addEventListener('shown.bs.tab', function() { syncSkipLabel('sms'); });
     tabEmail && tabEmail.addEventListener('click', function() { syncSkipLabel('email'); });
     tabSms && tabSms.addEventListener('click', function() { syncSkipLabel('sms'); });
+    setChannel(channelInput && channelInput.value === 'sms' ? 'sms' : 'email');
     syncSkipLabel(channelInput && channelInput.value === 'sms' ? 'sms' : 'email');
 
     function updateCount() {
@@ -347,6 +435,27 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     checks.forEach(function(cb) { cb.addEventListener('change', updateCount); });
     updateCount();
+
+    document.getElementById('loadPensionTemplate')?.addEventListener('click', function() {
+        if (subjectInput) {
+            subjectInput.value = '2025 Pension Declared Rate of Return';
+        }
+        if (bodyInput) {
+            bodyInput.value =
+                'Dear @{{first_name}},\n\n' +
+                'We are pleased to inform you that your pension contributions earned a return of 12.25% in 2025, up from 11.5% in 2024.\n\n' +
+                'Please find the official communication on the declared rate of return attached for your records.\n\n' +
+                'A detailed breakdown, including how this rate has been applied and its impact on your accumulated funds, will be provided in your Member Statement in due course.\n\n' +
+                'For enquiries, please call 0709 551 150 or email life@geminialife.co.ke.\n\n' +
+                'Thank you.\n' +
+                'GEMINIA LIFE INSURANCE CO. LTD';
+            bodyInput.focus();
+        }
+    });
+    document.getElementById('clearEmailTemplate')?.addEventListener('click', function() {
+        if (subjectInput) subjectInput.value = '';
+        if (bodyInput) bodyInput.value = '';
+    });
 
     document.getElementById('broadcastForm')?.addEventListener('submit', function(e) {
         var n = document.querySelectorAll('.bc-check:checked').length;

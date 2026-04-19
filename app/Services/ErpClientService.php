@@ -63,6 +63,59 @@ class ErpClientService
         return 'individual';
     }
 
+    protected function extractFirstValidEmail(?string $raw): ?string
+    {
+        $raw = trim((string) ($raw ?? ''));
+        if ($raw === '') {
+            return null;
+        }
+        if (filter_var($raw, FILTER_VALIDATE_EMAIL)) {
+            return $raw;
+        }
+        $parts = preg_split('/[;,\\s]+/', $raw, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        foreach ($parts as $part) {
+            $candidate = trim((string) $part);
+            if ($candidate !== '' && filter_var($candidate, FILTER_VALIDATE_EMAIL)) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string,mixed>  $row
+     */
+    protected function extractEmailFromAnyRow(array $row): ?string
+    {
+        $preferredKeys = [
+            'email_adr', 'emailAdr', 'EMAIL_ADR',
+            'client_email', 'CLIENT_EMAIL',
+            'mem_email', 'MEM_EMAIL',
+            'email', 'EMAIL',
+        ];
+        foreach ($preferredKeys as $key) {
+            if (! array_key_exists($key, $row)) {
+                continue;
+            }
+            $email = $this->extractFirstValidEmail(is_scalar($row[$key]) ? (string) $row[$key] : null);
+            if ($email !== null) {
+                return $email;
+            }
+        }
+        foreach ($row as $key => $value) {
+            if (! is_scalar($value) || ! str_contains(strtolower((string) $key), 'email')) {
+                continue;
+            }
+            $email = $this->extractFirstValidEmail((string) $value);
+            if ($email !== null) {
+                return $email;
+            }
+        }
+
+        return null;
+    }
+
     /**
      * Apply life system filter (group/individual) to query.
      *
@@ -378,8 +431,7 @@ class ErpClientService
         }
         $lifeAssured = (string) ($get(['life_assur', 'life_assured', 'lifeAssur', 'lifeAssured', 'client_name', 'clientName', 'member_name', 'mem_surname']) ?? '');
         $name = trim($lifeAssured) ?: trim(($row['pol_prepared_by'] ?? '') . ' ' . ($row['intermediary'] ?? '')) ?: trim(($row['firstname'] ?? '') . ' ' . ($row['lastname'] ?? ''));
-        $emailRaw = $get(['email', 'email_adr', 'emailAdr', 'client_email', 'mem_email']);
-        $email = personal_email_only($emailRaw);
+        $email = $this->extractEmailFromAnyRow($row);
         $mobile = $get(['mobile', 'phone', 'phone_no', 'phoneNo', 'client_contact', 'mem_teleph']);
 
         return [
@@ -557,10 +609,18 @@ class ErpClientService
                 if ($term === '') {
                     return null;
                 }
+                $termUpper = strtoupper($term);
+                $preferredSystemOrder = str_starts_with($termUpper, 'IL-')
+                    ? ['individual', 'group', 'mortgage', 'group_pension', null]
+                    : (str_starts_with($termUpper, 'GL-')
+                        ? ['group', 'individual', 'mortgage', 'group_pension', null]
+                        : ['group', 'individual', 'mortgage', 'group_pension', null]);
                 $systemsToTry = array_values(array_filter(
-                    ['group', 'individual', 'mortgage', 'group_pension', null],
+                    $preferredSystemOrder,
                     fn ($s) => $s === null || ! in_array($s, ['mortgage', 'group_pension'], true) || $this->optionalClientsSegmentConfigured($s)
                 ));
+                $norm = static fn (?string $v) => strtolower((string) preg_replace('/[^a-z0-9]/i', '', trim((string) $v)));
+                $termNorm = $norm($term);
                 // First try exact policy= match, then try search= (LIKE %term%) if no results
                 foreach (['policy', 'search'] as $matchMode) {
                     foreach ($systemsToTry as $system) {
@@ -577,23 +637,21 @@ class ErpClientService
                         if (! is_array($rows) || empty($rows)) {
                             continue;
                         }
-                        // Find row where policy matches (or first row when we used search=)
+                        // Find row where policy matches.
                         $row = null;
                         foreach ($rows as $r) {
                             $r = is_array($r) ? $r : (array) $r;
                             $mapped = $this->mapClientObjectToSearchResult($r);
                             $returnedPolicy = trim((string) ($mapped['policy_no'] ?? $mapped['policy_number'] ?? $r['ipol_policy_no'] ?? $r['pol_policy_no'] ?? $r['policy_number'] ?? ''));
-                            if ($returnedPolicy === $term || ($returnedPolicy === '' && $system === 'group' && $matchMode === 'policy')) {
+                            $returnedNorm = $norm($returnedPolicy);
+                            if ($returnedNorm !== '' && $returnedNorm === $termNorm) {
                                 $row = $r;
                                 break;
                             }
-                            if ($matchMode === 'search' && (str_contains($returnedPolicy, $term) || str_contains($term, $returnedPolicy))) {
+                            if ($matchMode === 'search' && $returnedNorm !== '' && (str_contains($returnedNorm, $termNorm) || str_contains($termNorm, $returnedNorm))) {
                                 $row = $r;
                                 break;
                             }
-                        }
-                        if (! $row && $matchMode === 'search' && ! empty($rows)) {
-                            $row = is_array($rows[0]) ? $rows[0] : (array) $rows[0];
                         }
                         if (! $row) {
                             continue;
@@ -602,12 +660,12 @@ class ErpClientService
                         $mapped = $this->mapClientObjectToSearchResult($row);
                         // Merge: keep all API keys, overlay mapped values. Build complete client object for details view.
                         $merged = $row;
-                        $merged['life_system'] = $system ?: $this->getLifeSystemFromProduct($merged['product'] ?? null);
                         foreach ($mapped as $k => $v) {
                             if ($v !== null && $v !== '') {
                                 $merged[$k] = $v;
                             }
                         }
+                        $merged['life_system'] = $this->getLifeSystemFromProduct((string) ($merged['product'] ?? $merged['prod_desc'] ?? ''));
                         $merged['policy_no'] = $term;
                         $merged['policy_number'] = $term;
                         if (empty($merged['maturity']) && ! empty($merged['maturity_date'])) {
@@ -624,6 +682,15 @@ class ErpClientService
                         }
                         if (empty($merged['email_adr']) && ! empty($merged['client_email'])) {
                             $merged['email_adr'] = $merged['client_email'];
+                        }
+                        if (empty($merged['email_adr']) && ! empty($merged['mem_email'])) {
+                            $merged['email_adr'] = $merged['mem_email'];
+                        }
+                        if (empty($merged['email_adr']) && ! empty($merged['EMAIL'])) {
+                            $merged['email_adr'] = $merged['EMAIL'];
+                        }
+                        if (empty($merged['email_adr'])) {
+                            $merged['email_adr'] = $this->extractEmailFromAnyRow($merged);
                         }
                         if (empty($merged['phone_no']) && ! empty($merged['client_contact'])) {
                             $merged['phone_no'] = $merged['client_contact'];
@@ -643,9 +710,20 @@ class ErpClientService
                 if (!$row) {
                     return null;
                 }
-                $mapped = $this->mapClientObjectToSearchResult((array) $row);
-                $mapped['life_system'] = $this->getLifeSystemFromProduct($mapped['product'] ?? null);
-                return $mapped;
+                $raw = (array) $row;
+                $mapped = $this->mapClientObjectToSearchResult($raw);
+                $merged = $raw;
+                foreach ($mapped as $k => $v) {
+                    if ($v !== null && $v !== '') {
+                        $merged[$k] = $v;
+                    }
+                }
+                $merged['life_system'] = $this->getLifeSystemFromProduct((string) ($merged['product'] ?? null));
+                if (empty($merged['email_adr'])) {
+                    $merged['email_adr'] = $this->extractEmailFromAnyRow($raw);
+                }
+
+                return $merged;
             }
 
             $source = config('erp.clients_source', 'table');
@@ -653,27 +731,74 @@ class ErpClientService
                 return null;
             }
 
-            $table = config('erp.clients_table', 'CLIENTS');
-            $policyCols = ['POLICY_NO', 'POLICY_NUMBER'];
             $term = trim($policyNumber);
             if ($term === '') {
                 return null;
             }
+            $termUpper = strtoupper($term);
+            $systemHints = str_starts_with($termUpper, 'IL-')
+                ? ['individual', 'group', 'mortgage', 'group_pension', null]
+                : (str_starts_with($termUpper, 'GL-')
+                    ? ['group', 'individual', 'mortgage', 'group_pension', null]
+                    : ['individual', 'group', 'mortgage', 'group_pension', null]);
+            $policyColsCandidate = ['POLICY_NUMBER', 'POLICY_NO', 'IPOL_POLICY_NO', 'POL_POLICY_NO', 'CONTRACT_NO', 'SCHEME_NO'];
 
-            $query = DB::connection('erp')->table($table);
-            $query->where(function ($q) use ($policyCols, $term) {
-                foreach ($policyCols as $col) {
-                    $q->orWhere($col, '=', $term);
+            foreach ($systemHints as $sys) {
+                if (in_array($sys, ['mortgage', 'group_pension'], true) && ! $this->optionalClientsSegmentConfigured($sys)) {
+                    continue;
                 }
-            });
+                $table = $sys === null
+                    ? config('erp.clients_table', 'CLIENTS')
+                    : $this->resolveClientsListTable($sys);
+                $table = trim((string) $table);
+                if ($table === '') {
+                    continue;
+                }
 
-            $row = $query->first();
-            if (!$row) {
-                return null;
+                $columns = Schema::connection('erp')->getColumnListing($table);
+                $columnLookup = array_fill_keys(array_map('strtoupper', $columns), true);
+                $policyCols = array_values(array_filter($policyColsCandidate, fn ($c) => isset($columnLookup[$c])));
+                if ($policyCols === []) {
+                    continue;
+                }
+
+                $query = DB::connection('erp')->table($table);
+                $query->where(function ($q) use ($policyCols, $term) {
+                    foreach ($policyCols as $col) {
+                        $q->orWhere($col, '=', $term);
+                    }
+                });
+
+                $row = $query->first();
+                if (! $row) {
+                    continue;
+                }
+
+                $raw = (array) $row;
+                $mapped = $this->mapClientObjectToSearchResult($raw);
+                $merged = $raw;
+                foreach ($mapped as $k => $v) {
+                    if ($v !== null && $v !== '') {
+                        $merged[$k] = $v;
+                    }
+                }
+                $merged['life_system'] = $sys ?: $this->getLifeSystemFromProduct((string) ($merged['product'] ?? $merged['prod_desc'] ?? ''));
+                $merged['policy_no'] = $term;
+                $merged['policy_number'] = $term;
+                if (empty($merged['email_adr'])) {
+                    $merged['email_adr'] = $merged['EMAIL_ADR'] ?? $merged['client_email'] ?? $merged['CLIENT_EMAIL'] ?? null;
+                }
+                if (empty($merged['email_adr'])) {
+                    $merged['email_adr'] = $this->extractEmailFromAnyRow($merged);
+                }
+                if (empty($merged['phone_no'])) {
+                    $merged['phone_no'] = $merged['PHONE_NO'] ?? $merged['client_contact'] ?? null;
+                }
+
+                return $merged;
             }
-            $mapped = $this->mapRow((array) $row);
-            $mapped['life_system'] = $this->getLifeSystemFromProduct($mapped['product'] ?? ($row->PRODUCT ?? null));
-            return $mapped;
+
+            return null;
         } catch (\Throwable $e) {
             Log::error('ERP policy details failed', ['message' => $e->getMessage()]);
 
@@ -876,12 +1001,12 @@ class ErpClientService
         $seen = [];
         $out = collect();
         foreach ($rows as $row) {
-            $p = strtolower(trim((string) ($row->policy_number ?? $row->policy_no ?? '')));
-            $ls = strtolower(trim((string) ($row->life_system ?? '')));
+            $p = strtolower((string) preg_replace('/[^a-z0-9]/i', '', trim((string) ($row->policy_number ?? $row->policy_no ?? ''))));
             if ($p === '') {
                 continue;
             }
-            $k = $ls.'|'.$p;
+            // Same policy can appear in more than one life-system stream; keep one row.
+            $k = $p;
             if (isset($seen[$k])) {
                 continue;
             }
@@ -1433,7 +1558,28 @@ class ErpClientService
             }
 
             $total = (int) ($body['total'] ?? $body['count'] ?? count($rows) + $offset);
-            $data = collect($rows)->map(fn ($row) => $this->mapHttpRowToClientObject(is_array($row) ? $row : (array) $row, $system));
+            $data = collect($rows)
+                ->map(fn ($row) => $this->mapHttpRowToClientObject(is_array($row) ? $row : (array) $row, $system));
+
+            if (in_array($system, ['group', 'individual'], true)) {
+                $filtered = $data
+                    ->filter(fn ($row) => strtolower(trim((string) ($row->life_system ?? ''))) === $system)
+                    ->values();
+                if ($filtered->isNotEmpty()) {
+                    $data = $filtered;
+                } elseif ($data->isNotEmpty()) {
+                    // Some ERP API responses omit/mislabel life_system even when system query param is applied.
+                    // In that case keep returned rows and tag them with requested system for broadcast/client filters.
+                    $data = $data->map(function ($row) use ($system) {
+                        $row->life_system = $system;
+                        return $row;
+                    })->values();
+                }
+
+                if (! $countOnly) {
+                    $total = min($total, $offset + $data->count());
+                }
+            }
 
             $apiMsg = $body['error'] ?? $body['message'] ?? null;
             if (is_string($apiMsg) && $apiMsg !== '' && $data->isEmpty()) {
@@ -1556,7 +1702,7 @@ class ErpClientService
         $effectiveDate = $get(['effective_date', 'effectiveDate', 'authorization_date']) ?? null;
         $paidMatAmt = $get(['bal', 'BAL', 'paid_mat_amt', 'paidMatAmt', 'production_amt']) ?? null;
         $checkoff = $get(['checkoff']) ?? null;
-        $emailAdr = $get(['email_adr', 'emailAdr', 'client_email', 'mem_email']) ?? null;
+        $emailAdr = $get(['email_adr', 'emailAdr', 'EMAIL_ADR', 'client_email', 'CLIENT_EMAIL', 'mem_email', 'MEM_EMAIL', 'email', 'EMAIL']) ?? null;
         $idNo = $get(['id_no', 'idNo', 'ID_NO']) ?? null;
         $phoneNo = $get(['phone_no', 'phoneNo', 'phone', 'mobile', 'client_contact', 'mem_teleph']) ?? null;
         $status = $get(['mendr_status', 'mendrStatus', 'MENDR_STATUS', 'endr_status', 'endrStatus', 'ENDR_STATUS', 'status', 'STATUS', 'policy_status', 'POLICY_STATUS']) ?? '';
@@ -1564,9 +1710,13 @@ class ErpClientService
         $clientName = trim($lifeAssur) ?: trim("{$polPreparedBy} {$intermediary}");
         $parts = explode(' ', $clientName, 2);
 
-        $lifeSystem = in_array($system, ['group', 'individual', 'mortgage', 'group_pension'], true)
-            ? $system
-            : $this->getLifeSystemFromProduct($product);
+        $apiSystemRaw = strtolower(trim((string) ($get(['life_system', 'lifeSystem', 'system', 'SYSTEM']) ?? '')));
+        $apiSystem = in_array($apiSystemRaw, ['group', 'individual', 'mortgage', 'group_pension'], true) ? $apiSystemRaw : null;
+        $detectedSystem = $this->getLifeSystemFromProduct($product);
+        $lifeSystem = $apiSystem ?? $detectedSystem;
+        if (in_array($system, ['mortgage', 'group_pension'], true) && $apiSystem === null) {
+            $lifeSystem = $system;
+        }
 
         return (object) [
             'contactid' => $policyNo ?: ('erp-' . md5(json_encode($row))),
@@ -1589,7 +1739,7 @@ class ErpClientService
             'paid_mat_amt' => $paidMatAmt,
             'bal' => $get(['bal', 'BAL']) ?? $paidMatAmt,
             'checkoff' => $checkoff,
-            'email_adr' => personal_email_only($emailAdr),
+            'email_adr' => $this->extractFirstValidEmail(is_scalar($emailAdr) ? (string) $emailAdr : null),
             'id_no' => $idNo,
             'phone_no' => $phoneNo,
             'mobile' => $phoneNo,
@@ -1652,7 +1802,7 @@ class ErpClientService
         $policyNo = $row['policy_number'] ?? '';
         $parts = explode(' ', $clientName, 2);
 
-        $email = personal_email_only($row['email_adr'] ?? null) ?? '';
+        $email = $this->extractEmailFromAnyRow($row) ?? '';
 
         return (object) [
             'contactid' => $policyNo ?: ('erp-' . md5(json_encode($row))),
@@ -1698,7 +1848,7 @@ class ErpClientService
         $last = $mapped['last_name'] ?? (explode(' ', $name, 2)[1] ?? '');
         $policyNo = $mapped['policy_no'] ?? $mapped['policy_number'] ?? '';
 
-        $email = personal_email_only($mapped['email'] ?? null) ?? '';
+        $email = $this->extractEmailFromAnyRow(array_merge($row, $mapped)) ?? '';
 
         return (object) [
             'contactid' => $policyNo ?: ('erp-' . md5(json_encode($row))),

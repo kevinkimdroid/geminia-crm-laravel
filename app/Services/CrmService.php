@@ -756,23 +756,44 @@ class CrmService
                     if ($out->count() >= $limit) {
                         break;
                     }
-                    $policy = trim((string) ($row->policy_no ?? $row->policy_number ?? ''));
-                    if ($policy === '') {
-                        continue;
-                    }
-                    $contact = $this->findContactByPolicyNumber($policy);
+                    $contact = $this->resolveBroadcastContactFromErpRow($row);
                     if (! $contact) {
                         continue;
                     }
                     // Same source as Support → Clients: agent column is ERP intermediary, not Vtiger smowner.
                     $contact->intermediary = trim((string) ($row->intermediary ?? ''));
                     $contact->pol_prepared_by = trim((string) ($row->pol_prepared_by ?? ''));
+                    $contact->policy_number = trim((string) ($row->policy_no ?? $row->policy_number ?? ''));
+                    $contact->policy_no = $contact->policy_number;
+                    $contact->product = trim((string) ($row->product ?? ''));
+                    $contact->life_system = trim((string) ($row->life_system ?? $lifeSystem));
+                    $contact->status = trim((string) ($row->status ?? ''));
+                    if (trim((string) ($contact->email ?? '')) === '') {
+                        foreach (['email', 'email_adr', 'emailAdr', 'EMAIL_ADR', 'client_email', 'CLIENT_EMAIL', 'mem_email', 'MEM_EMAIL'] as $k) {
+                            $candidate = trim((string) ($row->{$k} ?? ''));
+                            if ($candidate !== '' && filter_var($candidate, FILTER_VALIDATE_EMAIL)) {
+                                $contact->email = $candidate;
+                                break;
+                            }
+                        }
+                    }
+                    if (trim((string) (($contact->mobile ?? '') ?: ($contact->phone ?? ''))) === '') {
+                        $erpPhone = trim((string) ($row->phone_no ?? $row->mobile ?? $row->phone ?? $row->client_contact ?? ''));
+                        if ($erpPhone !== '') {
+                            $contact->mobile = $erpPhone;
+                            $contact->phone = $erpPhone;
+                        }
+                    }
                     $cid = (int) $contact->contactid;
                     if (isset($seen[$cid])) {
                         continue;
                     }
-                    if ($ownerId !== null && (int) ($contact->smownerid ?? 0) !== $ownerId) {
-                        continue;
+                    if ($ownerId !== null) {
+                        $ownerMatch = (int) ($contact->smownerid ?? 0) === $ownerId;
+                        $canAccess = function_exists('contact_can_access') ? contact_can_access($cid) : $ownerMatch;
+                        if (! $ownerMatch && ! $canAccess) {
+                            continue;
+                        }
                     }
                     if ($excludeContactIds !== null && $excludeContactIds !== []
                         && in_array($cid, $excludeContactIds, true)) {
@@ -794,7 +815,8 @@ class CrmService
             $query = DB::connection('vtiger')
                 ->table('vtiger_contactdetails as c')
                 ->join('vtiger_crmentity as e', 'c.contactid', '=', 'e.crmid')
-                ->leftJoin('vtiger_users as u', 'e.smownerid', '=', 'u.id');
+                ->leftJoin('vtiger_users as u', 'e.smownerid', '=', 'u.id')
+                ->leftJoin('vtiger_contactscf as cf', 'c.contactid', '=', 'cf.contactid');
 
             if ($cfCol !== null && $typeVal !== null) {
                 $query->leftJoin('vtiger_contactscf as cfseg', 'c.contactid', '=', 'cfseg.contactid');
@@ -825,8 +847,14 @@ class CrmService
                 'c.firstname',
                 'c.lastname',
                 'c.email',
+                'c.otheremail',
+                'c.secondaryemail',
                 'c.mobile',
                 'c.phone',
+                'cf.cf_860',
+                'cf.cf_856',
+                'cf.cf_872',
+                'cf.cf_852',
                 'e.smownerid',
                 'e.source',
                 'u.first_name as owner_first',
@@ -838,13 +866,34 @@ class CrmService
                 $term = '%' . trim($search) . '%';
                 $searchLower = strtolower(trim($search));
                 $exactTerm = $searchLower;
+                $policyNeedle = strtolower((string) preg_replace('/[^a-z0-9]/i', '', $searchLower));
                 $words = array_filter(preg_split('/\s+/', $searchLower, -1, PREG_SPLIT_NO_EMPTY));
 
-                $query->where(function ($q) use ($term, $exactTerm) {
+                $query->where(function ($q) use ($term, $exactTerm, $policyNeedle) {
                     $q->where('c.firstname', 'like', $term)
                         ->orWhere('c.lastname', 'like', $term)
                         ->orWhere('c.email', 'like', $term)
-                        ->orWhere('c.mobile', 'like', $term);
+                        ->orWhere('c.otheremail', 'like', $term)
+                        ->orWhere('c.secondaryemail', 'like', $term)
+                        ->orWhere('c.mobile', 'like', $term)
+                        ->orWhere('cf.cf_860', 'like', $term)
+                        ->orWhere('cf.cf_856', 'like', $term)
+                        ->orWhere('cf.cf_872', 'like', $term)
+                        ->orWhere('cf.cf_852', 'like', $term);
+
+                    if ($policyNeedle !== '') {
+                        $needleLike = '%' . $policyNeedle . '%';
+                        $norm860 = "LOWER(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(cf.cf_860,''), '-', ''), ' ', ''), '/', ''), '_', ''))";
+                        $norm856 = "LOWER(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(cf.cf_856,''), '-', ''), ' ', ''), '/', ''), '_', ''))";
+                        $norm872 = "LOWER(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(cf.cf_872,''), '-', ''), ' ', ''), '/', ''), '_', ''))";
+                        $norm852 = "LOWER(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(cf.cf_852,''), '-', ''), ' ', ''), '/', ''), '_', ''))";
+                        $q->orWhereRaw("({$norm860} LIKE ? OR {$norm856} LIKE ? OR {$norm872} LIKE ? OR {$norm852} LIKE ?)", [
+                            $needleLike,
+                            $needleLike,
+                            $needleLike,
+                            $needleLike,
+                        ]);
+                    }
 
                     $conn = \DB::connection('vtiger');
                     $concatFirstLast = $conn->getDriverName() === 'sqlite'
@@ -885,7 +934,76 @@ class CrmService
                 $query->orderByDesc('e.createdtime');
             }
 
-            return $query->offset($offset)->limit($limit)->get();
+            $rows = $query->offset($offset)->limit($limit)->get();
+            if ($rows->isNotEmpty()) {
+                $rows = $rows->map(function ($r) {
+                    $r->policy_number = $this->pickPolicyExcludingPin(
+                        $r->cf_860 ?? null,
+                        $r->cf_856 ?? null,
+                        $r->cf_872 ?? null,
+                        $r->cf_852 ?? null
+                    );
+                    return $r;
+                });
+            }
+            if ($rows->isNotEmpty() || ! $search || trim($search) === '' || ! $this->searchTermLooksLikePolicyToken($search)) {
+                return $rows;
+            }
+
+            $fallbackContacts = collect();
+            $fallbackContactIds = [];
+            $policyContact = $this->findContactByPolicyNumber((string) $search);
+            if ($policyContact) {
+                $cid = (int) ($policyContact->contactid ?? 0);
+                if ($cid > 0) {
+                    if ($excludeContactIds === null || ! in_array($cid, $excludeContactIds, true)) {
+                        $ownerMatch = $ownerId === null || (int) ($policyContact->smownerid ?? 0) === $ownerId;
+                        $canAccess = function_exists('contact_can_access') ? contact_can_access($cid) : $ownerMatch;
+                        if ($ownerMatch || $canAccess) {
+                            $fallbackContacts->push($policyContact);
+                            $fallbackContactIds[$cid] = true;
+                        }
+                    }
+                }
+            }
+
+            $erp = app(ErpClientService::class);
+            if ($fallbackContacts->count() < $limit && $erp->isClientsViewBackedByErp()) {
+                try {
+                    $probe = $erp->getClientsForListView(min(max($limit * 2, 30), 120), 0, (string) $search, null);
+                    foreach ($probe['data'] as $row) {
+                        if ($fallbackContacts->count() >= $limit) {
+                            break;
+                        }
+                        $policy = trim((string) ($row->policy_no ?? $row->policy_number ?? ''));
+                        if ($policy === '') {
+                            continue;
+                        }
+                        $contact = $this->findContactByPolicyNumber($policy);
+                        if (! $contact) {
+                            continue;
+                        }
+                        $cid = (int) ($contact->contactid ?? 0);
+                        if ($cid <= 0 || isset($fallbackContactIds[$cid])) {
+                            continue;
+                        }
+                        if ($excludeContactIds !== null && in_array($cid, $excludeContactIds, true)) {
+                            continue;
+                        }
+                        $ownerMatch = $ownerId === null || (int) ($contact->smownerid ?? 0) === $ownerId;
+                        $canAccess = function_exists('contact_can_access') ? contact_can_access($cid) : $ownerMatch;
+                        if (! $ownerMatch && ! $canAccess) {
+                            continue;
+                        }
+                        $fallbackContactIds[$cid] = true;
+                        $fallbackContacts->push($contact);
+                    }
+                } catch (\Throwable $ignored) {
+                    // Keep fallback best-effort; return whatever we could already resolve.
+                }
+            }
+
+            return $fallbackContacts;
         } catch (\Throwable $e) {
             Log::warning('CrmService::getCustomersForBroadcast: ' . $e->getMessage());
 
@@ -919,7 +1037,10 @@ class CrmService
             $allowedList = $erp->filterPoliciesMatchingLifeSystemSegment($policies, $lifeSystem);
             $allowedNorm = [];
             foreach ($allowedList as $p) {
-                $allowedNorm[trim(preg_replace('/\s+/', '', (string) $p))] = true;
+                $norm = $this->normalizePolicyToken((string) $p);
+                if ($norm !== '') {
+                    $allowedNorm[$norm] = true;
+                }
             }
             $kept = [];
             foreach ($contactIds as $id) {
@@ -927,7 +1048,7 @@ class CrmService
                 if ($pol === null || $pol === '') {
                     continue;
                 }
-                $key = trim(preg_replace('/\s+/', '', $pol));
+                $key = $this->normalizePolicyToken((string) $pol);
                 if (isset($allowedNorm[$key])) {
                     $kept[] = $id;
                 }
@@ -1074,6 +1195,51 @@ class CrmService
     }
 
     /**
+     * Resolve a vtiger contact from an ERP list row.
+     * Prefer policy match, then fallback to phone/email.
+     */
+    protected function resolveBroadcastContactFromErpRow(object $row): ?object
+    {
+        $policy = trim((string) ($row->policy_no ?? $row->policy_number ?? ''));
+        if ($policy !== '') {
+            $contact = $this->findContactByPolicyNumber($policy);
+            if ($contact) {
+                return $contact;
+            }
+        }
+
+        $phone = trim((string) ($row->phone_no ?? $row->mobile ?? $row->phone ?? $row->client_contact ?? ''));
+        $email = '';
+        foreach (['email', 'email_adr', 'emailAdr', 'EMAIL_ADR', 'client_email', 'CLIENT_EMAIL', 'mem_email', 'MEM_EMAIL'] as $k) {
+            $raw = trim((string) ($row->{$k} ?? ''));
+            if ($raw === '') {
+                continue;
+            }
+            if (filter_var($raw, FILTER_VALIDATE_EMAIL)) {
+                $email = $raw;
+                break;
+            }
+            $parts = preg_split('/[;,\\s]+/', $raw, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+            foreach ($parts as $part) {
+                $candidate = trim((string) $part);
+                if ($candidate !== '' && filter_var($candidate, FILTER_VALIDATE_EMAIL)) {
+                    $email = $candidate;
+                    break 2;
+                }
+            }
+        }
+
+        if ($phone === '' && $email === '') {
+            return null;
+        }
+
+        return $this->findContactByPhoneOrEmail(
+            $phone !== '' ? $phone : null,
+            $email !== '' ? $email : null
+        );
+    }
+
+    /**
      * Get a single contact by ID (for ticket create when contact may not be in paginated list).
      */
     public function getContactById(int $contactId): ?object
@@ -1113,7 +1279,16 @@ class CrmService
                 ->where('e.deleted', 0)
                 ->whereIn('e.setype', ['Contacts', 'Contact'])
                 ->whereIn('c.contactid', $contactIds)
-                ->select('c.contactid', 'c.firstname', 'c.lastname', 'c.email', 'c.mobile', 'c.phone')
+                ->select(
+                    'c.contactid',
+                    'c.firstname',
+                    'c.lastname',
+                    'c.email',
+                    'c.otheremail',
+                    'c.secondaryemail',
+                    'c.mobile',
+                    'c.phone'
+                )
                 ->orderBy('c.lastname')
                 ->orderBy('c.firstname')
                 ->get();
@@ -1149,7 +1324,7 @@ class CrmService
                 ->where('e.deleted', 0)
                 ->whereIn('e.setype', ['Contacts', 'Contact'])
                 ->where('c.contactid', $contactId)
-                ->select('cf.cf_860', 'cf.cf_856', 'cf.cf_872')
+                ->select('cf.cf_860', 'cf.cf_856', 'cf.cf_872', 'cf.cf_852')
                 ->first();
             if (! $row) {
                 return null;
@@ -1157,7 +1332,8 @@ class CrmService
             $policy = $this->pickPolicyExcludingPin(
                 $row->cf_860 ?? null,
                 $row->cf_856 ?? null,
-                $row->cf_872 ?? null
+                $row->cf_872 ?? null,
+                $row->cf_852 ?? null
             );
             $policy = $policy !== null ? trim((string) $policy) : '';
 
@@ -1188,7 +1364,7 @@ class CrmService
                 ->where('e.deleted', 0)
                 ->whereIn('e.setype', ['Contacts', 'Contact'])
                 ->whereIn('c.contactid', $contactIds)
-                ->select('c.contactid', 'cf.cf_860', 'cf.cf_856', 'cf.cf_872')
+                ->select('c.contactid', 'cf.cf_860', 'cf.cf_856', 'cf.cf_872', 'cf.cf_852')
                 ->get();
 
             $map = [];
@@ -1199,7 +1375,8 @@ class CrmService
                 $policy = $this->pickPolicyExcludingPin(
                     $row->cf_860 ?? null,
                     $row->cf_856 ?? null,
-                    $row->cf_872 ?? null
+                    $row->cf_872 ?? null,
+                    $row->cf_852 ?? null
                 );
                 $policy = $policy !== null ? trim((string) $policy) : '';
                 $map[(int) $row->contactid] = $policy !== '' ? $policy : null;
@@ -2984,16 +3161,35 @@ class CrmService
     }
 
     /**
+     * Normalize policy tokens for tolerant matching (ignore separators/case).
+     */
+    protected function normalizePolicyToken(string $value): string
+    {
+        return strtolower((string) preg_replace('/[^a-z0-9]/i', '', trim($value)));
+    }
+
+    protected function searchTermLooksLikePolicyToken(string $term): bool
+    {
+        $t = trim($term);
+        if ($t === '' || strlen($t) < 4) {
+            return false;
+        }
+
+        return (bool) preg_match('/[A-Za-z]/', $t) && (bool) preg_match('/\d/', $t);
+    }
+
+    /**
      * Find vtiger contact by policy number (searches cf_860, cf_856, cf_852, cf_872).
      */
     public function findContactByPolicyNumber(string $policyNumber): ?object
     {
-        $policyNumber = trim(preg_replace('/\s+/', '', $policyNumber));
+        $policyNumber = trim((string) $policyNumber);
         if ($policyNumber === '') {
             return null;
         }
         try {
             $term = '%' . $policyNumber . '%';
+            $policyNeedle = $this->normalizePolicyToken($policyNumber);
             $row = DB::connection('vtiger')
                 ->table('vtiger_contactdetails as c')
                 ->join('vtiger_crmentity as e', 'c.contactid', '=', 'e.crmid')
@@ -3001,25 +3197,55 @@ class CrmService
                 ->leftJoin('vtiger_users as u', 'e.smownerid', '=', 'u.id')
                 ->where('e.deleted', 0)
                 ->whereIn('e.setype', ['Contacts', 'Contact'])
-                ->where(function ($q) use ($term) {
+                ->where(function ($q) use ($term, $policyNeedle) {
                     $q->where('cf.cf_860', 'like', $term)
                         ->orWhere('cf.cf_856', 'like', $term)
                         ->orWhere('cf.cf_852', 'like', $term)
                         ->orWhere('cf.cf_872', 'like', $term);
+
+                    if ($policyNeedle !== '') {
+                        $needleLike = '%' . $policyNeedle . '%';
+                        $norm860 = "LOWER(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(cf.cf_860,''), '-', ''), ' ', ''), '/', ''), '_', ''))";
+                        $norm856 = "LOWER(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(cf.cf_856,''), '-', ''), ' ', ''), '/', ''), '_', ''))";
+                        $norm872 = "LOWER(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(cf.cf_872,''), '-', ''), ' ', ''), '/', ''), '_', ''))";
+                        $norm852 = "LOWER(REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(cf.cf_852,''), '-', ''), ' ', ''), '/', ''), '_', ''))";
+                        $q->orWhereRaw("({$norm860} LIKE ? OR {$norm856} LIKE ? OR {$norm872} LIKE ? OR {$norm852} LIKE ?)", [
+                            $needleLike,
+                            $needleLike,
+                            $needleLike,
+                            $needleLike,
+                        ]);
+                    }
                 })
                 ->select([
                     'c.contactid',
                     'c.firstname',
                     'c.lastname',
                     'c.email',
+                    'c.otheremail',
+                    'c.secondaryemail',
                     'c.mobile',
                     'c.phone',
+                    'cf.cf_860',
+                    'cf.cf_856',
+                    'cf.cf_872',
+                    'cf.cf_852',
                     'e.smownerid',
                     'u.first_name as owner_first',
                     'u.last_name as owner_last',
                     'u.user_name as owner_username',
                 ])
                 ->first();
+
+            if ($row) {
+                $row->policy_number = $this->pickPolicyExcludingPin(
+                    $row->cf_860 ?? null,
+                    $row->cf_856 ?? null,
+                    $row->cf_872 ?? null,
+                    $row->cf_852 ?? null
+                );
+            }
+
             return $row;
         } catch (\Throwable $e) {
             Log::warning('CrmService::findContactByPolicyNumber: ' . $e->getMessage());

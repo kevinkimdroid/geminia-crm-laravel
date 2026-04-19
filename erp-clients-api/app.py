@@ -152,10 +152,21 @@ def _mortgage_renewal_sql_days_from_today_predicate(rexpr):
 
 def _group_pension_view_q():
     return (os.environ.get("ERP_CLIENTS_GROUP_PENSION_VIEW") or "").strip()
+
+
+def _ensure_csv_column(csv_spec: str, required_col: str) -> str:
+    cols = [c.strip() for c in (csv_spec or "").split(",") if c.strip()]
+    wanted = required_col.strip().upper()
+    seen = {c.upper() for c in cols}
+    if wanted not in seen:
+        cols.append(wanted)
+    return ",".join(cols)
+
+
 COLS_BASE = "POLICY_NUMBER,PRODUCT,POL_PREPARED_BY,INTERMEDIARY,STATUS,KRA_PIN"
 # Oracle view uses LIFE_ASSURED (with D); LIFE_ASSUR may also exist
-COLS_EXTENDED = "POLICY_NUMBER,LIFE_ASSURED,PRODUCT,POL_PREPARED_BY,INTERMEDIARY,STATUS,KRA_PIN,PRP_DOB,MATURITY_DATE,ID_NO,PHONE_NO,CHECKOFF,BAL"
-COLS = os.environ.get("ERP_CLIENTS_LIST_COLUMNS", COLS_EXTENDED)
+COLS_EXTENDED = "POLICY_NUMBER,LIFE_ASSURED,PRODUCT,POL_PREPARED_BY,INTERMEDIARY,STATUS,KRA_PIN,PRP_DOB,MATURITY_DATE,ID_NO,PHONE_NO,EMAIL_ADR,CHECKOFF,BAL"
+COLS = _ensure_csv_column(os.environ.get("ERP_CLIENTS_LIST_COLUMNS", COLS_EXTENDED), "EMAIL_ADR")
 # Group Life: LMS_GROUP_CRM_VIEW columns - discovered at runtime, these are fallback order
 # Policy column: IPOL_POLICY_NO (GEMPPP0070) or POL_POLICY_NO - NEVER GRCT_RECEIPT_NO (receipt)
 COLS_GROUP = os.environ.get("ERP_CLIENTS_GROUP_COLUMNS") or COLS_BASE
@@ -1070,6 +1081,12 @@ def get_clients():
     columns = [c.strip() for c in (COLS_GROUP if use_group_columns else COLS).split(",")]
     if system == "individual":
         columns = _merge_individual_product_fallback_columns(columns)
+    # Ensure email columns are selected even when ERP_CLIENTS_LIST_COLUMNS omits them.
+    cols_upper = {c.upper() for c in columns if c}
+    for email_col in ("EMAIL_ADR", "CLIENT_EMAIL", "MEM_EMAIL", "EMAIL"):
+        if email_col not in cols_upper:
+            columns.append(email_col)
+            cols_upper.add(email_col)
     search_columns = [c.strip() for c in (SEARCH_COLS_GROUP if use_group_columns else SEARCH_COLS).split(",") if c.strip()]
     if is_mortgage and _mortgage_view_q():
         search_columns = _refine_search_columns_for_qualified_view(
@@ -1641,7 +1658,7 @@ def clients_debug():
         data = [row_to_client(r, columns) for r in rows] if rows else []
         cursor.close()
         conn.close()
-        return jsonify({"policy": policy, "data": data, "columns_used": columns})
+        return jsonify({"policy": policy, "data": data, "columns_used": columns, "cols_env": COLS})
     except Exception as e:
         return jsonify({"policy": policy, "data": [], "error": str(e)}), 500
 
