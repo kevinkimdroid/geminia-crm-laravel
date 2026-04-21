@@ -5,7 +5,7 @@
 @section('content')
 <div class="page-header mb-4">
     <h1 class="page-title">Email & SMS broadcast</h1>
-    <p class="page-subtitle mb-0">Send plain-text email or SMS to selected contacts (uses Microsoft Graph / SMTP and Advanta SMS, same as elsewhere).</p>
+    <p class="page-subtitle mb-0">Send plain-text email or SMS to selected contacts (Microsoft Graph / SMTP and Advanta SMS). Reusable ad copy lives in <a href="{{ route('tools.email-templates') }}">Tools → Email templates</a> (modules <strong>Broadcast</strong>, <strong>Marketing</strong>, or <strong>Broadcast SMS</strong> for texts).</p>
 </div>
 
 @if (session('success'))
@@ -109,7 +109,7 @@
 </p>
 
 <div class="alert alert-info py-2 px-3 small">
-    <strong>Bulk send guide:</strong> For large campaigns (e.g. 700 clients), use <strong>Select all (with email)</strong> or upload a file, load a template, attach your circular, and send.
+    <strong>Bulk send guide:</strong> For large campaigns (e.g. 700 clients), use <strong>Select all (with email)</strong> or upload a file, pick a saved template (or the quick pension snippet), attach your circular, and send.
     If you exceed the current max ({{ $maxRecipients ?? 500 }}), split into batches and keep <strong>Skip duplicate sends</strong> enabled.
 </div>
 
@@ -161,38 +161,108 @@
 
     <div class="tab-content">
         <div class="tab-pane fade show active" id="pane-email" role="tabpanel">
-            <div class="card p-4 mb-4">
-                <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
-                    <span class="small text-muted">Quick templates:</span>
-                    <button type="button" class="btn btn-sm btn-outline-primary" id="loadPensionTemplate">Load 2025 Pension template</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" id="clearEmailTemplate">Clear</button>
-                </div>
-                <div class="row g-3">
-                    <div class="col-12">
-                        <label class="form-label">Subject <span class="text-danger">*</span></label>
-                        <input type="text" name="subject" id="broadcastSubject" class="form-control" value="{{ old('subject') }}" maxlength="200" placeholder="e.g. Update from Geminia Life">
-                        @error('subject')<div class="invalid-feedback d-block">{{ $message }}</div>@enderror
+            <div class="card bc-composer-card border-0 shadow-sm mb-4 overflow-hidden">
+                <div class="row g-0">
+                    <div class="col-lg-4 bc-tpl-sidebar text-white p-4 d-flex flex-column">
+                        <div class="mb-2">
+                            <span class="text-uppercase small fw-bold opacity-75">Template library</span>
+                            <h2 class="h6 text-white mb-0 mt-1">Saved advertisement copy</h2>
+                        </div>
+                            <p class="small opacity-90 mb-3 mb-lg-4">Choose a row from <strong>Email templates</strong> (modules Broadcast or Marketing), then apply it. Tokens like <code class="text-white text-opacity-75">{{ '{{firstname}}' }}</code> are filled per recipient when you send.</p>
+                        @php $emailTplList = $emailAdvertTemplates ?? collect(); @endphp
+                        @if ($emailTplList->isEmpty())
+                            <div class="rounded-3 small mb-3 p-3" style="background: rgba(255,255,255,.12);">No templates yet. Add some under Tools with module <strong>Broadcast</strong> or <strong>Marketing</strong>.</div>
+                        @endif
+                        <label class="form-label small mb-1 opacity-75" for="bcEmailTemplateSelect">Template</label>
+                        <select id="bcEmailTemplateSelect" class="form-select form-select-sm mb-2" @disabled($emailTplList->isEmpty())>
+                            <option value="">Choose…</option>
+                            @foreach ($emailTplList as $tpl)
+                                <option value="{{ $tpl->id }}">{{ $tpl->template_name }} — {{ $tpl->module_name }}</option>
+                            @endforeach
+                        </select>
+                        <p class="small opacity-90 mb-3 flex-grow-1" id="bcEmailTemplateHint">Select a template to see its description here.</p>
+                        <div class="d-grid gap-2 mt-auto">
+                            <button type="button" class="btn btn-light btn-sm fw-semibold" id="bcApplyEmailTemplate" @disabled($emailTplList->isEmpty())>
+                                <i class="bi bi-arrow-down-circle me-1"></i> Apply to subject &amp; message
+                            </button>
+                            <a href="{{ route('tools.email-templates', ['module' => 'Broadcast']) }}" class="btn btn-outline-light btn-sm">
+                                <i class="bi bi-collection me-1"></i> Manage email templates
+                            </a>
+                        </div>
+                        <hr class="border-white opacity-25 my-3">
+                        <span class="small text-uppercase opacity-75">Quick start</span>
+                        <div class="d-flex flex-wrap gap-2 mt-2">
+                            <button type="button" class="btn btn-sm btn-outline-light" id="loadPensionTemplate">2025 Pension</button>
+                            <button type="button" class="btn btn-sm btn-outline-light" id="clearEmailTemplate">Clear</button>
+                        </div>
                     </div>
-                    <div class="col-12">
-                        <label class="form-label">Message <span class="text-danger">*</span></label>
-                        <textarea name="body" id="broadcastBody" class="form-control" rows="8" placeholder="Plain text only. Placeholders: @{{first_name}}, @{{last_name}}, @{{name}}, @{{email}}">{{ old('body') }}</textarea>
-                        @error('body')<div class="invalid-feedback d-block">{{ $message }}</div>@enderror
-                    </div>
-                    <div class="col-12">
-                        <label class="form-label">Attachment (optional)</label>
-                        <input type="file" name="email_attachment" id="emailAttachmentInput" class="form-control" accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.ppt,.pptx">
-                        <small class="text-muted d-block mt-1">Attached to every email recipient. Max 10MB. Allowed: PDF, Word, Excel, CSV, TXT, PowerPoint.</small>
-                        @error('email_attachment')<div class="invalid-feedback d-block">{{ $message }}</div>@enderror
+                    <div class="col-lg-8 p-4 bg-body">
+                        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                            <span class="fw-semibold">Email content</span>
+                            <span class="badge rounded-pill bg-primary bg-opacity-10 text-primary">Plain text</span>
+                        </div>
+                        <div class="row g-3">
+                            <div class="col-12">
+                                <label class="form-label">Subject <span class="text-danger">*</span></label>
+                                <input type="text" name="subject" id="broadcastSubject" class="form-control" value="{{ old('subject') }}" maxlength="200" placeholder="e.g. Update from Geminia Life">
+                                @error('subject')<div class="invalid-feedback d-block">{{ $message }}</div>@enderror
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label">Message <span class="text-danger">*</span></label>
+                                <textarea name="body" id="broadcastBody" class="form-control" rows="10" placeholder="Plain text. Placeholders: @{{first_name}}, @{{firstname}}, @{{last_name}}, @{{name}}, @{{email}}">{{ old('body') }}</textarea>
+                                @error('body')<div class="invalid-feedback d-block">{{ $message }}</div>@enderror
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label">Attachment (optional)</label>
+                                <input type="file" name="email_attachment" id="emailAttachmentInput" class="form-control" accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.ppt,.pptx">
+                                <small class="text-muted d-block mt-1">Attached to every email recipient. Max 10MB. Allowed: PDF, Word, Excel, CSV, TXT, PowerPoint.</small>
+                                @error('email_attachment')<div class="invalid-feedback d-block">{{ $message }}</div>@enderror
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
         <div class="tab-pane fade" id="pane-sms" role="tabpanel">
-            <div class="card p-4 mb-4">
-                <label class="form-label">SMS text <span class="text-danger">*</span></label>
-                <textarea name="message" class="form-control" rows="5" maxlength="1600" placeholder="Max 1600 characters; long messages may split into multiple SMS segments.">{{ old('message') }}</textarea>
-                @error('message')<div class="invalid-feedback d-block">{{ $message }}</div>@enderror
-                <p class="small text-muted mt-2 mb-0">Uses Advanta (same as <a href="{{ route('support.sms-notifier') }}">SMS Notifier</a>). Numbers are normalized to 254…</p>
+            @php $smsTplList = $smsAdvertTemplates ?? collect(); @endphp
+            <div class="card bc-composer-card bc-composer-sms border-0 shadow-sm mb-4 overflow-hidden">
+                <div class="row g-0">
+                    <div class="col-lg-4 bc-tpl-sidebar bc-tpl-sidebar-sms text-white p-4 d-flex flex-column">
+                        <div class="mb-2">
+                            <span class="text-uppercase small fw-bold opacity-75">SMS snippets</span>
+                            <h2 class="h6 text-white mb-0 mt-1">Saved text messages</h2>
+                        </div>
+                        <p class="small opacity-90 mb-3 mb-lg-4">Templates whose module is <strong>Broadcast SMS</strong> load the message body only (subject is ignored here).</p>
+                        @if ($smsTplList->isEmpty())
+                            <div class="rounded-3 small mb-3 p-3" style="background: rgba(255,255,255,.12);">No SMS templates yet. Create one in Tools with module <strong>Broadcast SMS</strong>.</div>
+                        @endif
+                        <label class="form-label small mb-1 opacity-75" for="bcSmsTemplateSelect">Template</label>
+                        <select id="bcSmsTemplateSelect" class="form-select form-select-sm mb-2" @disabled($smsTplList->isEmpty())>
+                            <option value="">Choose…</option>
+                            @foreach ($smsTplList as $tpl)
+                                <option value="{{ $tpl->id }}">{{ $tpl->template_name }}</option>
+                            @endforeach
+                        </select>
+                        <p class="small opacity-90 mb-3 flex-grow-1" id="bcSmsTemplateHint">Select a template to see its description here.</p>
+                        <div class="d-grid gap-2 mt-auto">
+                            <button type="button" class="btn btn-light btn-sm fw-semibold" id="bcApplySmsTemplate" @disabled($smsTplList->isEmpty())>
+                                <i class="bi bi-arrow-down-circle me-1"></i> Apply to SMS text
+                            </button>
+                            <a href="{{ route('tools.email-templates', ['module' => 'Broadcast SMS']) }}" class="btn btn-outline-light btn-sm">
+                                <i class="bi bi-collection me-1"></i> Manage SMS templates
+                            </a>
+                        </div>
+                    </div>
+                    <div class="col-lg-8 p-4 bg-body">
+                        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                            <label class="form-label fw-semibold mb-0" for="broadcastSmsMessage">SMS text <span class="text-danger">*</span></label>
+                            <span class="small text-muted" id="bcSmsCharCount">0 / 1600</span>
+                        </div>
+                        <textarea name="message" id="broadcastSmsMessage" class="form-control" rows="8" maxlength="1600" placeholder="Max 1600 characters; long messages may split into multiple SMS segments.">{{ old('message') }}</textarea>
+                        @error('message')<div class="invalid-feedback d-block">{{ $message }}</div>@enderror
+                        <p class="small text-muted mt-2 mb-0">Uses Advanta (same as <a href="{{ route('support.sms-notifier') }}">SMS Notifier</a>). Numbers are normalized to 254…</p>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -379,6 +449,28 @@
     </button>
 </form>
 
+<script type="application/json" id="bcEmailTemplatesById">@json(($emailAdvertTemplates ?? collect())->keyBy('id')->map(fn ($t) => [
+    'subject' => $t->subject,
+    'body' => (string) ($t->body ?? ''),
+    'description' => (string) ($t->description ?? ''),
+])->all())</script>
+<script type="application/json" id="bcSmsTemplatesById">@json(($smsAdvertTemplates ?? collect())->keyBy('id')->map(fn ($t) => [
+    'body' => (string) ($t->body ?? ''),
+    'description' => (string) ($t->description ?? ''),
+])->all())</script>
+
+<style>
+.bc-composer-card { border-radius: 16px; border: 1px solid rgba(14, 67, 133, 0.1); }
+.bc-tpl-sidebar {
+    background: linear-gradient(165deg, #0b3569 0%, #0E4385 45%, #1560a8 100%);
+}
+.bc-tpl-sidebar-sms {
+    background: linear-gradient(165deg, #064032 0%, #0d5c4a 50%, #13806a 100%);
+}
+.bc-composer-sms { border-color: rgba(13, 92, 74, 0.15) !important; }
+.bc-tpl-sidebar .form-select { border: none; }
+</style>
+
 @push('scripts')
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -390,6 +482,77 @@ document.addEventListener('DOMContentLoaded', function() {
     var attachmentInput = document.getElementById('emailAttachmentInput');
     var subjectInput = document.getElementById('broadcastSubject');
     var bodyInput = document.getElementById('broadcastBody');
+    var smsMessage = document.getElementById('broadcastSmsMessage');
+    var smsCharEl = document.getElementById('bcSmsCharCount');
+
+    function parseJsonScript(id) {
+        var el = document.getElementById(id);
+        if (!el || !el.textContent) return {};
+        try { return JSON.parse(el.textContent); } catch (e) { return {}; }
+    }
+    var emailTemplatesById = parseJsonScript('bcEmailTemplatesById');
+    var smsTemplatesById = parseJsonScript('bcSmsTemplatesById');
+
+    var emailTplSelect = document.getElementById('bcEmailTemplateSelect');
+    var emailTplHint = document.getElementById('bcEmailTemplateHint');
+    function syncEmailTplHint() {
+        if (!emailTplHint || !emailTplSelect) return;
+        var id = emailTplSelect.value;
+        if (!id || !emailTemplatesById[id]) {
+            emailTplHint.textContent = 'Select a template to see its description here.';
+            return;
+        }
+        var d = emailTemplatesById[id].description || '';
+        emailTplHint.textContent = d || 'No description for this template.';
+    }
+    emailTplSelect && emailTplSelect.addEventListener('change', syncEmailTplHint);
+    syncEmailTplHint();
+
+    document.getElementById('bcApplyEmailTemplate')?.addEventListener('click', function() {
+        var id = emailTplSelect && emailTplSelect.value;
+        if (!id || !emailTemplatesById[id]) {
+            alert('Choose a template from the list first.');
+            return;
+        }
+        var t = emailTemplatesById[id];
+        if (subjectInput) subjectInput.value = t.subject || '';
+        if (bodyInput) bodyInput.value = t.body || '';
+        if (bodyInput) bodyInput.focus();
+    });
+
+    var smsTplSelect = document.getElementById('bcSmsTemplateSelect');
+    var smsTplHint = document.getElementById('bcSmsTemplateHint');
+    function syncSmsTplHint() {
+        if (!smsTplHint || !smsTplSelect) return;
+        var id = smsTplSelect.value;
+        if (!id || !smsTemplatesById[id]) {
+            smsTplHint.textContent = 'Select a template to see its description here.';
+            return;
+        }
+        var d = smsTemplatesById[id].description || '';
+        smsTplHint.textContent = d || 'No description for this template.';
+    }
+    smsTplSelect && smsTplSelect.addEventListener('change', syncSmsTplHint);
+    syncSmsTplHint();
+
+    document.getElementById('bcApplySmsTemplate')?.addEventListener('click', function() {
+        var id = smsTplSelect && smsTplSelect.value;
+        if (!id || !smsTemplatesById[id]) {
+            alert('Choose a template from the list first.');
+            return;
+        }
+        var t = smsTemplatesById[id];
+        if (smsMessage) smsMessage.value = t.body || '';
+        if (smsMessage) smsMessage.focus();
+        updateSmsCharCount();
+    });
+
+    function updateSmsCharCount() {
+        if (!smsCharEl || !smsMessage) return;
+        smsCharEl.textContent = (smsMessage.value || '').length + ' / 1600';
+    }
+    smsMessage && smsMessage.addEventListener('input', updateSmsCharCount);
+    updateSmsCharCount();
 
     function setChannel(ch) {
         if (channelInput) channelInput.value = ch;

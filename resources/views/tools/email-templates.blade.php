@@ -36,9 +36,15 @@
                 </button>
             </div>
             <div class="d-flex align-items-center gap-3">
-                <form action="{{ route('tools.email-templates') }}" method="GET" class="d-flex">
-                    <input type="text" name="search" class="form-control form-control-sm" placeholder="Type to search" value="{{ request('search') }}" style="width: 180px;">
-                    <button type="submit" class="btn btn-sm btn-outline-secondary ms-1"><i class="bi bi-search"></i></button>
+                <form action="{{ route('tools.email-templates') }}" method="GET" class="d-flex flex-wrap align-items-center gap-1">
+                    <input type="text" name="search" class="form-control form-control-sm" placeholder="Type to search" value="{{ request('search') }}" style="width: 160px;">
+                    <select name="module" class="form-select form-select-sm" style="width: 150px;" title="Filter by module" onchange="this.form.submit()">
+                        <option value="">All modules</option>
+                        @foreach ($modules ?? [] as $mod)
+                            <option value="{{ $mod }}" @selected(request('module') === $mod)>{{ $mod }}</option>
+                        @endforeach
+                    </select>
+                    <button type="submit" class="btn btn-sm btn-outline-secondary"><i class="bi bi-search"></i></button>
                 </form>
                 @if ($templates->total() > 0)
                     <div class="d-flex align-items-center gap-2 small text-muted">

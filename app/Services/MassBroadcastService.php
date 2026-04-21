@@ -18,18 +18,47 @@ class MassBroadcastService
         protected BroadcastSendHistoryService $sendHistory,
     ) {}
 
-    public function personalize(string $template, object $contact): string
+    public function personalize(string $template, object $contact, array $contextTokens = []): string
     {
         $first = trim($contact->firstname ?? '');
         $last = trim($contact->lastname ?? '');
         $name = trim($first . ' ' . $last);
         $email = trim($contact->email ?? '');
 
-        return str_replace(
-            ['{{first_name}}', '{{last_name}}', '{{name}}', '{{email}}'],
-            [$first, $last, $name, $email],
-            $template
-        );
+        // Support CRM email-template style placeholders and common variants.
+        $search = [
+            '{{first_name}}', '{{firstname}}', '{{FIRST_NAME}}',
+            '{{last_name}}', '{{lastname}}', '{{LAST_NAME}}',
+            '{{name}}', '{{email}}',
+        ];
+        $replace = [
+            $first, $first, $first,
+            $last, $last, $last,
+            $name, $email,
+        ];
+
+        $out = str_replace($search, $replace, $template);
+
+        if ($contextTokens !== []) {
+            $extraSearch = [];
+            $extraReplace = [];
+            foreach ($contextTokens as $key => $value) {
+                $keyNorm = trim((string) $key);
+                if ($keyNorm === '') {
+                    continue;
+                }
+                $tokenValue = trim((string) $value);
+                $extraSearch[] = '{{' . $keyNorm . '}}';
+                $extraReplace[] = $tokenValue;
+                $extraSearch[] = '{{' . strtoupper($keyNorm) . '}}';
+                $extraReplace[] = $tokenValue;
+            }
+            if ($extraSearch !== []) {
+                $out = str_replace($extraSearch, $extraReplace, $out);
+            }
+        }
+
+        return $out;
     }
 
     protected function firstValidEmailCandidate(object $contact): ?string
@@ -112,6 +141,7 @@ class MassBroadcastService
         bool $skipRecentSends = true,
         array $emailOverrides = [],
         array $fileEmailRecipients = [],
+        array $contextTokens = [],
     ): array {
         @ini_set('max_execution_time', '0');
         @set_time_limit(0);
@@ -248,8 +278,8 @@ class MassBroadcastService
                 continue;
             }
 
-            $subject = $this->personalize($subjectTemplate, $contact);
-            $body = $this->personalize($bodyTemplate, $contact);
+            $subject = $this->personalize($subjectTemplate, $contact, $contextTokens);
+            $body = $this->personalize($bodyTemplate, $contact, $contextTokens);
             $to = $resolvedTo;
             if ($to === '') {
                 // Safety: should not happen since key was built from resolved email.
@@ -369,11 +399,12 @@ class MassBroadcastService
                 continue;
             }
 
-            $result = $this->sms->send($normalized, $message);
+            $text = $this->personalize($message, $contact);
+            $result = $this->sms->send($normalized, $text);
             $ok = (bool) ($result['success'] ?? false);
             if ($ok) {
                 $sent++;
-                $this->sendHistory->recordSuccessfulSms($cid, $message, $userId ? (int) $userId : null);
+                $this->sendHistory->recordSuccessfulSms($cid, $text, $userId ? (int) $userId : null);
             } else {
                 $failed++;
             }
@@ -382,7 +413,7 @@ class MassBroadcastService
                 SmsLog::create([
                     'contact_id' => $contact->contactid,
                     'phone' => $normalized,
-                    'message' => $message,
+                    'message' => $text,
                     'status' => $ok ? 'sent' : 'failed',
                     'error_message' => $ok ? null : ($result['error'] ?? 'Unknown error'),
                     'user_id' => $userId,

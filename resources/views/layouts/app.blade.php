@@ -324,6 +324,9 @@
                     <a href="{{ route('marketing.broadcast') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('marketing.broadcast*') ? 'active' : '' }}">
                         <i class="bi bi-broadcast"></i><span>Broadcast</span>
                     </a>
+                    <a href="{{ route('marketing.credit-life-statements') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('marketing.credit-life-statements*') ? 'active' : '' }}">
+                        <i class="bi bi-file-earmark-text"></i><span>Credit Life Statements</span>
+                    </a>
                     @endif
                 </div>
                 @endif
@@ -351,6 +354,7 @@
                     @endif
                     @if($can('support.customers') && ! ($can('leads') || $can('marketing')))
                     <a href="{{ route('marketing.broadcast') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('marketing.broadcast*') ? 'active' : '' }}"><i class="bi bi-broadcast"></i><span>Broadcast</span></a>
+                    <a href="{{ route('marketing.credit-life-statements') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('marketing.credit-life-statements*') ? 'active' : '' }}"><i class="bi bi-file-earmark-text"></i><span>Credit Life Statements</span></a>
                     @endif
                     @if($can('tickets'))
                     <a href="{{ route('support.maturities') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('support.maturities') ? 'active' : '' }}"><i class="bi bi-calendar-event"></i><span>Maturities</span></a>
@@ -388,6 +392,7 @@
                     @endif
                     @if($can('tools.email-templates'))
                     <a href="{{ route('tools.email-templates') }}" class="app-nav-link app-nav-sublink"><i class="bi bi-envelope"></i><span>Email Templates</span></a>
+                    <a href="{{ route('marketing.credit-life-statements') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('marketing.credit-life-statements*') ? 'active' : '' }}"><i class="bi bi-file-earmark-text"></i><span>Credit Life Statements</span></a>
                     @endif
                     @if($can('tools.mail-manager'))
                     <a href="{{ route('tools.mail-manager') }}" class="app-nav-link app-nav-sublink"><i class="bi bi-envelope-at"></i><span>Mail Manager</span></a>

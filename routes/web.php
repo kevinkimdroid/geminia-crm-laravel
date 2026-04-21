@@ -92,6 +92,8 @@ Route::prefix('marketing')->name('marketing.')->group(function () {
     Route::get('broadcast', [\App\Http\Controllers\MassBroadcastController::class, 'index'])->name('broadcast');
     Route::get('broadcast/template', [\App\Http\Controllers\MassBroadcastController::class, 'downloadRecipientsTemplate'])->name('broadcast.template');
     Route::post('broadcast/send', [\App\Http\Controllers\MassBroadcastController::class, 'send'])->name('broadcast.send');
+    Route::get('credit-life-statements', [\App\Http\Controllers\CreditLifeStatementController::class, 'index'])->name('credit-life-statements');
+    Route::post('credit-life-statements/send', [\App\Http\Controllers\CreditLifeStatementController::class, 'send'])->name('credit-life-statements.send');
     Route::resource('campaigns', \App\Http\Controllers\CampaignController::class)->parameters(['campaigns' => 'campaign']);
 });
 Route::get('/support', fn () => view('support', ['ticketCounts' => app(\App\Services\CrmService::class)->getTicketCountsByStatus()]))->name('support');

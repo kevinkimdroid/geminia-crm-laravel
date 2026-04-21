@@ -59,8 +59,8 @@
                 </div>
                 <div class="col-12">
                     <label class="form-label fw-semibold">Body</label>
-                    <textarea name="body" class="form-control font-monospace" rows="12" placeholder="Email content (HTML or plain text). Use placeholders like @{{firstname}}, @{{lastname}}...">{{ old('body', optional($template)->body ?? '') }}</textarea>
-                    <p class="small text-muted mt-1">Use placeholders for personalization: &#123;&#123;firstname&#125;&#125;, &#123;&#123;lastname&#125;&#125;, &#123;&#123;email&#125;&#125;, etc.</p>
+                    <textarea name="body" class="form-control font-monospace" rows="12" placeholder="Plain text for broadcasts. Use placeholders like @{{firstname}}, @{{first_name}}, @{{lastname}}, @{{name}}, @{{email}}.">{{ old('body', optional($template)->body ?? '') }}</textarea>
+                    <p class="small text-muted mt-1">Broadcast and Marketing email bodies are sent as <strong>plain text</strong>. Use <strong>Broadcast SMS</strong> for reusable mass-SMS copy (body only; subject is stored but not used on the SMS tab).</p>
                 </div>
             </div>
         </div>

@@ -8,6 +8,9 @@ use Illuminate\Http\Request;
 class EmailTemplateController extends Controller
 {
     protected array $modules = [
+        'Marketing',
+        'Broadcast',
+        'Broadcast SMS',
         'Customers',
         'Events',
         'Leads',
@@ -28,6 +31,13 @@ class EmailTemplateController extends Controller
                     ->orWhere('description', 'like', $term)
                     ->orWhere('module_name', 'like', $term);
             });
+        }
+
+        if ($request->filled('module')) {
+            $mod = (string) $request->input('module');
+            if (in_array($mod, $this->modules, true)) {
+                $query->where('module_name', $mod);
+            }
         }
 
         $templates = $query->orderBy('template_name')->paginate(15)->withQueryString();

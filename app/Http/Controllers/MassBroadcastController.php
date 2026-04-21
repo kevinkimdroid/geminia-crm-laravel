@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\EmailTemplate;
 use App\Services\BroadcastRecipientImportService;
 use App\Services\BroadcastSendHistoryService;
 use App\Services\CrmService;
@@ -502,6 +503,16 @@ class MassBroadcastController extends Controller
             );
         }
 
+        $emailAdvertTemplates = EmailTemplate::query()
+            ->whereIn('module_name', ['Broadcast', 'Marketing'])
+            ->orderBy('template_name')
+            ->get(['id', 'template_name', 'subject', 'body', 'description', 'module_name']);
+
+        $smsAdvertTemplates = EmailTemplate::query()
+            ->where('module_name', 'Broadcast SMS')
+            ->orderBy('template_name')
+            ->get(['id', 'template_name', 'subject', 'body', 'description']);
+
         return view('marketing.broadcast', [
             'customers' => $customers,
             'search' => $search,
@@ -520,6 +531,8 @@ class MassBroadcastController extends Controller
             'lastBroadcastByContact' => $lastBroadcastByContact,
             'broadcastHistoryReady' => $history->tableReady(),
             'duplicatesCollapsed' => $duplicatesCollapsed,
+            'emailAdvertTemplates' => $emailAdvertTemplates,
+            'smsAdvertTemplates' => $smsAdvertTemplates,
         ]);
     }
 

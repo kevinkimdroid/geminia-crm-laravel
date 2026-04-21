@@ -64,7 +64,20 @@
                         <td class="fw-semibold">{{ e($r->to_user_name ?? '—') }}</td>
                         <td>{{ e($r->to_user_department ?? '—') }}</td>
                         <td>{{ e($r->reassigned_by_name ?? '—') }}</td>
-                        <td class="text-nowrap">{{ $r->created_at?->format('d M Y H:i') ?? '—' }}</td>
+                        @php
+                            $createdAtLabel = '—';
+                            if (!empty($r->created_at)) {
+                                if ($r->created_at instanceof \Carbon\CarbonInterface) {
+                                    $createdAtLabel = $r->created_at->format('d M Y H:i');
+                                } elseif (is_string($r->created_at)) {
+                                    $ts = strtotime($r->created_at);
+                                    if ($ts !== false) {
+                                        $createdAtLabel = date('d M Y H:i', $ts);
+                                    }
+                                }
+                            }
+                        @endphp
+                        <td class="text-nowrap">{{ $createdAtLabel }}</td>
                     </tr>
                     @empty
                     <tr>
