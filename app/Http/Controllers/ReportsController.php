@@ -338,10 +338,17 @@ class ReportsController
     public function reassignmentAudit(Request $request, UserDepartmentService $userDept): View
     {
         $limit = min(1000, max(50, (int) $request->get('limit', 200)));
-        $reassignments = \App\Models\TicketReassignment::with([])
-            ->orderByDesc('created_at')
-            ->limit($limit)
-            ->get();
+        $ticketRef = trim((string) $request->get('ticket', ''));
+        $ticketId = $this->parseTicketIdFromReference($ticketRef);
+
+        $query = \App\Models\TicketReassignment::query();
+        if ($ticketId !== null) {
+            $query->where('ticket_id', $ticketId)->orderBy('created_at');
+        } else {
+            $query->orderByDesc('created_at');
+        }
+
+        $reassignments = $query->limit($limit)->get();
         $userIds = collect($reassignments->pluck('from_user_id')->merge($reassignments->pluck('to_user_id')))->filter()->unique()->values()->all();
         $departments = $userDept->getDepartmentsForUsers($userIds);
         $reassignments = $reassignments->map(fn ($r) => (object) array_merge($r->toArray(), [
@@ -351,6 +358,7 @@ class ReportsController
         return view('reports.reassignment-audit', [
             'reassignments' => $reassignments,
             'limit' => $limit,
+            'ticket' => $ticketRef,
         ]);
     }
 
@@ -487,22 +495,72 @@ class ReportsController
     public function exportReassignmentAudit(Request $request, UserDepartmentService $userDept)
     {
         $limit = min(10000, max(50, (int) $request->get('limit', 1000)));
-        $reassignments = \App\Models\TicketReassignment::orderByDesc('created_at')->limit($limit)->get();
+        $ticketRef = trim((string) $request->get('ticket', ''));
+        $ticketId = $this->parseTicketIdFromReference($ticketRef);
+
+        $query = \App\Models\TicketReassignment::query();
+        if ($ticketId !== null) {
+            $query->where('ticket_id', $ticketId)->orderBy('created_at');
+        } else {
+            $query->orderByDesc('created_at');
+        }
+
+        $reassignments = $query->limit($limit)->get();
         $userIds = collect($reassignments->pluck('from_user_id')->merge($reassignments->pluck('to_user_id')))->filter()->unique()->values()->all();
         $departments = $userDept->getDepartmentsForUsers($userIds);
-        $rows = $reassignments->map(fn ($r) => [
-            'TT' . $r->ticket_id,
-            $r->from_user_name ?? 'Unassigned',
-            $departments[$r->from_user_id ?? 0] ?? '',
-            $r->to_user_name ?? '—',
-            $departments[$r->to_user_id ?? 0] ?? '',
-            $r->reassigned_by_name ?? '—',
-            $r->created_at?->format('Y-m-d H:i:s') ?? '',
-        ])->toArray();
-        if ($request->get('format') === 'xlsx') {
-            return Excel::download(new \App\Exports\ReassignmentAuditExport($rows), 'ticket-reassignment-audit-' . date('Y-m-d') . '.xlsx');
+        $groupedByTicket = $reassignments
+            ->groupBy('ticket_id')
+            ->map(function ($trail) {
+                return $trail->sortBy(function ($row) {
+                    return $this->formatDateTimeValue($row->created_at, 'Y-m-d H:i:s');
+                })->values();
+            });
+
+        $maxSteps = (int) $groupedByTicket->map(fn ($trail) => $trail->count())->max();
+        $maxSteps = max(1, $maxSteps);
+
+        $headings = ['Ticket Number', 'Total Reassignments'];
+        for ($i = 1; $i <= $maxSteps; $i++) {
+            $headings[] = 'Step ' . $i . ' From';
+            $headings[] = 'Step ' . $i . ' From Department';
+            $headings[] = 'Step ' . $i . ' To';
+            $headings[] = 'Step ' . $i . ' To Department';
+            $headings[] = 'Step ' . $i . ' Reassigned By';
+            $headings[] = 'Step ' . $i . ' Date';
+            $headings[] = 'Step ' . $i . ' Time';
         }
-        return $this->csvResponse($rows, ['Ticket', 'From', 'From Dept', 'To', 'To Dept', 'Reassigned By', 'Date & Time'], 'ticket-reassignment-audit');
+
+        $rows = $groupedByTicket->map(function ($trail, $ticketId) use ($maxSteps, $departments) {
+            $row = ['TT' . $ticketId, $trail->count()];
+            for ($i = 0; $i < $maxSteps; $i++) {
+                $step = $trail->get($i);
+                if ($step === null) {
+                    array_push($row, '', '', '', '', '', '', '');
+                    continue;
+                }
+                array_push(
+                    $row,
+                    $step->from_user_name ?? 'Unassigned',
+                    $departments[$step->from_user_id ?? 0] ?? '',
+                    $step->to_user_name ?? '—',
+                    $departments[$step->to_user_id ?? 0] ?? '',
+                    $step->reassigned_by_name ?? '—',
+                    $this->formatDateTimeValue($step->created_at, 'Y-m-d'),
+                    $this->formatDateTimeValue($step->created_at, 'H:i:s')
+                );
+            }
+
+            return $row;
+        })->values()->toArray();
+
+        if ($request->get('format') === 'xlsx') {
+            return Excel::download(new \App\Exports\ReassignmentAuditExport($rows, $headings), 'ticket-reassignment-audit-' . date('Y-m-d') . '.xlsx');
+        }
+        return $this->csvResponse(
+            $rows,
+            $headings,
+            'ticket-reassignment-audit'
+        );
     }
 
     public function exportSlaBroken(TicketSlaService $sla, UserDepartmentService $userDept, Request $request)
@@ -704,6 +762,35 @@ class ReportsController
             return null;
         }
         return $value;
+    }
+
+    private function parseTicketIdFromReference(string $ticketRef): ?int
+    {
+        $ticketRef = trim($ticketRef);
+        if ($ticketRef === '') {
+            return null;
+        }
+        $digits = preg_replace('/\D+/', '', $ticketRef) ?? '';
+        if ($digits === '') {
+            return null;
+        }
+        $ticketId = (int) $digits;
+        return $ticketId > 0 ? $ticketId : null;
+    }
+
+    private function formatDateTimeValue($value, string $format = 'Y-m-d H:i:s'): string
+    {
+        if ($value instanceof \Carbon\CarbonInterface) {
+            return $value->format($format);
+        }
+        if (is_string($value) && trim($value) !== '') {
+            $ts = strtotime($value);
+            if ($ts !== false) {
+                return date($format, $ts);
+            }
+        }
+
+        return '';
     }
 
     private function parseBouncedEmailLine(string $line): ?array

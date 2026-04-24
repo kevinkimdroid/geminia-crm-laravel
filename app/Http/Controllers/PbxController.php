@@ -301,6 +301,142 @@ class PbxController extends Controller
         }
     }
 
+    /**
+     * Receive incoming call events directly from PBX webapp/connector.
+     * This keeps call logs flowing even when the old CRM connector is down.
+     */
+    public function incomingWebhook(Request $request): JsonResponse
+    {
+        $secret = trim((string) ($request->input('secret')
+            ?? $request->input('vtigersecretkey')
+            ?? $request->header('X-Vtiger-Secret')
+            ?? ''));
+        $expectedSecret = trim((string) ($this->pbxConfig->getSecretKey() ?? ''));
+        if ($expectedSecret !== '' && ! hash_equals($expectedSecret, $secret)) {
+            return response()->json(['success' => false, 'message' => 'Invalid PBX secret.'], 401);
+        }
+
+        $event = strtolower(trim((string) ($request->input('event') ?? $request->input('type') ?? 'IncomingCall')));
+        $sourceUuid = trim((string) ($request->input('sourceuuid')
+            ?? $request->input('callid')
+            ?? $request->input('uniqueid')
+            ?? $request->input('uuid')
+            ?? ''));
+        $status = strtolower(trim((string) ($request->input('callstatus')
+            ?? $request->input('status')
+            ?? ($event === 'incomingcall' ? 'ringing' : 'completed'))));
+        $direction = strtolower(trim((string) ($request->input('direction') ?? 'inbound')));
+        $customerNumber = trim((string) ($request->input('customernumber')
+            ?? $request->input('caller')
+            ?? $request->input('from')
+            ?? $request->input('from_number')
+            ?? $request->input('number')
+            ?? ''));
+        $customerName = trim((string) ($request->input('customer')
+            ?? $request->input('customer_name')
+            ?? $request->input('caller_name')
+            ?? ''));
+        $recordingUrl = trim((string) ($request->input('recordingurl')
+            ?? $request->input('recording_url')
+            ?? $request->input('recording')
+            ?? ''));
+        $user = trim((string) ($request->input('user')
+            ?? $request->input('agent')
+            ?? $request->input('extension')
+            ?? $request->input('to')
+            ?? ''));
+        $startTime = $this->parsePbxDateTime($request->input('starttime') ?? $request->input('start_time'));
+        $endTime = $this->parsePbxDateTime($request->input('endtime') ?? $request->input('end_time'));
+        $duration = (int) ($request->input('totalduration')
+            ?? $request->input('billduration')
+            ?? $request->input('duration')
+            ?? 0);
+
+        if ($startTime === null) {
+            $startTime = now();
+        }
+        if ($endTime === null && $duration > 0) {
+            $endTime = $startTime->copy()->addSeconds($duration);
+        }
+
+        try {
+            $payload = [
+                'direction' => $direction ?: 'inbound',
+                'callstatus' => $status ?: 'unknown',
+                'starttime' => $startTime?->format('Y-m-d H:i:s'),
+                'endtime' => $endTime?->format('Y-m-d H:i:s'),
+                'totalduration' => max(0, $duration),
+                'billduration' => max(0, (int) ($request->input('billduration') ?? $duration)),
+                'recordingurl' => $recordingUrl ?: null,
+                'sourceuuid' => $sourceUuid ?: null,
+                'gateway' => 'PBXManager',
+                'customer' => $customerName ?: null,
+                'user' => $user ?: null,
+                'customernumber' => $customerNumber ?: null,
+                'customertype' => (string) ($request->input('customertype') ?? 'Contact'),
+                'incominglinename' => (string) ($request->input('incominglinename') ?? $request->input('to') ?? ''),
+            ];
+
+            if ($sourceUuid !== '') {
+                $existing = DB::connection('vtiger')
+                    ->table('vtiger_pbxmanager')
+                    ->where('sourceuuid', $sourceUuid)
+                    ->orderByDesc('pbxmanagerid')
+                    ->first();
+                if ($existing) {
+                    DB::connection('vtiger')
+                        ->table('vtiger_pbxmanager')
+                        ->where('pbxmanagerid', $existing->pbxmanagerid)
+                        ->update($payload);
+                } else {
+                    DB::connection('vtiger')->table('vtiger_pbxmanager')->insert($payload);
+                }
+            } else {
+                DB::connection('vtiger')->table('vtiger_pbxmanager')->insert($payload);
+            }
+
+            // Keep a local fallback copy for troubleshooting and resilience.
+            PbxCall::updateOrCreate(
+                ['external_id' => $sourceUuid !== '' ? $sourceUuid : sha1($customerNumber . '|' . ($startTime?->timestamp ?? time()))],
+                [
+                    'call_status' => $status ?: 'unknown',
+                    'direction' => $direction ?: 'inbound',
+                    'customer_number' => $customerNumber,
+                    'customer_name' => $customerName,
+                    'user_name' => $user,
+                    'recording_url' => $recordingUrl ?: null,
+                    'duration_sec' => max(0, $duration),
+                    'start_time' => $startTime,
+                ]
+            );
+        } catch (\Throwable $e) {
+            Log::warning('PBX incoming webhook failed', [
+                'event' => $event,
+                'source_uuid' => $sourceUuid,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Could not persist PBX event.',
+            ], 500);
+        }
+
+        if (config('services.pbx.debug')) {
+            Log::info('PBX incoming webhook processed', [
+                'event' => $event,
+                'status' => $status,
+                'source_uuid' => $sourceUuid,
+                'number' => $customerNumber,
+            ]);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'PBX event received.',
+        ]);
+    }
+
     public function recordingVtiger(int $id)
     {
         $row = DB::connection('vtiger')
@@ -382,7 +518,7 @@ class PbxController extends Controller
             return response()->json(['success' => false, 'message' => 'PBX not configured. Set webappurl in vtiger_pbxmanager_gateway, or PBX_WEBAPP_URL / PBX_MAKE_CALL_URL in .env'], 503);
         }
 
-        $context = $this->pbxConfig->getOutboundContext() ?: 'vtiger_outbound';
+        $context = $this->pbxConfig->getOutboundContext() ?: 'from-internal';
         $trunk = $this->pbxConfig->getOutboundTrunk() ?: 'default';
         $secretKey = $this->pbxConfig->getSecretKey();
 
@@ -606,6 +742,27 @@ class PbxController extends Controller
             'failed' => 'failed',
         ];
         return $map[$status] ?? $status ?: 'unknown';
+    }
+
+    protected function parsePbxDateTime(mixed $value): ?\Carbon\Carbon
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        if (is_numeric($value)) {
+            return \Carbon\Carbon::createFromTimestamp((int) $value);
+        }
+
+        if (is_string($value)) {
+            try {
+                return \Carbon\Carbon::parse($value);
+            } catch (\Throwable) {
+                return null;
+            }
+        }
+
+        return null;
     }
 
     /**

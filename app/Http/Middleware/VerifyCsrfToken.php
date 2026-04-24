@@ -15,5 +15,6 @@ class VerifyCsrfToken extends Middleware
         'api/admin/erp-clients-import',
         'api/feedback/submit',
         'webhooks/social/*',
+        'webhooks/pbx/*',
     ];
 }

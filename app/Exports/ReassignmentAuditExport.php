@@ -13,7 +13,10 @@ class ReassignmentAuditExport implements FromArray, WithHeadings, WithStyles, Wi
 {
     use WithExcelDateValueBinder;
 
-    public function __construct(protected array $rows)
+    public function __construct(
+        protected array $rows,
+        protected array $headings = []
+    )
     {
     }
 
@@ -24,7 +27,11 @@ class ReassignmentAuditExport implements FromArray, WithHeadings, WithStyles, Wi
 
     public function headings(): array
     {
-        return ['Ticket', 'From', 'From Dept', 'To', 'To Dept', 'Reassigned By', 'Date & Time'];
+        if ($this->headings !== []) {
+            return $this->headings;
+        }
+
+        return ['Ticket Number'];
     }
 
     public function styles(Worksheet $sheet): array

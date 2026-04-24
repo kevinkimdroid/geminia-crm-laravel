@@ -31,6 +31,9 @@ Route::match(['get', 'post'], '/webhooks/social/meta', [\App\Http\Controllers\So
 Route::post('/webhooks/social/ingest', [\App\Http\Controllers\SocialMediaWebhookController::class, 'ingest'])
     ->middleware('throttle:60,1')
     ->name('webhooks.social.ingest');
+Route::any('/webhooks/pbx/incoming', [\App\Http\Controllers\PbxController::class, 'incomingWebhook'])
+    ->middleware('throttle:240,1')
+    ->name('webhooks.pbx.incoming');
 
 Route::any('/crm-client-feedback', function () {
     ob_start();

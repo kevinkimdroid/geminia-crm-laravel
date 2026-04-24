@@ -16,7 +16,8 @@
             <p class="reports-audit-subtitle mb-0">Audit trail of all ticket reassignments for compliance and accountability.</p>
         </div>
         <div class="d-flex flex-wrap gap-2 align-items-center no-print">
-            <form action="{{ route('reports.reassignment-audit') }}" method="GET" class="d-flex gap-2 align-items-center">
+            <form action="{{ route('reports.reassignment-audit') }}" method="GET" class="d-flex flex-wrap gap-2 align-items-center">
+                <input type="text" name="ticket" value="{{ $ticket ?? '' }}" class="form-control form-control-sm" style="width: 180px;" placeholder="Ticket e.g. TT2025809937">
                 <label class="text-muted small mb-0">Show</label>
                 <select name="limit" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
                     <option value="50" {{ $limit == 50 ? 'selected' : '' }}>50 recent</option>
@@ -24,11 +25,12 @@
                     <option value="500" {{ $limit == 500 ? 'selected' : '' }}>500 recent</option>
                     <option value="1000" {{ $limit == 1000 ? 'selected' : '' }}>1000 recent</option>
                 </select>
+                <button type="submit" class="btn btn-outline-secondary btn-sm">Apply</button>
             </form>
-            <a href="{{ route('reports.export.reassignment-audit', ['limit' => $limit, 'format' => 'xlsx']) }}" class="btn btn-primary btn-sm">
+            <a href="{{ route('reports.export.reassignment-audit', ['limit' => $limit, 'ticket' => $ticket ?? '', 'format' => 'xlsx']) }}" class="btn btn-primary btn-sm">
                 <i class="bi bi-file-earmark-spreadsheet me-1"></i>Export Excel
             </a>
-            <a href="{{ route('reports.export.reassignment-audit', ['limit' => $limit]) }}" class="btn btn-outline-secondary btn-sm">
+            <a href="{{ route('reports.export.reassignment-audit', ['limit' => $limit, 'ticket' => $ticket ?? '']) }}" class="btn btn-outline-secondary btn-sm">
                 <i class="bi bi-download me-1"></i>Export CSV
             </a>
             <button type="button" class="btn btn-outline-secondary btn-sm" onclick="window.print()" title="Print report">
