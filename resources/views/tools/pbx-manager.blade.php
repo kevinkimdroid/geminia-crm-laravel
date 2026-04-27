@@ -104,8 +104,9 @@
                                     $receivedByMe = auth()->check() && !empty($call->received_by_user_id) && (int) $call->received_by_user_id === (int) auth()->id();
                                     $rawStatus = strtolower(trim((string) ($call->call_status ?? '')));
                                     $displayStatus = $rawStatus !== '' ? $rawStatus : 'unknown';
-                                    if ($displayStatus === 'ringing' && optional($call->start_time)?->lt(now()->subMinutes(2))) {
-                                        $displayStatus = 'missed';
+                                    $rawDuration = (int) ($call->duration_sec ?? 0);
+                                    if ($displayStatus === 'ringing' && $rawDuration > 0) {
+                                        $displayStatus = 'completed';
                                     }
                                     $rawReason = trim((string) ($call->reason_for_calling ?? ''));
                                     $displayReason = $rawReason !== '' ? $rawReason : (($displayStatus === 'completed') ? 'Inbound call' : 'Awaiting sync');
@@ -115,12 +116,12 @@
                                     $displayUser = $rawUser !== '' ? $rawUser : 'Unassigned';
                                     $userLooksLikeMe = auth()->check() && $loggedInName !== '' && strcasecmp($displayUser, $loggedInName) === 0;
                                     if (($receivedByMe || $userLooksLikeMe) && in_array($displayStatus, ['ringing', 'missed'], true)) {
-                                        $displayStatus = 'completed';
+                                        $displayStatus = 'received';
                                     }
                                     if (($receivedByMe || $userLooksLikeMe) && ($rawReason === '' || $displayReason === 'Awaiting sync')) {
                                         $displayReason = 'Received by ' . ($loggedInName !== '' ? $loggedInName : 'you');
                                     }
-                                    $displayDuration = (int) ($call->duration_sec ?? 0);
+                                    $displayDuration = $rawDuration;
                                     $clientSearchValue = preg_replace('/\s+/', '', $displayNumber !== '' ? $displayNumber : $rawNumber);
                                 @endphp
                                 <tr>
@@ -404,6 +405,7 @@
     border-radius: 4px;
 }
 .pbx-badge-completed { background: #dcfce7; color: #166534; }
+.pbx-badge-received { background: #dcfce7; color: #166534; }
 .pbx-badge-missed, .pbx-badge-no-answer, .pbx-badge-no-response, .pbx-badge-busy { background: #fef3c7; color: #b45309; }
 .pbx-badge-ringing { background: #dbeafe; color: #1d4ed8; }
 .pbx-badge-unknown { background: #e2e8f0; color: #334155; }
@@ -618,5 +620,23 @@ document.querySelector('.pbx-claim-latest-btn')?.addEventListener('click', funct
         this.innerHTML = originalHtml;
     });
 });
+
+// Auto-refresh call logs for near real-time updates.
+// Keeps page stable by pausing while user is interacting with form fields/modals.
+(function () {
+    var REFRESH_MS = 10000;
+    function shouldSkipRefresh() {
+        if (document.hidden) return true;
+        if (document.querySelector('.modal.show')) return true;
+        var active = document.activeElement;
+        if (!active) return false;
+        var tag = (active.tagName || '').toUpperCase();
+        return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || active.isContentEditable;
+    }
+    setInterval(function () {
+        if (shouldSkipRefresh()) return;
+        window.location.reload();
+    }, REFRESH_MS);
+})();
 </script>
 @endsection

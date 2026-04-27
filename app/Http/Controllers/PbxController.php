@@ -414,6 +414,10 @@ class PbxController extends Controller
         if ($endTime === null && $duration > 0) {
             $endTime = $startTime->copy()->addSeconds($duration);
         }
+        // If PBX reports ringing/incoming but we already know who handled it, treat as received.
+        if (in_array($status, ['ringing', 'incomingcall'], true) && $direction === 'inbound' && $user !== '') {
+            $status = 'received';
+        }
         if ($customerName === '' && $customerNumber !== '') {
             $customerName = $customerNumber;
         }
@@ -817,6 +821,7 @@ class PbxController extends Controller
         $status = strtolower(trim($status));
         $map = [
             'completed' => 'completed',
+            'received' => 'received',
             'answered' => 'completed',
             'busy' => 'busy',
             'no-answer' => 'no-answer',
