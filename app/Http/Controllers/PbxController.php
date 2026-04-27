@@ -278,6 +278,15 @@ class PbxController extends Controller
                 $userName = $resolvedUser;
             }
         }
+        if (! $userName && isset($row->pbx_user)) {
+            $pbxUser = trim((string) $row->pbx_user);
+            if ($pbxUser !== '') {
+                $resolvedUser = $this->extensionMapping->resolveUserName(null, $pbxUser);
+                $userName = $resolvedUser ?: ('Ext ' . $pbxUser);
+            }
+        } elseif ($userName && preg_match('/^\d{2,6}$/', $userName)) {
+            $userName = 'Ext ' . $userName;
+        }
 
         return (object) [
             'id' => $row->pbxmanagerid ?? $row->id ?? null,
@@ -404,6 +413,9 @@ class PbxController extends Controller
         }
         if ($endTime === null && $duration > 0) {
             $endTime = $startTime->copy()->addSeconds($duration);
+        }
+        if ($customerName === '' && $customerNumber !== '') {
+            $customerName = $customerNumber;
         }
         if ($recordingUrl === '' && $recordingFile !== '') {
             $monitorBase = rtrim((string) config('services.pbx.monitor_public_base_url', ''), '/');

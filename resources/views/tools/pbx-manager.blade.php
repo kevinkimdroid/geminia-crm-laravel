@@ -91,6 +91,9 @@
                 <tbody>
                             @forelse ($calls as $call)
                                 @php
+                                    $loggedInName = auth()->check()
+                                        ? trim((string) ((auth()->user()->first_name ?? '') . ' ' . (auth()->user()->last_name ?? '')))
+                                        : '';
                                     $rawNumber = trim((string) ($call->customer_number ?? ''));
                                     $displayNumber = $rawNumber;
                                     if (preg_match('/^00254(\d{9})$/', $rawNumber, $m)) {
@@ -99,11 +102,31 @@
                                         $displayNumber = '0' . $m[1];
                                     }
                                     $receivedByMe = auth()->check() && !empty($call->received_by_user_id) && (int) $call->received_by_user_id === (int) auth()->id();
+                                    $rawStatus = strtolower(trim((string) ($call->call_status ?? '')));
+                                    $displayStatus = $rawStatus !== '' ? $rawStatus : 'unknown';
+                                    if ($displayStatus === 'ringing' && optional($call->start_time)?->lt(now()->subMinutes(2))) {
+                                        $displayStatus = 'missed';
+                                    }
+                                    $rawReason = trim((string) ($call->reason_for_calling ?? ''));
+                                    $displayReason = $rawReason !== '' ? $rawReason : (($displayStatus === 'completed') ? 'Inbound call' : 'Awaiting sync');
+                                    $rawCustomer = trim((string) ($call->customer_name ?? ''));
+                                    $displayCustomer = $rawCustomer !== '' ? $rawCustomer : ($displayNumber !== '' ? $displayNumber : 'Unknown');
+                                    $rawUser = trim((string) ($call->user_name ?? ''));
+                                    $displayUser = $rawUser !== '' ? $rawUser : 'Unassigned';
+                                    $userLooksLikeMe = auth()->check() && $loggedInName !== '' && strcasecmp($displayUser, $loggedInName) === 0;
+                                    if (($receivedByMe || $userLooksLikeMe) && in_array($displayStatus, ['ringing', 'missed'], true)) {
+                                        $displayStatus = 'completed';
+                                    }
+                                    if (($receivedByMe || $userLooksLikeMe) && ($rawReason === '' || $displayReason === 'Awaiting sync')) {
+                                        $displayReason = 'Received by ' . ($loggedInName !== '' ? $loggedInName : 'you');
+                                    }
+                                    $displayDuration = (int) ($call->duration_sec ?? 0);
+                                    $clientSearchValue = preg_replace('/\s+/', '', $displayNumber !== '' ? $displayNumber : $rawNumber);
                                 @endphp
                                 <tr>
                                     <td>
-                                        <span class="pbx-badge pbx-badge-{{ Str::slug($call->call_status ?? '') }}">
-                                            {{ $call->call_status ?? '—' }}
+                                        <span class="pbx-badge pbx-badge-{{ Str::slug($displayStatus) }}">
+                                            {{ $displayStatus }}
                                         </span>
                                     </td>
                                     <td>
@@ -119,11 +142,19 @@
                                         @endif
                                         <span class="pbx-number">{{ $displayNumber !== '' ? $displayNumber : '—' }}</span>
                                     </td>
-                                    <td class="d-none d-lg-table-cell pbx-cell-muted">{{ Str::limit($call->reason_for_calling ?? '—', 20) }}</td>
-                                    <td class="d-none d-xl-table-cell">{{ Str::limit($call->customer_name ?? '—', 15) }}</td>
+                                    <td class="d-none d-lg-table-cell pbx-cell-muted">{{ Str::limit($displayReason, 24) }}</td>
+                                    <td class="d-none d-xl-table-cell">
+                                        @if($clientSearchValue !== '')
+                                            <a href="{{ route('support.serve-client', ['search' => $clientSearchValue]) }}" class="text-decoration-none">
+                                                {{ Str::limit($displayCustomer, 22) }}
+                                            </a>
+                                        @else
+                                            {{ Str::limit($displayCustomer, 22) }}
+                                        @endif
+                                    </td>
                                     <td>
-                                        <span class="pbx-user-display">{{ $call->user_name ?? '—' }}</span>
-                                        @if($receivedByMe)
+                                        <span class="pbx-user-display">{{ $displayUser }}</span>
+                                        @if($receivedByMe || $userLooksLikeMe)
                                             <span class="badge bg-success-subtle text-success-emphasis border ms-1">You</span>
                                         @endif
                                         @auth
@@ -154,14 +185,14 @@
                                                 </button>
                                             </div>
                                         @else
-                                            @if(($call->call_status ?? '') === 'completed')
-                                                <span class="pbx-cell-muted">Pending sync</span>
+                                            @if($displayStatus === 'completed')
+                                                <span class="pbx-cell-muted">Pending recording</span>
                                             @else
                                                 <span class="pbx-cell-muted">—</span>
                                             @endif
                                         @endif
                                     </td>
-                                    <td><span class="pbx-duration">{{ $call->duration_sec ?? 0 }}s</span></td>
+                                    <td><span class="pbx-duration">{{ $displayDuration > 0 ? $displayDuration . 's' : '—' }}</span></td>
                                     <td class="pbx-time">{{ optional($call->start_time)->format('d M Y, h:i A') ?: '—' }}</td>
                                 </tr>
                             @empty
@@ -373,7 +404,9 @@
     border-radius: 4px;
 }
 .pbx-badge-completed { background: #dcfce7; color: #166534; }
-.pbx-badge-busy, .pbx-badge-no-response, .pbx-badge-no-answer { background: #fef3c7; color: #b45309; }
+.pbx-badge-missed, .pbx-badge-no-answer, .pbx-badge-no-response, .pbx-badge-busy { background: #fef3c7; color: #b45309; }
+.pbx-badge-ringing { background: #dbeafe; color: #1d4ed8; }
+.pbx-badge-unknown { background: #e2e8f0; color: #334155; }
 .pbx-direction { font-size: 0.8rem; font-weight: 500; text-transform: capitalize; }
 .pbx-direction-inbound { color: #2563eb; }
 .pbx-direction-outbound { color: #059669; }
