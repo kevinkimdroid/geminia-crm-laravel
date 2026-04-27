@@ -95,6 +95,7 @@ return [
         // Duration: totalduration is usually populated; billduration often 0. Add columns if your schema differs.
         'duration_columns' => array_filter(array_map('trim', explode(',', env('PBX_DURATION_COLUMNS', 'totalduration,billduration')))),
         'webapp_url' => env('PBX_WEBAPP_URL', ''),
+        'monitor_public_base_url' => env('PBX_MONITOR_PUBLIC_BASE_URL', ''),
         'make_call_url' => env('PBX_MAKE_CALL_URL', ''),
         'secret_key' => env('PBX_SECRET_KEY', ''),
         'outbound_context' => env('PBX_OUTBOUND_CONTEXT', ''),

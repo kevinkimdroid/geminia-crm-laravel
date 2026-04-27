@@ -90,6 +90,16 @@
                 </thead>
                 <tbody>
                             @forelse ($calls as $call)
+                                @php
+                                    $rawNumber = trim((string) ($call->customer_number ?? ''));
+                                    $displayNumber = $rawNumber;
+                                    if (preg_match('/^00254(\d{9})$/', $rawNumber, $m)) {
+                                        $displayNumber = '0' . $m[1];
+                                    } elseif (preg_match('/^254(\d{9})$/', $rawNumber, $m)) {
+                                        $displayNumber = '0' . $m[1];
+                                    }
+                                    $receivedByMe = auth()->check() && !empty($call->received_by_user_id) && (int) $call->received_by_user_id === (int) auth()->id();
+                                @endphp
                                 <tr>
                                     <td>
                                         <span class="pbx-badge pbx-badge-{{ Str::slug($call->call_status ?? '') }}">
@@ -107,12 +117,15 @@
                                             <i class="bi bi-telephone-outbound"></i>
                                         </a>
                                         @endif
-                                        <span class="pbx-number">{{ $call->customer_number ?? '—' }}</span>
+                                        <span class="pbx-number">{{ $displayNumber !== '' ? $displayNumber : '—' }}</span>
                                     </td>
                                     <td class="d-none d-lg-table-cell pbx-cell-muted">{{ Str::limit($call->reason_for_calling ?? '—', 20) }}</td>
                                     <td class="d-none d-xl-table-cell">{{ Str::limit($call->customer_name ?? '—', 15) }}</td>
                                     <td>
                                         <span class="pbx-user-display">{{ $call->user_name ?? '—' }}</span>
+                                        @if($receivedByMe)
+                                            <span class="badge bg-success-subtle text-success-emphasis border ms-1">You</span>
+                                        @endif
                                         @auth
                                         <button type="button" class="pbx-claim-btn" data-call-id="{{ $call->id }}" data-source="{{ $pbxSource ?? 'vtiger' }}" title="I received this call">
                                             <i class="bi bi-person-plus"></i>
@@ -141,7 +154,11 @@
                                                 </button>
                                             </div>
                                         @else
-                                            <span class="pbx-cell-muted">—</span>
+                                            @if(($call->call_status ?? '') === 'completed')
+                                                <span class="pbx-cell-muted">Pending sync</span>
+                                            @else
+                                                <span class="pbx-cell-muted">—</span>
+                                            @endif
                                         @endif
                                     </td>
                                     <td><span class="pbx-duration">{{ $call->duration_sec ?? 0 }}s</span></td>

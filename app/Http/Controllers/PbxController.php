@@ -270,8 +270,13 @@ class PbxController extends Controller
         }
 
         $userName = trim($row->user_name ?? '') ?: null;
-        if (! $userName && $fromVtiger && isset($row->pbx_user)) {
+        if ($fromVtiger && isset($row->pbx_user)) {
             $userName = $this->extensionMapping->resolveUserName($userName, $row->pbx_user);
+        } elseif ($userName && preg_match('/^\d{2,6}$/', $userName)) {
+            $resolvedUser = $this->extensionMapping->resolveUserName(null, $userName);
+            if ($resolvedUser) {
+                $userName = $resolvedUser;
+            }
         }
 
         return (object) [
@@ -377,6 +382,11 @@ class PbxController extends Controller
             ?? $request->input('recording_url')
             ?? $request->input('recording')
             ?? ''));
+        $recordingFile = trim((string) ($request->input('recordingfile')
+            ?? $request->input('recording_file')
+            ?? $request->input('callfilename')
+            ?? $request->input('cdr_recordingfile')
+            ?? ''));
         $user = trim((string) ($request->input('user')
             ?? $request->input('agent')
             ?? $request->input('extension')
@@ -394,6 +404,12 @@ class PbxController extends Controller
         }
         if ($endTime === null && $duration > 0) {
             $endTime = $startTime->copy()->addSeconds($duration);
+        }
+        if ($recordingUrl === '' && $recordingFile !== '') {
+            $monitorBase = rtrim((string) config('services.pbx.monitor_public_base_url', ''), '/');
+            if ($monitorBase !== '') {
+                $recordingUrl = $monitorBase . '/' . ltrim($recordingFile, '/');
+            }
         }
 
         $payload = [
