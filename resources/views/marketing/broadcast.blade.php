@@ -98,7 +98,7 @@
 </form>
 
 @if (empty($contactTypeCf) && count($contactTypeValues ?? []) === 0)
-    <p class="small text-muted mb-3">Optional: set <code>BROADCAST_CONTACT_TYPE_CF</code> in <code>.env</code> (e.g. your Vtiger Contacts custom field <code>cf_912</code>) to filter by client type picklist values.</p>
+    <p class="small text-muted mb-3">You can also filter contacts by client type. If this filter is missing, ask your system administrator to enable it.</p>
 @endif
 
 <p class="text-muted small">
@@ -168,7 +168,7 @@
                             <span class="text-uppercase small fw-bold opacity-75">Template library</span>
                             <h2 class="h6 text-white mb-0 mt-1">Saved advertisement copy</h2>
                         </div>
-                            <p class="small opacity-90 mb-3 mb-lg-4">Choose a row from <strong>Email templates</strong> (modules Broadcast or Marketing), then apply it. Tokens like <code class="text-white text-opacity-75">{{ '{{firstname}}' }}</code> are filled per recipient when you send.</p>
+                            <p class="small opacity-90 mb-3 mb-lg-4">Choose a row from <strong>Email templates</strong> (modules Broadcast or Marketing), then apply it. Tokens like <code class="text-white text-opacity-75">@{{firstname}}</code> are filled per recipient when you send.</p>
                         @php $emailTplList = $emailAdvertTemplates ?? collect(); @endphp
                         @if ($emailTplList->isEmpty())
                             <div class="rounded-3 small mb-3 p-3" style="background: rgba(255,255,255,.12);">No templates yet. Add some under Tools with module <strong>Broadcast</strong> or <strong>Marketing</strong>.</div>
@@ -449,15 +449,26 @@
     </button>
 </form>
 
-<script type="application/json" id="bcEmailTemplatesById">@json(($emailAdvertTemplates ?? collect())->keyBy('id')->map(fn ($t) => [
-    'subject' => $t->subject,
-    'body' => (string) ($t->body ?? ''),
-    'description' => (string) ($t->description ?? ''),
-])->all())</script>
-<script type="application/json" id="bcSmsTemplatesById">@json(($smsAdvertTemplates ?? collect())->keyBy('id')->map(fn ($t) => [
-    'body' => (string) ($t->body ?? ''),
-    'description' => (string) ($t->description ?? ''),
-])->all())</script>
+@php
+    $emailTemplatesById = [];
+    foreach (($emailAdvertTemplates ?? collect()) as $tpl) {
+        $emailTemplatesById[$tpl->id] = [
+            'subject' => (string) ($tpl->subject ?? ''),
+            'body' => (string) ($tpl->body ?? ''),
+            'description' => (string) ($tpl->description ?? ''),
+        ];
+    }
+
+    $smsTemplatesById = [];
+    foreach (($smsAdvertTemplates ?? collect()) as $tpl) {
+        $smsTemplatesById[$tpl->id] = [
+            'body' => (string) ($tpl->body ?? ''),
+            'description' => (string) ($tpl->description ?? ''),
+        ];
+    }
+@endphp
+<script type="application/json" id="bcEmailTemplatesById">@json($emailTemplatesById)</script>
+<script type="application/json" id="bcSmsTemplatesById">@json($smsTemplatesById)</script>
 
 <style>
 .bc-composer-card { border-radius: 16px; border: 1px solid rgba(14, 67, 133, 0.1); }

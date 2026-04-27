@@ -38,7 +38,7 @@ class PbxTestCallCommand extends Command
             'secret' => $pbxConfig->getSecretKey() ?: '',
             'from' => $extension,
             'to' => $number,
-            'context' => $pbxConfig->getOutboundContext() ?: 'from-internal',
+            'context' => $pbxConfig->getOutboundContext() ?: 'vtiger_outbound',
             'record' => '',
         ]);
         if (! $url) {
@@ -46,7 +46,7 @@ class PbxTestCallCommand extends Command
             return self::FAILURE;
         }
 
-        $context = $pbxConfig->getOutboundContext() ?: 'from-internal';
+        $context = $pbxConfig->getOutboundContext() ?: 'vtiger_outbound';
         $trunk = $pbxConfig->getOutboundTrunk() ?: 'default';
 
         $this->info('PBX Make Call Test (Vtiger connector format)');

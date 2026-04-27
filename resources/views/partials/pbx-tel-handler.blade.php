@@ -93,10 +93,12 @@
     });
 
     function normalizeTel(num) {
+        // Keep a PBX-friendly, fully dialable format for MicroSIP links.
         var d = String(num || '').replace(/\D/g, '');
-        if (d.indexOf('254') === 0 && d.length === 12) d = d.slice(3);
-        else if (d.indexOf('0') === 0 && d.length === 10) d = d.slice(1);
-        else if (d.indexOf('00254') === 0 && d.length >= 14) d = d.slice(5);
+        if (d.indexOf('00254') === 0 && d.length >= 14) d = d.slice(2); // 00254... -> 254...
+        if (d.indexOf('254') === 0 && d.length === 12) return d;
+        if (d.indexOf('0') === 0 && d.length === 10) return '254' + d.slice(1);
+        if (d.indexOf('7') === 0 && d.length === 9) return '254' + d;
         return d;
     }
     function updateCallLink() {

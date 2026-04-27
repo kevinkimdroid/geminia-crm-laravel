@@ -34,6 +34,10 @@ Route::post('/webhooks/social/ingest', [\App\Http\Controllers\SocialMediaWebhook
 Route::any('/webhooks/pbx/incoming', [\App\Http\Controllers\PbxController::class, 'incomingWebhook'])
     ->middleware('throttle:240,1')
     ->name('webhooks.pbx.incoming');
+// Compatibility path for old Vtiger Asterisk Connector callback URL.
+Route::any('/modules/PBXManager/callbacks/PBXManager.php', [\App\Http\Controllers\PbxController::class, 'incomingWebhook'])
+    ->middleware('throttle:240,1')
+    ->name('webhooks.pbx.incoming.legacy');
 
 Route::any('/crm-client-feedback', function () {
     ob_start();

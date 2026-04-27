@@ -100,6 +100,7 @@ return [
         'outbound_context' => env('PBX_OUTBOUND_CONTEXT', ''),
         'outbound_trunk' => env('PBX_OUTBOUND_TRUNK', ''),
         'debug' => env('PBX_DEBUG', false),
+        'trusted_callback_ips' => array_values(array_filter(array_map('trim', explode(',', (string) env('PBX_TRUSTED_CALLBACK_IPS', '127.0.0.1,::1,10.1.1.86'))))),
         // Kenya: add 254 prefix when number starts with 7 and has 9 digits (e.g. 712345678 -> 254712345678)
         // Set to false if trunk expects 0XXXXXXXXX (e.g. 0712345678)
         'number_country_code' => env('PBX_NUMBER_COUNTRY_CODE', '254'),

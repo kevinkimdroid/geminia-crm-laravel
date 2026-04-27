@@ -16,5 +16,6 @@ class VerifyCsrfToken extends Middleware
         'api/feedback/submit',
         'webhooks/social/*',
         'webhooks/pbx/*',
+        'modules/PBXManager/callbacks/PBXManager.php',
     ];
 }

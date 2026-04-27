@@ -25,11 +25,41 @@ class PbxController extends Controller
 
     public function index(Request $request)
     {
-        if ($this->pbxConfig->isConfigured()) {
+        if ($this->pbxConfig->isConfigured() && ! $this->shouldPreferLocalLogs()) {
             return $this->indexFromVtiger($request);
         }
 
         return $this->indexFromLocal($request);
+    }
+
+    /**
+     * Prefer local logs when they are fresher than vtiger logs.
+     * This keeps PBX Manager useful when callback/connector sync lags.
+     */
+    protected function shouldPreferLocalLogs(): bool
+    {
+        try {
+            $localLatest = PbxCall::query()->max('start_time');
+            $vtigerLatest = DB::connection('vtiger')->table('vtiger_pbxmanager')->max('starttime');
+
+            if (! $localLatest) {
+                return false;
+            }
+
+            $localAt = \Carbon\Carbon::parse($localLatest);
+            $vtigerAt = $vtigerLatest ? \Carbon\Carbon::parse($vtigerLatest) : null;
+
+            // If vtiger has no rows, use local when recent.
+            if (! $vtigerAt) {
+                return $localAt->greaterThan(now()->subDays(7));
+            }
+
+            // Prefer local if it is ahead by 2+ minutes (sync lag/stuck).
+            return $localAt->greaterThan($vtigerAt->copy()->addMinutes(2));
+        } catch (\Throwable) {
+            // Any vtiger/read issue should not hide local call history.
+            return PbxCall::query()->exists();
+        }
     }
 
     protected function indexFromVtiger(Request $request)
@@ -305,15 +335,22 @@ class PbxController extends Controller
      * Receive incoming call events directly from PBX webapp/connector.
      * This keeps call logs flowing even when the old CRM connector is down.
      */
-    public function incomingWebhook(Request $request): JsonResponse
+    public function incomingWebhook(Request $request)
     {
         $secret = trim((string) ($request->input('secret')
             ?? $request->input('vtigersecretkey')
             ?? $request->header('X-Vtiger-Secret')
             ?? ''));
         $expectedSecret = trim((string) ($this->pbxConfig->getSecretKey() ?? ''));
-        if ($expectedSecret !== '' && ! hash_equals($expectedSecret, $secret)) {
-            return response()->json(['success' => false, 'message' => 'Invalid PBX secret.'], 401);
+        $isLegacyCallback = $request->is('modules/PBXManager/callbacks/PBXManager.php');
+        $trustedIps = array_values(array_unique(array_filter(array_merge(
+            ['127.0.0.1', '::1', '10.1.1.86', '10.1.1.65'],
+            config('services.pbx.trusted_callback_ips', [])
+        ))));
+        $requestIp = (string) ($request->ip() ?? '');
+        $isTrustedIp = in_array($requestIp, $trustedIps, true);
+        if (! $isLegacyCallback && ! $isTrustedIp && $expectedSecret !== '' && ! hash_equals($expectedSecret, $secret)) {
+            return $this->pbxWebhookResponse($request, false, 'Invalid PBX secret.', 401);
         }
 
         $event = strtolower(trim((string) ($request->input('event') ?? $request->input('type') ?? 'IncomingCall')));
@@ -359,24 +396,29 @@ class PbxController extends Controller
             $endTime = $startTime->copy()->addSeconds($duration);
         }
 
-        try {
-            $payload = [
-                'direction' => $direction ?: 'inbound',
-                'callstatus' => $status ?: 'unknown',
-                'starttime' => $startTime?->format('Y-m-d H:i:s'),
-                'endtime' => $endTime?->format('Y-m-d H:i:s'),
-                'totalduration' => max(0, $duration),
-                'billduration' => max(0, (int) ($request->input('billduration') ?? $duration)),
-                'recordingurl' => $recordingUrl ?: null,
-                'sourceuuid' => $sourceUuid ?: null,
-                'gateway' => 'PBXManager',
-                'customer' => $customerName ?: null,
-                'user' => $user ?: null,
-                'customernumber' => $customerNumber ?: null,
-                'customertype' => (string) ($request->input('customertype') ?? 'Contact'),
-                'incominglinename' => (string) ($request->input('incominglinename') ?? $request->input('to') ?? ''),
-            ];
+        $payload = [
+            'direction' => $direction ?: 'inbound',
+            'callstatus' => $status ?: 'unknown',
+            'starttime' => $startTime?->format('Y-m-d H:i:s'),
+            'endtime' => $endTime?->format('Y-m-d H:i:s'),
+            'totalduration' => max(0, $duration),
+            'billduration' => max(0, (int) ($request->input('billduration') ?? $duration)),
+            'recordingurl' => $recordingUrl ?: null,
+            'sourceuuid' => $sourceUuid ?: null,
+            'gateway' => 'PBXManager',
+            'customer' => $customerName ?: null,
+            'user' => $user ?: null,
+            'customernumber' => $customerNumber ?: null,
+            'customertype' => (string) ($request->input('customertype') ?? 'Contact'),
+            'incominglinename' => (string) ($request->input('incominglinename') ?? $request->input('to') ?? ''),
+        ];
 
+        $savedToVtiger = false;
+        $savedToLocal = false;
+        $vtigerError = null;
+        $localError = null;
+
+        try {
             if ($sourceUuid !== '') {
                 $existing = DB::connection('vtiger')
                     ->table('vtiger_pbxmanager')
@@ -394,7 +436,17 @@ class PbxController extends Controller
             } else {
                 DB::connection('vtiger')->table('vtiger_pbxmanager')->insert($payload);
             }
+            $savedToVtiger = true;
+        } catch (\Throwable $e) {
+            $vtigerError = $e->getMessage();
+            Log::warning('PBX incoming webhook vtiger persist failed', [
+                'event' => $event,
+                'source_uuid' => $sourceUuid,
+                'error' => $vtigerError,
+            ]);
+        }
 
+        try {
             // Keep a local fallback copy for troubleshooting and resilience.
             PbxCall::updateOrCreate(
                 ['external_id' => $sourceUuid !== '' ? $sourceUuid : sha1($customerNumber . '|' . ($startTime?->timestamp ?? time()))],
@@ -409,17 +461,18 @@ class PbxController extends Controller
                     'start_time' => $startTime,
                 ]
             );
+            $savedToLocal = true;
         } catch (\Throwable $e) {
-            Log::warning('PBX incoming webhook failed', [
+            $localError = $e->getMessage();
+            Log::warning('PBX incoming webhook local persist failed', [
                 'event' => $event,
                 'source_uuid' => $sourceUuid,
-                'error' => $e->getMessage(),
+                'error' => $localError,
             ]);
+        }
 
-            return response()->json([
-                'success' => false,
-                'message' => 'Could not persist PBX event.',
-            ], 500);
+        if (! $savedToVtiger && ! $savedToLocal) {
+            return $this->pbxWebhookResponse($request, false, 'Could not persist PBX event.', 500);
         }
 
         if (config('services.pbx.debug')) {
@@ -428,13 +481,14 @@ class PbxController extends Controller
                 'status' => $status,
                 'source_uuid' => $sourceUuid,
                 'number' => $customerNumber,
+                'saved_to_vtiger' => $savedToVtiger,
+                'saved_to_local' => $savedToLocal,
+                'vtiger_error' => $vtigerError,
+                'local_error' => $localError,
             ]);
         }
 
-        return response()->json([
-            'success' => true,
-            'message' => 'PBX event received.',
-        ]);
+        return $this->pbxWebhookResponse($request, true, 'PBX event received.');
     }
 
     public function recordingVtiger(int $id)
@@ -518,7 +572,7 @@ class PbxController extends Controller
             return response()->json(['success' => false, 'message' => 'PBX not configured. Set webappurl in vtiger_pbxmanager_gateway, or PBX_WEBAPP_URL / PBX_MAKE_CALL_URL in .env'], 503);
         }
 
-        $context = $this->pbxConfig->getOutboundContext() ?: 'from-internal';
+        $context = $this->pbxConfig->getOutboundContext() ?: 'vtiger_outbound';
         $trunk = $this->pbxConfig->getOutboundTrunk() ?: 'default';
         $secretKey = $this->pbxConfig->getSecretKey();
 
@@ -556,8 +610,8 @@ class PbxController extends Controller
         ]);
 
         $endpoints = [];
-        $endpoints[] = ['method' => 'post', 'url' => $vtigerMakecallUrl, 'form' => false];
-        $endpoints[] = ['method' => 'get', 'url' => $vtigerMakecallUrl, 'form' => false];
+        $endpoints[] = ['method' => 'post', 'url' => $vtigerMakecallUrl, 'form' => false, 'empty_body' => true];
+        $endpoints[] = ['method' => 'get', 'url' => $vtigerMakecallUrl, 'form' => false, 'empty_body' => true];
         if ($customUrl) {
             $endpoints[] = ['method' => 'post', 'url' => $customUrl, 'form' => true];
             $endpoints[] = ['method' => 'post', 'url' => $customUrl, 'form' => false];
@@ -578,17 +632,18 @@ class PbxController extends Controller
                 if (($ep['method'] ?? 'post') === 'get') {
                     $response = Http::timeout(10)
                         ->withHeaders($secretKey ? ['X-Vtiger-Secret' => $secretKey] : [])
-                        ->get($url, $payload);
+                        ->get($url, ($ep['empty_body'] ?? false) ? [] : $payload);
                 } else {
                     $headers = array_filter([
                         'X-Vtiger-Secret' => $secretKey,
                         'Accept' => 'application/json',
                     ]);
+                    $requestPayload = ($ep['empty_body'] ?? false) ? [] : $payload;
                     if ($ep['form'] ?? false) {
-                        $response = Http::timeout(10)->withHeaders($headers)->asForm()->post($url, $payload);
+                        $response = Http::timeout(10)->withHeaders($headers)->asForm()->post($url, $requestPayload);
                     } else {
                         $headers['Content-Type'] = 'application/json';
-                        $response = Http::timeout(10)->withHeaders($headers)->post($url, $payload);
+                        $response = Http::timeout(10)->withHeaders($headers)->post($url, $requestPayload);
                     }
                 }
 
@@ -763,6 +818,22 @@ class PbxController extends Controller
         }
 
         return null;
+    }
+
+    protected function pbxWebhookResponse(Request $request, bool $success, string $message, int $status = 200)
+    {
+        if ($request->is('modules/PBXManager/callbacks/PBXManager.php')) {
+            $state = $success ? 'Success' : 'Error';
+            $safeMessage = htmlspecialchars($message, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+            $xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Response><status>{$state}</status><message>{$safeMessage}</message></Response>";
+
+            return response($xml, $status, ['Content-Type' => 'text/xml; charset=UTF-8']);
+        }
+
+        return response()->json([
+            'success' => $success,
+            'message' => $message,
+        ], $status);
     }
 
     /**
