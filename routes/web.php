@@ -139,6 +139,7 @@ Route::put('/tools/email-templates/{emailTemplate}', [\App\Http\Controllers\Emai
 Route::delete('/tools/email-templates/{emailTemplate}', [\App\Http\Controllers\EmailTemplateController::class, 'destroy'])->name('tools.email-templates.destroy');
 Route::get('/tools/recycle-bin', fn () => view('tools.recycle-bin'))->name('tools.recycle-bin');
 Route::get('/tools/pbx-manager', [\App\Http\Controllers\PbxController::class, 'index'])->name('tools.pbx-manager');
+Route::get('/tools/pbx-manager/live', [\App\Http\Controllers\PbxController::class, 'live'])->name('tools.pbx-manager.live');
 Route::post('/tools/pbx-manager/fetch', [\App\Http\Controllers\PbxController::class, 'fetch'])->name('tools.pbx-manager.fetch');
 Route::post('/tools/pbx-manager/make-call', [\App\Http\Controllers\PbxController::class, 'makeCall'])->name('tools.pbx-manager.make-call');
 Route::get('/tools/pbx-manager/vtiger/{id}/recording', [\App\Http\Controllers\PbxController::class, 'recordingVtiger'])->name('tools.pbx-manager.recording.vtiger');

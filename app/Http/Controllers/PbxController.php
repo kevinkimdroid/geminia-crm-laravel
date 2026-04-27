@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\PbxCall;
 use App\Models\PbxCallRecipient;
+use App\Services\CrmService;
+use App\Services\ErpClientService;
 use App\Services\PbxConfigService;
 use App\Services\PbxExtensionMappingService;
 use Illuminate\Http\JsonResponse;
@@ -18,9 +20,16 @@ use Illuminate\Support\Str;
 
 class PbxController extends Controller
 {
+    /** @var array<string,string> */
+    protected array $customerNameByPhoneCache = [];
+    /** @var array<string,string> */
+    protected array $recordingUrlByUniqueIdCache = [];
+
     public function __construct(
         protected PbxConfigService $pbxConfig,
-        protected PbxExtensionMappingService $extensionMapping
+        protected PbxExtensionMappingService $extensionMapping,
+        protected CrmService $crm,
+        protected ErpClientService $erpClients
     ) {}
 
     public function index(Request $request)
@@ -39,23 +48,14 @@ class PbxController extends Controller
     protected function shouldPreferLocalLogs(): bool
     {
         try {
-            $localLatest = PbxCall::query()->max('start_time');
-            $vtigerLatest = DB::connection('vtiger')->table('vtiger_pbxmanager')->max('starttime');
-
-            if (! $localLatest) {
-                return false;
+            // Deterministic real-time behavior:
+            // once local webhook rows exist, use local list as source of truth.
+            if (PbxCall::query()->exists()) {
+                return true;
             }
 
-            $localAt = \Carbon\Carbon::parse($localLatest);
-            $vtigerAt = $vtigerLatest ? \Carbon\Carbon::parse($vtigerLatest) : null;
-
-            // If vtiger has no rows, use local when recent.
-            if (! $vtigerAt) {
-                return $localAt->greaterThan(now()->subDays(7));
-            }
-
-            // Prefer local if it is ahead by 2+ minutes (sync lag/stuck).
-            return $localAt->greaterThan($vtigerAt->copy()->addMinutes(2));
+            // Fallback to vtiger only when local has no rows.
+            return false;
         } catch (\Throwable) {
             // Any vtiger/read issue should not hide local call history.
             return PbxCall::query()->exists();
@@ -156,6 +156,9 @@ class PbxController extends Controller
         }
 
         $calls = $query->orderByDesc('start_time')->paginate(50)->withQueryString();
+        $calls->setCollection(
+            $calls->getCollection()->map(fn ($row) => $this->toCallDto($row, false))
+        );
 
         $this->mergeClaimedRecipients($calls, 'local');
 
@@ -165,6 +168,80 @@ class PbxController extends Controller
             'pbxSource' => 'local',
             'pbxCanCall' => $this->pbxConfig->isConfigured(),
             'defaultExtension' => config('services.pbx.default_extension', env('PBX_DEFAULT_EXTENSION', '')),
+        ]);
+    }
+
+    /**
+     * Lightweight live feed for PBX table.
+     * Returns recent local calls as JSON to avoid full page reload.
+     */
+    public function live(Request $request): JsonResponse
+    {
+        $query = PbxCall::query();
+
+        if ($request->filled('list')) {
+            if ($request->list === 'Completed Calls') {
+                $query->where('call_status', 'completed');
+            } elseif ($request->list === 'No Response Calls') {
+                $query->whereIn('call_status', ['no-response', 'no-answer', 'busy']);
+            } elseif ($request->list === 'Received Calls') {
+                $claimedIds = PbxCallRecipient::where('call_source', 'local')->pluck('call_id')->toArray();
+                $query->whereIn('id', $claimedIds ?: [0]);
+            }
+        }
+
+        if ($request->filled('search')) {
+            $term = '%' . $request->search . '%';
+            $query->where(function ($q) use ($term) {
+                $q->where('customer_number', 'like', $term)
+                    ->orWhere('customer_name', 'like', $term)
+                    ->orWhere('user_name', 'like', $term);
+            });
+        }
+
+        $rows = $query->orderByDesc('start_time')->limit(50)->get();
+        $callIds = $rows->pluck('id')->all();
+        $claims = PbxCallRecipient::query()
+            ->where('call_source', 'local')
+            ->whereIn('call_id', $callIds ?: [0])
+            ->get()
+            ->keyBy('call_id');
+
+        $items = $rows->map(function (PbxCall $row) use ($claims) {
+            $dto = $this->toCallDto($row, false);
+            $claim = $claims->get($row->id);
+            if ($claim && trim((string) ($claim->received_by_user_name ?? '')) !== '') {
+                $dto->user_name = trim((string) $claim->received_by_user_name);
+                $dto->received_by_user_id = $claim->received_by_user_id;
+            }
+            $displayTimezone = (string) config('app.timezone', 'Africa/Nairobi');
+            $displayStart = $dto->start_time ? $dto->start_time->copy()->timezone($displayTimezone) : null;
+
+            return [
+                'id' => $dto->id,
+                'call_status' => (string) ($dto->call_status ?? 'unknown'),
+                'direction' => (string) ($dto->direction ?? 'unknown'),
+                'customer_number' => (string) ($dto->customer_number ?? ''),
+                'reason_for_calling' => (string) ($dto->reason_for_calling ?? ''),
+                'customer_name' => (string) ($dto->customer_name ?? ''),
+                'user_name' => (string) ($dto->user_name ?? ''),
+                'recording_url' => (string) ($dto->recording_url ?? ''),
+                'recording_route' => (! empty($dto->id) && ! empty($dto->recording_url))
+                    ? route('tools.pbx-manager.recording', ['pbxCall' => $dto->id])
+                    : null,
+                'duration_sec' => (int) ($dto->duration_sec ?? 0),
+                'received_by_user_id' => $dto->received_by_user_id ?? null,
+                'start_time' => $displayStart ? $displayStart->toIso8601String() : null,
+                'start_time_label' => $displayStart ? $displayStart->format('d M Y, h:i A') : '—',
+                'updated_at' => $row->updated_at?->toIso8601String(),
+            ];
+        })->values();
+
+        return response()->json([
+            'success' => true,
+            'calls' => $items,
+            'count' => $items->count(),
+            'ts' => now()->toIso8601String(),
         ]);
     }
 
@@ -265,8 +342,72 @@ class PbxController extends Controller
     protected function toCallDto(object $row, bool $fromVtiger): object
     {
         $recordingUrl = $row->recording_url ?? null;
+        $externalId = trim((string) ($row->external_id ?? ''));
+        $isUndatedMonitorUrl = is_string($recordingUrl)
+            && str_contains($recordingUrl, '/monitor/')
+            && ! preg_match('#/monitor/\d{4}/\d{2}/\d{2}/#', $recordingUrl);
+        if ($externalId !== '' && $isUndatedMonitorUrl) {
+            $datedMonitorUrl = $this->resolveRecordingUrlFromCdrUniqueId($externalId);
+            if (! empty($datedMonitorUrl)) {
+                $recordingUrl = $datedMonitorUrl;
+            }
+        }
+        $isLegacyRecordingEndpoint = is_string($recordingUrl) && str_contains($recordingUrl, '/recording?id=');
+        if ($isLegacyRecordingEndpoint) {
+            $legacyUniqueId = $this->extractUniqueIdFromRecordingUrl((string) $recordingUrl);
+            if ($legacyUniqueId !== '') {
+                $legacyResolvedUrl = $this->resolveRecordingUrlFromCdrUniqueId($legacyUniqueId);
+                if (! empty($legacyResolvedUrl)) {
+                    $recordingUrl = $legacyResolvedUrl;
+                    $isLegacyRecordingEndpoint = false;
+                }
+            }
+        }
+        if ($externalId !== '' && ($recordingUrl === null || $recordingUrl === '' || $isLegacyRecordingEndpoint)) {
+            $cdrResolvedUrl = $this->resolveRecordingUrlFromCdrUniqueId($externalId);
+            if (! empty($cdrResolvedUrl)) {
+                $recordingUrl = $cdrResolvedUrl;
+            }
+        }
+        if ($externalId !== '' && is_string($recordingUrl) && str_contains($recordingUrl, '/recording?id=')) {
+            $patternResolvedUrl = $this->resolveRecordingUrlByFilenamePattern(
+                $externalId,
+                trim((string) ($row->customer_number ?? '')),
+                $row->start_time ? \Carbon\Carbon::parse($row->start_time) : null
+            );
+            if (! empty($patternResolvedUrl)) {
+                $recordingUrl = $patternResolvedUrl;
+            }
+        }
         if (! $recordingUrl && ! empty($row->sourceuuid) && $fromVtiger) {
             $recordingUrl = $this->pbxConfig->getRecordingUrl($row->sourceuuid);
+        } elseif (! $recordingUrl && ! $fromVtiger && $externalId !== '') {
+            $recordingUrl = $this->pbxConfig->getRecordingUrl($externalId);
+        }
+        if ($externalId !== '' && is_string($recordingUrl) && str_contains($recordingUrl, '/recording?id=')) {
+            $cdrResolvedUrl = $this->resolveRecordingUrlFromCdrUniqueId($externalId);
+            if (! empty($cdrResolvedUrl)) {
+                $recordingUrl = $cdrResolvedUrl;
+            } else {
+                $patternResolvedUrl = $this->resolveRecordingUrlByFilenamePattern(
+                    $externalId,
+                    trim((string) ($row->customer_number ?? '')),
+                    $row->start_time ? \Carbon\Carbon::parse($row->start_time) : null
+                );
+                if (! empty($patternResolvedUrl)) {
+                    $recordingUrl = $patternResolvedUrl;
+                }
+            }
+        }
+        if (! $recordingUrl && $externalId !== '') {
+            $recordingUrl = $this->resolveRecordingUrlFromCdrUniqueId($externalId);
+        }
+        if (! $recordingUrl && $externalId !== '') {
+            $recordingUrl = $this->resolveRecordingUrlByFilenamePattern(
+                $externalId,
+                trim((string) ($row->customer_number ?? '')),
+                $row->start_time ? \Carbon\Carbon::parse($row->start_time) : null
+            );
         }
 
         $userName = trim($row->user_name ?? '') ?: null;
@@ -288,20 +429,271 @@ class PbxController extends Controller
             $userName = 'Ext ' . $userName;
         }
 
+        $customerNumber = trim((string) ($row->customer_number ?? ''));
+        $customerName = trim((string) ($row->customer_name ?? ''));
+        if (($customerName === '' || preg_replace('/\D/', '', $customerName) === preg_replace('/\D/', '', $customerNumber)) && $customerNumber !== '') {
+            $resolvedCustomerName = $this->resolveCustomerNameByPhone($customerNumber, false);
+            if ($resolvedCustomerName !== '') {
+                $customerName = $resolvedCustomerName;
+            }
+        }
+
+        $durationSec = (int) ($row->duration_sec ?? 0);
+        $status = strtolower(trim((string) ($row->call_status ?? '')));
+        $startAt = $row->start_time ? \Carbon\Carbon::parse($row->start_time) : null;
+        if ($durationSec <= 0 && in_array($status, ['received', 'completed'], true) && $startAt) {
+            $updatedAt = (isset($row->updated_at) && $row->updated_at)
+                ? \Carbon\Carbon::parse($row->updated_at)
+                : null;
+            if ($updatedAt && $updatedAt->greaterThan($startAt)) {
+                $durationSec = max(0, $startAt->diffInSeconds($updatedAt));
+            }
+        }
+
         return (object) [
             'id' => $row->pbxmanagerid ?? $row->id ?? null,
             'call_status' => $row->call_status ?? null,
             'direction' => $row->direction ?? null,
-            'customer_number' => $row->customer_number ?? null,
+            'customer_number' => $customerNumber !== '' ? $customerNumber : null,
             'reason_for_calling' => null,
-            'customer_name' => $row->customer_name ?? null,
+            'customer_name' => $customerName !== '' ? $customerName : null,
             'user_name' => $userName,
             'recording_url' => $recordingUrl,
             'recording_path' => null,
-            'duration_sec' => (int) ($row->duration_sec ?? 0),
-            'start_time' => $row->start_time ? \Carbon\Carbon::parse($row->start_time) : null,
+            'duration_sec' => $durationSec,
+            'start_time' => $startAt,
             'from_vtiger' => $fromVtiger,
         ];
+    }
+
+    protected function resolveRecordingUrlFromCdrUniqueId(string $uniqueId): ?string
+    {
+        $uniqueId = trim($uniqueId);
+        if ($uniqueId === '') {
+            return null;
+        }
+        if (array_key_exists($uniqueId, $this->recordingUrlByUniqueIdCache)) {
+            $cached = $this->recordingUrlByUniqueIdCache[$uniqueId];
+            return $cached !== '' ? $cached : null;
+        }
+
+        $monitorBase = rtrim((string) config('services.pbx.monitor_public_base_url', ''), '/');
+        if ($monitorBase === '') {
+            $this->recordingUrlByUniqueIdCache[$uniqueId] = '';
+            return null;
+        }
+
+        try {
+            $cdr = DB::connection('vtiger')
+                ->table('asteriskcdrdb.cdr')
+                ->select('recordingfile', 'calldate')
+                ->where('uniqueid', $uniqueId)
+                ->whereNotNull('recordingfile')
+                ->where('recordingfile', '<>', '')
+                ->orderByDesc('calldate')
+                ->first();
+            $recordingFile = trim((string) ($cdr->recordingfile ?? ''));
+            if ($recordingFile !== '') {
+                $paths = [];
+                if (! empty($cdr->calldate)) {
+                    try {
+                        $dt = \Carbon\Carbon::parse((string) $cdr->calldate)->timezone(config('app.timezone', 'Africa/Nairobi'));
+                        $paths[] = $dt->format('Y/m/d') . '/' . ltrim($recordingFile, '/');
+                    } catch (\Throwable) {
+                        // ignore calldate parse issues
+                    }
+                }
+                $paths[] = ltrim($recordingFile, '/');
+
+                foreach ($paths as $path) {
+                    $url = $monitorBase . '/' . $path;
+                    try {
+                        $head = Http::timeout(3)->withOptions(['verify' => false])->head($url);
+                        if ($head->successful()) {
+                            $this->recordingUrlByUniqueIdCache[$uniqueId] = $url;
+                            return $url;
+                        }
+                    } catch (\Throwable) {
+                        continue;
+                    }
+                }
+            }
+        } catch (\Throwable) {
+            // Keep call list resilient even if CDR DB is temporarily unreachable.
+        }
+
+        $this->recordingUrlByUniqueIdCache[$uniqueId] = '';
+        return null;
+    }
+
+    protected function resolveRecordingUrlByFilenamePattern(string $uniqueId, string $customerNumber, ?\Carbon\Carbon $startAt): ?string
+    {
+        $uniqueId = trim($uniqueId);
+        if ($uniqueId === '') {
+            return null;
+        }
+        $monitorBase = rtrim((string) config('services.pbx.monitor_public_base_url', ''), '/');
+        if ($monitorBase === '') {
+            return null;
+        }
+
+        $rawNumber = preg_replace('/\D/', '', $customerNumber);
+        if ($rawNumber === '') {
+            $rawNumber = 'unknown';
+        }
+        $epochPart = explode('.', $uniqueId)[0] ?? '';
+        if (ctype_digit((string) $epochPart)) {
+            $ts = \Carbon\Carbon::createFromTimestamp((int) $epochPart)->timezone(config('app.timezone', 'Africa/Nairobi'));
+        } else {
+            $ts = ($startAt ?? now())->copy()->timezone(config('app.timezone', 'Africa/Nairobi'));
+        }
+        $datePart = $ts->format('Ymd');
+        $timePart = $ts->format('His');
+        $dateTimePart = $datePart . '-' . $timePart;
+
+        $candidates = [
+            "{$monitorBase}/rg-620-{$rawNumber}-{$dateTimePart}-{$uniqueId}.wav",
+            "{$monitorBase}/in-{$dateTimePart}-{$rawNumber}-296.wav",
+        ];
+
+        foreach ($candidates as $url) {
+            try {
+                $head = Http::timeout(3)
+                    ->withOptions(['verify' => false])
+                    ->head($url);
+                if ($head->successful()) {
+                    return $url;
+                }
+            } catch (\Throwable) {
+                continue;
+            }
+        }
+
+        return null;
+    }
+
+    protected function resolveCustomerNameByPhone(string $phone, bool $allowErpFallback = true): string
+    {
+        $digits = preg_replace('/\D/', '', $phone);
+        if ($digits === '') {
+            return '';
+        }
+        if (isset($this->customerNameByPhoneCache[$digits])) {
+            return $this->customerNameByPhoneCache[$digits];
+        }
+
+        $variants = array_values(array_unique(array_filter([
+            $digits,
+            ltrim($digits, '0'),
+            str_starts_with($digits, '254') ? ('0' . substr($digits, 3)) : null,
+            str_starts_with($digits, '0') && strlen($digits) >= 10 ? ('254' . substr($digits, 1)) : null,
+            str_starts_with($digits, '00254') ? substr($digits, 2) : null,
+        ])));
+
+        foreach ($variants as $candidate) {
+            $contact = $this->crm->findContactByPhoneOrEmail($candidate, null);
+            if ($contact) {
+                $name = trim((string) (($contact->firstname ?? '') . ' ' . ($contact->lastname ?? '')));
+                if ($name !== '') {
+                    $this->customerNameByPhoneCache[$digits] = $name;
+                    return $name;
+                }
+            }
+        }
+
+        // ERP fallback can be expensive; use it during webhook ingest (write-time),
+        // not during list rendering.
+        if ($allowErpFallback) {
+            $erpName = $this->resolveErpCustomerNameByPhoneVariants($variants);
+            if ($erpName !== '') {
+                $this->customerNameByPhoneCache[$digits] = $erpName;
+                return $erpName;
+            }
+        }
+
+        $this->customerNameByPhoneCache[$digits] = '';
+        return '';
+    }
+
+    /**
+     * @param  array<int,string>  $variants
+     */
+    protected function resolveErpCustomerNameByPhoneVariants(array $variants): string
+    {
+        $variantDigits = array_values(array_unique(array_filter(
+            array_map(fn ($v) => preg_replace('/\D/', '', (string) $v), $variants)
+        )));
+        if (empty($variantDigits)) {
+            return '';
+        }
+
+        foreach ($variants as $candidate) {
+            try {
+                $result = $this->erpClients->searchClients((string) $candidate, 10);
+                $rows = $result['data'] ?? [];
+                if (! is_array($rows) || empty($rows)) {
+                    continue;
+                }
+
+                foreach ($rows as $row) {
+                    if (! is_array($row)) {
+                        continue;
+                    }
+
+                    $name = trim((string) (
+                        $row['name']
+                        ?? $row['client_name']
+                        ?? $row['life_assur']
+                        ?? $row['life_assured']
+                        ?? ''
+                    ));
+                    if ($name === '') {
+                        continue;
+                    }
+
+                    $rowPhoneCandidates = [
+                        (string) ($row['phone_no'] ?? ''),
+                        (string) ($row['mobile'] ?? ''),
+                        (string) ($row['phone'] ?? ''),
+                        (string) ($row['client_contact'] ?? ''),
+                    ];
+                    foreach ($rowPhoneCandidates as $rowPhone) {
+                        $rowDigits = preg_replace('/\D/', '', $rowPhone);
+                        if ($rowDigits === '') {
+                            continue;
+                        }
+
+                        if (in_array($rowDigits, $variantDigits, true)
+                            || in_array(ltrim($rowDigits, '0'), array_map(fn ($v) => ltrim($v, '0'), $variantDigits), true)
+                            || in_array(substr($rowDigits, -9), array_map(fn ($v) => substr($v, -9), $variantDigits), true)
+                        ) {
+                            return $name;
+                        }
+                    }
+                }
+
+                // If there is no strict phone-field match but search returned a clear candidate,
+                // prefer first non-empty name so PBX table is still useful for agents.
+                $first = $rows[0] ?? null;
+                if (is_array($first)) {
+                    $firstName = trim((string) (
+                        $first['name']
+                        ?? $first['client_name']
+                        ?? $first['life_assur']
+                        ?? $first['life_assured']
+                        ?? ''
+                    ));
+                    if ($firstName !== '') {
+                        return $firstName;
+                    }
+                }
+            } catch (\Throwable) {
+                // Keep PBX list fast/resilient even when ERP is unavailable.
+                continue;
+            }
+        }
+
+        return '';
     }
 
     public function fetch(Request $request)
@@ -414,18 +806,22 @@ class PbxController extends Controller
         if ($endTime === null && $duration > 0) {
             $endTime = $startTime->copy()->addSeconds($duration);
         }
-        // If PBX reports ringing/incoming but we already know who handled it, treat as received.
-        if (in_array($status, ['ringing', 'incomingcall'], true) && $direction === 'inbound' && $user !== '') {
-            $status = 'received';
-        }
+        // Do not auto-mark as received from extension/user alone.
+        // A call is received only when PBX explicitly reports answered/completed
+        // or when user manually claims it in PBX Manager.
         if ($customerName === '' && $customerNumber !== '') {
-            $customerName = $customerNumber;
+            $resolvedCustomerName = $this->resolveCustomerNameByPhone($customerNumber, true);
+            $customerName = $resolvedCustomerName !== '' ? $resolvedCustomerName : $customerNumber;
         }
         if ($recordingUrl === '' && $recordingFile !== '') {
             $monitorBase = rtrim((string) config('services.pbx.monitor_public_base_url', ''), '/');
             if ($monitorBase !== '') {
                 $recordingUrl = $monitorBase . '/' . ltrim($recordingFile, '/');
             }
+        }
+        if ($recordingUrl === '' && $sourceUuid !== '') {
+            // Backward-compatible fallback: old connector usually served recordings by call UUID.
+            $recordingUrl = $this->pbxConfig->getRecordingUrl($sourceUuid);
         }
 
         $payload = [
@@ -523,7 +919,7 @@ class PbxController extends Controller
         return $this->pbxWebhookResponse($request, true, 'PBX event received.');
     }
 
-    public function recordingVtiger(int $id)
+    public function recordingVtiger(Request $request, int $id)
     {
         $row = DB::connection('vtiger')
             ->table('vtiger_pbxmanager')
@@ -540,22 +936,51 @@ class PbxController extends Controller
         } elseif (! empty($row->sourceuuid)) {
             $recordingUrl = $this->pbxConfig->getRecordingUrl($row->sourceuuid);
         }
+        if ($recordingUrl && str_contains((string) $recordingUrl, '/recording?id=') && ! empty($row->sourceuuid)) {
+            $patternResolvedUrl = $this->resolveRecordingUrlByFilenamePattern(
+                (string) $row->sourceuuid,
+                trim((string) ($row->customernumber ?? '')),
+                ! empty($row->starttime) ? \Carbon\Carbon::parse($row->starttime) : null
+            );
+            if (! empty($patternResolvedUrl)) {
+                $recordingUrl = $patternResolvedUrl;
+            }
+        }
 
         if (! $recordingUrl) {
             abort(404);
         }
 
-        return $this->streamRecordingFromUrl($recordingUrl);
+        return $this->streamRecordingFromUrl($recordingUrl, $request->boolean('download'));
     }
 
-    public function recording(PbxCall $pbxCall)
+    public function recording(Request $request, PbxCall $pbxCall)
     {
-        if (! $pbxCall->hasRecording()) {
-            abort(404);
+        if (! empty($pbxCall->recording_url)) {
+            $recordingUrl = (string) $pbxCall->recording_url;
+            if (str_contains($recordingUrl, '/recording?id=')) {
+                $patternResolvedUrl = $this->resolveRecordingUrlByFilenamePattern(
+                    (string) ($pbxCall->external_id ?? ''),
+                    trim((string) ($pbxCall->customer_number ?? '')),
+                    $pbxCall->start_time ? \Carbon\Carbon::parse($pbxCall->start_time) : null
+                );
+                if (! empty($patternResolvedUrl)) {
+                    $recordingUrl = $patternResolvedUrl;
+                }
+            }
+            return $this->streamRecordingFromUrl($recordingUrl, $request->boolean('download'));
         }
 
-        if (! empty($pbxCall->recording_url)) {
-            return $this->streamRecordingFromUrl($pbxCall->recording_url);
+        // Backward-compatible fallback: many local rows store only external_id/source UUID.
+        if (! empty($pbxCall->external_id)) {
+            $fallbackUrl = $this->pbxConfig->getRecordingUrl((string) $pbxCall->external_id);
+            if ($fallbackUrl !== '') {
+                return $this->streamRecordingFromUrl($fallbackUrl, $request->boolean('download'));
+            }
+        }
+
+        if (! $pbxCall->hasRecording()) {
+            abort(404);
         }
 
         $path = $pbxCall->recording_path;
@@ -759,30 +1184,142 @@ class PbxController extends Controller
      * Fetch recording from external URL and stream to browser.
      * Proxies through Laravel to avoid CORS and mixed-content issues.
      */
-    protected function streamRecordingFromUrl(string $url)
+    protected function streamRecordingFromUrl(string $url, bool $download = false)
     {
-        try {
-            $secretKey = $this->pbxConfig->getSecretKey();
-            $response = Http::timeout(30)
-                ->withHeaders($secretKey ? ['X-Vtiger-Secret' => $secretKey] : [])
-                ->get($url);
-
-            if (! $response->successful()) {
-                abort(404, 'Recording not found');
+        $legacyUniqueId = $this->extractUniqueIdFromRecordingUrl($url);
+        if ($legacyUniqueId !== '') {
+            $cdrResolvedUrl = $this->resolveRecordingUrlFromCdrUniqueId($legacyUniqueId);
+            if (! empty($cdrResolvedUrl)) {
+                $url = $cdrResolvedUrl;
             }
-
-            $contentType = $response->header('Content-Type') ?: 'audio/mpeg';
-            $contentDisposition = $response->header('Content-Disposition');
-
-            return response($response->body(), 200, [
-                'Content-Type' => $contentType,
-                'Content-Length' => strlen($response->body()),
-                'Accept-Ranges' => 'bytes',
-                'Cache-Control' => 'public, max-age=3600',
-            ]);
-        } catch (\Throwable $e) {
-            abort(404, 'Could not load recording: ' . $e->getMessage());
         }
+
+        $candidates = $this->buildRecordingUrlCandidates($url);
+        $secretKey = $this->pbxConfig->getSecretKey();
+        $headers = $secretKey ? ['X-Vtiger-Secret' => $secretKey] : [];
+
+        foreach ($candidates as $candidateUrl) {
+            try {
+                $response = Http::timeout(30)
+                    ->withOptions(['verify' => false])
+                    ->withHeaders($headers)
+                    ->get($candidateUrl);
+
+                if (! $response->successful()) {
+                    continue;
+                }
+
+                $contentType = $response->header('Content-Type') ?: 'audio/mpeg';
+                $filename = basename(parse_url($candidateUrl, PHP_URL_PATH) ?: 'recording.mp3');
+                if ($filename === '' || $filename === 'recording') {
+                    $filename = 'recording.mp3';
+                }
+                $contentDisposition = $download
+                    ? "attachment; filename=\"{$filename}\""
+                    : ($response->header('Content-Disposition') ?: "inline; filename=\"{$filename}\"");
+
+                return response($response->body(), 200, [
+                    'Content-Type' => $contentType,
+                    'Content-Length' => strlen($response->body()),
+                    'Content-Disposition' => $contentDisposition,
+                    'Accept-Ranges' => 'bytes',
+                    'Cache-Control' => 'public, max-age=3600',
+                ]);
+            } catch (\Throwable) {
+                continue;
+            }
+        }
+
+        // Last chance: derive monitor-file URL from local call metadata by uniqueid.
+        if ($legacyUniqueId !== '') {
+            $local = PbxCall::query()
+                ->where('external_id', $legacyUniqueId)
+                ->orderByDesc('id')
+                ->first(['external_id', 'customer_number', 'start_time']);
+            if ($local) {
+                $derived = $this->resolveRecordingUrlByFilenamePattern(
+                    (string) $local->external_id,
+                    (string) ($local->customer_number ?? ''),
+                    $local->start_time ? \Carbon\Carbon::parse($local->start_time) : null
+                );
+                if (! empty($derived)) {
+                    return redirect()->away($derived);
+                }
+            }
+        }
+
+        abort(404, 'Recording not available yet for this call.');
+    }
+
+    /**
+     * Build a resilient set of PBX recording URL variants.
+     * Some PBX setups expose recordings on 8383, others on 80/443.
+     *
+     * @return array<int,string>
+     */
+    protected function buildRecordingUrlCandidates(string $url): array
+    {
+        $url = trim($url);
+        if ($url === '') {
+            return [];
+        }
+
+        $parts = parse_url($url);
+        if (! is_array($parts) || empty($parts['host'])) {
+            return [$url];
+        }
+
+        $scheme = $parts['scheme'] ?? 'http';
+        $host = $parts['host'];
+        $port = $parts['port'] ?? null;
+        $path = $parts['path'] ?? '';
+        $query = isset($parts['query']) ? ('?' . $parts['query']) : '';
+
+        $variants = [];
+        $variants[] = $url;
+
+        // PBX monitor files are often served under dated folders:
+        // /monitor/YYYY/MM/DD/<recordingfile>.wav
+        // while some rows store /monitor/<recordingfile>.wav.
+        if (preg_match('#^(https?://[^/]+/monitor)/([^/?]+)$#i', $url, $m)) {
+            $monitorBase = $m[1];
+            $fileName = $m[2];
+            if (preg_match('/-(\d{8})-\d{6}-[\d.]+\.wav$/i', $fileName, $dm)) {
+                $yyyymmdd = $dm[1];
+                $yyyy = substr($yyyymmdd, 0, 4);
+                $mm = substr($yyyymmdd, 4, 2);
+                $dd = substr($yyyymmdd, 6, 2);
+                $variants[] = "{$monitorBase}/{$yyyy}/{$mm}/{$dd}/{$fileName}";
+            }
+        }
+
+        // Same host/path/query on default ports.
+        $variants[] = "{$scheme}://{$host}{$path}{$query}";
+        $variants[] = "https://{$host}{$path}{$query}";
+        $variants[] = "http://{$host}{$path}{$query}";
+
+        // Keep explicit non-default port variant if present.
+        if ($port !== null) {
+            $variants[] = "{$scheme}://{$host}:{$port}{$path}{$query}";
+            $variants[] = "https://{$host}:{$port}{$path}{$query}";
+            $variants[] = "http://{$host}:{$port}{$path}{$query}";
+        }
+
+        return array_values(array_unique(array_filter($variants)));
+    }
+
+    protected function extractUniqueIdFromRecordingUrl(string $url): string
+    {
+        if (! str_contains($url, '/recording?id=')) {
+            return '';
+        }
+        $query = parse_url($url, PHP_URL_QUERY);
+        if (! is_string($query) || $query === '') {
+            return '';
+        }
+        parse_str($query, $params);
+        $id = trim((string) ($params['id'] ?? ''));
+        return $id;
     }
 
     protected function upsertCall(array $call): int

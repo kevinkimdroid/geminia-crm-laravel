@@ -88,7 +88,11 @@
                         <th>Time</th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody id="pbx-live-tbody"
+                    data-live-url="{{ route('tools.pbx-manager.live', request()->query()) }}"
+                    data-source="{{ $pbxSource ?? 'local' }}"
+                    data-auth-user-id="{{ auth()->id() ?? '' }}"
+                    data-auth-user-name="{{ auth()->check() ? trim((string) ((auth()->user()->first_name ?? '') . ' ' . (auth()->user()->last_name ?? ''))) : '' }}">
                             @forelse ($calls as $call)
                                 @php
                                     $loggedInName = auth()->check()
@@ -111,14 +115,21 @@
                                     $rawReason = trim((string) ($call->reason_for_calling ?? ''));
                                     $displayReason = $rawReason !== '' ? $rawReason : (($displayStatus === 'completed') ? 'Inbound call' : 'Awaiting sync');
                                     $rawCustomer = trim((string) ($call->customer_name ?? ''));
-                                    $displayCustomer = $rawCustomer !== '' ? $rawCustomer : ($displayNumber !== '' ? $displayNumber : 'Unknown');
+                                    if (preg_match('/^00?254\d{9}$/', preg_replace('/\s+/', '', $rawCustomer))) {
+                                        $displayCustomer = $displayNumber !== '' ? $displayNumber : $rawCustomer;
+                                    } else {
+                                        $displayCustomer = $rawCustomer !== '' ? $rawCustomer : ($displayNumber !== '' ? $displayNumber : 'Unknown');
+                                    }
                                     $rawUser = trim((string) ($call->user_name ?? ''));
                                     $displayUser = $rawUser !== '' ? $rawUser : 'Unassigned';
+                                    if (preg_match('/^\d{2,6}$/', $displayUser)) {
+                                        $displayUser = 'Ext ' . $displayUser;
+                                    }
                                     $userLooksLikeMe = auth()->check() && $loggedInName !== '' && strcasecmp($displayUser, $loggedInName) === 0;
-                                    if (($receivedByMe || $userLooksLikeMe) && in_array($displayStatus, ['ringing', 'missed'], true)) {
+                                    if ($receivedByMe && in_array($displayStatus, ['ringing', 'missed'], true)) {
                                         $displayStatus = 'received';
                                     }
-                                    if (($receivedByMe || $userLooksLikeMe) && ($rawReason === '' || $displayReason === 'Awaiting sync')) {
+                                    if ($receivedByMe && ($rawReason === '' || $displayReason === 'Awaiting sync')) {
                                         $displayReason = 'Received by ' . ($loggedInName !== '' ? $loggedInName : 'you');
                                     }
                                     $displayDuration = $rawDuration;
@@ -171,8 +182,9 @@
                                                 $recordingRoute = route('tools.pbx-manager.recording.vtiger', $call->id);
                                             } elseif (method_exists($call, 'hasRecording') && $call->hasRecording()) {
                                                 $recordingRoute = route('tools.pbx-manager.recording', $call);
-                                            } elseif (!empty($call->recording_url)) {
-                                                $recordingRoute = route('tools.pbx-manager.recording', $call);
+                                            } elseif (!empty($call->recording_url) && !empty($call->id)) {
+                                                // Local rows may be DTO stdClass objects; pass route key explicitly.
+                                                $recordingRoute = route('tools.pbx-manager.recording', ['pbxCall' => $call->id]);
                                             }
                                         @endphp
                                         @if($recordingRoute)
@@ -181,20 +193,33 @@
                                                     <source src="{{ $recordingRoute }}" type="audio/mpeg">
                                                     Your browser does not support audio playback.
                                                 </audio>
+                                                <a href="{{ $recordingRoute }}?download=1" class="pbx-play-btn" title="Download recording">
+                                                    <i class="bi bi-download"></i>
+                                                </a>
                                                 <button type="button" class="pbx-play-btn pbx-play-modal-btn" data-recording-url="{{ $recordingRoute }}" data-call-info="{{ $call->customer_number ?? '' }} - {{ optional($call->start_time)->format('d/m H:i') ?: '' }}" title="Open in player">
                                                     <i class="bi bi-box-arrow-up-right"></i>
                                                 </button>
                                             </div>
                                         @else
-                                            @if($displayStatus === 'completed')
+                                            @if(in_array($displayStatus, ['completed', 'received', 'ringing'], true))
                                                 <span class="pbx-cell-muted">Pending recording</span>
                                             @else
                                                 <span class="pbx-cell-muted">—</span>
                                             @endif
                                         @endif
                                     </td>
-                                    <td><span class="pbx-duration">{{ $displayDuration > 0 ? $displayDuration . 's' : '—' }}</span></td>
-                                    <td class="pbx-time">{{ optional($call->start_time)->format('d M Y, h:i A') ?: '—' }}</td>
+                                    <td>
+                                        <span class="pbx-duration">
+                                            @if($displayDuration > 0)
+                                                {{ $displayDuration }}s
+                                            @elseif(in_array($displayStatus, ['completed', 'received'], true))
+                                                Pending sync
+                                            @else
+                                                —
+                                            @endif
+                                        </span>
+                                    </td>
+                                    <td class="pbx-time">{{ optional($call->start_time)->timezone(config('app.timezone', 'Africa/Nairobi'))->format('d M Y, h:i A') ?: '—' }}</td>
                                 </tr>
                             @empty
                                 <tr>
@@ -527,7 +552,7 @@ document.querySelectorAll('.pbx-play-modal-btn').forEach(btn => {
         audio.addEventListener('canplaythrough', () => audio.play(), { once: true });
         audio.addEventListener('error', () => {
             console.error('Recording failed to load');
-            alert('Could not load recording. The file may be missing or the PBX server may be unreachable.');
+            alert('Could not load recording for this call yet. Please try again after a few seconds.');
         });
     });
 });
@@ -621,10 +646,159 @@ document.querySelector('.pbx-claim-latest-btn')?.addEventListener('click', funct
     });
 });
 
-// Auto-refresh call logs for near real-time updates.
-// Keeps page stable by pausing while user is interacting with form fields/modals.
+// Live-refresh call rows without full page reload.
 (function () {
-    var REFRESH_MS = 10000;
+    var REFRESH_MS = 700;
+    var tbody = document.getElementById('pbx-live-tbody');
+    if (!tbody || (tbody.dataset.source || 'local') !== 'local') return;
+    var liveUrl = tbody.dataset.liveUrl;
+    if (!liveUrl) return;
+    var authUserId = parseInt(tbody.dataset.authUserId || '0', 10) || null;
+    var authUserName = (tbody.dataset.authUserName || '').trim();
+    var lastPayloadSig = '';
+    var inflight = false;
+
+    function esc(v) {
+        return String(v ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function normalizeDisplayNumber(rawNumber) {
+        var n = (rawNumber || '').trim();
+        var m = n.match(/^00254(\d{9})$/);
+        if (m) return '0' + m[1];
+        m = n.match(/^254(\d{9})$/);
+        if (m) return '0' + m[1];
+        return n;
+    }
+
+    function statusBadgeClass(status) {
+        return String(status || 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    }
+
+    function renderRows(calls) {
+        if (!Array.isArray(calls)) return;
+        var nextSig = calls.map(function (c) {
+            return [
+                c.id,
+                c.call_status,
+                c.duration_sec,
+                c.recording_url || '',
+                c.user_name || '',
+                c.customer_name || '',
+                c.updated_at || ''
+            ].join('|');
+        }).join('||');
+        if (nextSig !== '' && nextSig === lastPayloadSig) return;
+        lastPayloadSig = nextSig;
+
+        var html = calls.map(function (call) {
+            var rawNumber = String(call.customer_number || '');
+            var displayNumber = normalizeDisplayNumber(rawNumber);
+            var rawStatus = String(call.call_status || 'unknown').toLowerCase().trim() || 'unknown';
+            var rawDuration = parseInt(call.duration_sec || 0, 10) || 0;
+            var displayStatus = (rawStatus === 'ringing' && rawDuration > 0) ? 'completed' : rawStatus;
+            var rawReason = String(call.reason_for_calling || '').trim();
+            var displayReason = rawReason !== '' ? rawReason : (displayStatus === 'completed' ? 'Inbound call' : 'Awaiting sync');
+            var rawCustomer = String(call.customer_name || '').trim();
+            var displayCustomer = (/^00?254\d{9}$/.test(rawCustomer.replace(/\s+/g, '')))
+                ? (displayNumber || rawCustomer)
+                : (rawCustomer || displayNumber || 'Unknown');
+            var displayUser = String(call.user_name || '').trim() || 'Unassigned';
+            if (/^\d{2,6}$/.test(displayUser)) displayUser = 'Ext ' + displayUser;
+            var receivedByMe = authUserId && parseInt(call.received_by_user_id || 0, 10) === authUserId;
+            var userLooksLikeMe = authUserName !== '' && displayUser.toLowerCase() === authUserName.toLowerCase();
+            if (receivedByMe && (displayStatus === 'ringing' || displayStatus === 'missed')) {
+                displayStatus = 'received';
+            }
+            if (receivedByMe && (rawReason === '' || displayReason === 'Awaiting sync')) {
+                displayReason = 'Received by ' + (authUserName || 'you');
+            }
+            var durationLabel = rawDuration > 0 ? (rawDuration + 's') : ((displayStatus === 'completed' || displayStatus === 'received') ? 'Pending sync' : '—');
+            var telLink = rawNumber !== '' ? '<a href="tel:' + esc(rawNumber) + '" class="pbx-number-link" title="Call"><i class="bi bi-telephone-outbound"></i></a>' : '';
+            var serveLink = displayNumber !== ''
+                ? '<a href="{{ route('support.serve-client') }}?search=' + encodeURIComponent(displayNumber.replace(/\s+/g, '')) + '" class="text-decoration-none">' + esc(displayCustomer.length > 22 ? displayCustomer.slice(0, 22) + '...' : displayCustomer) + '</a>'
+                : esc(displayCustomer.length > 22 ? displayCustomer.slice(0, 22) + '...' : displayCustomer);
+            var recordingRoute = String(call.recording_route || '').trim();
+            var callInfo = esc((rawNumber || '') + ' - ' + String(call.start_time_label || ''));
+            var recordingCell = '';
+            if (recordingRoute !== '') {
+                recordingCell =
+                    '<div class="pbx-recording-cell" data-recording-url="' + esc(recordingRoute) + '">' +
+                        '<audio class="pbx-inline-audio" controls preload="none" title="Play recording">' +
+                            '<source src="' + esc(recordingRoute) + '" type="audio/mpeg">' +
+                            'Your browser does not support audio playback.' +
+                        '</audio>' +
+                        '<a href="' + esc(recordingRoute + '?download=1') + '" class="pbx-play-btn" title="Download recording">' +
+                            '<i class="bi bi-download"></i>' +
+                        '</a>' +
+                        '<button type="button" class="pbx-play-btn pbx-play-modal-btn" data-recording-url="' + esc(recordingRoute) + '" data-call-info="' + callInfo + '" title="Open in player">' +
+                            '<i class="bi bi-box-arrow-up-right"></i>' +
+                        '</button>' +
+                    '</div>';
+            } else {
+                recordingCell = (displayStatus === 'completed' || displayStatus === 'received' || displayStatus === 'ringing')
+                    ? '<span class="pbx-cell-muted">Pending recording</span>'
+                    : '<span class="pbx-cell-muted">—</span>';
+            }
+            return '' +
+                '<tr>' +
+                '<td><span class="pbx-badge pbx-badge-' + esc(statusBadgeClass(displayStatus)) + '">' + esc(displayStatus) + '</span></td>' +
+                '<td><span class="pbx-direction pbx-direction-' + esc(String(call.direction || 'unknown').toLowerCase()) + '">' + esc(call.direction || '—') + '</span></td>' +
+                '<td>' + telLink + '<span class="pbx-number">' + esc(displayNumber || '—') + '</span></td>' +
+                '<td class="d-none d-lg-table-cell pbx-cell-muted">' + esc(displayReason.length > 24 ? displayReason.slice(0, 24) + '...' : displayReason) + '</td>' +
+                '<td class="d-none d-xl-table-cell">' + serveLink + '</td>' +
+                '<td><span class="pbx-user-display">' + esc(displayUser) + '</span>' + ((receivedByMe || userLooksLikeMe) ? '<span class="badge bg-success-subtle text-success-emphasis border ms-1">You</span>' : '') + '</td>' +
+                '<td>' + recordingCell + '</td>' +
+                '<td><span class="pbx-duration">' + esc(durationLabel) + '</span></td>' +
+                '<td class="pbx-time">' + esc(call.start_time_label || '—') + '</td>' +
+                '</tr>';
+        }).join('');
+
+        if (html !== '') {
+            tbody.innerHTML = html;
+            bindRecordingActions();
+        }
+    }
+
+    function bindRecordingActions() {
+        document.querySelectorAll('.pbx-inline-audio').forEach(function(audio) {
+            if (audio.dataset.boundError === '1') return;
+            audio.dataset.boundError = '1';
+            audio.addEventListener('error', function() {
+                var cell = this.closest('.pbx-recording-cell');
+                if (cell && !cell.querySelector('.pbx-no-recording')) {
+                    cell.innerHTML = '<span class="pbx-cell-muted pbx-no-recording">No recording</span>';
+                }
+            });
+        });
+
+        document.querySelectorAll('.pbx-play-modal-btn').forEach(function(btn) {
+            if (btn.dataset.boundClick === '1') return;
+            btn.dataset.boundClick = '1';
+            btn.addEventListener('click', function() {
+                var url = this.dataset.recordingUrl;
+                var info = this.dataset.callInfo || '—';
+                if (!url) return;
+                var modal = new bootstrap.Modal(document.getElementById('pbxRecordingModal'));
+                var audio = document.getElementById('pbxRecordingAudio');
+                document.getElementById('pbxRecordingInfo').textContent = info;
+                audio.pause();
+                audio.src = url;
+                audio.load();
+                modal.show();
+                audio.addEventListener('canplaythrough', function() { audio.play(); }, { once: true });
+                audio.addEventListener('error', function() {
+                    alert('Could not load recording for this call yet. Please try again after a few seconds.');
+                }, { once: true });
+            });
+        });
+    }
+
     function shouldSkipRefresh() {
         if (document.hidden) return true;
         if (document.querySelector('.modal.show')) return true;
@@ -634,9 +808,18 @@ document.querySelector('.pbx-claim-latest-btn')?.addEventListener('click', funct
         return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || active.isContentEditable;
     }
     setInterval(function () {
-        if (shouldSkipRefresh()) return;
-        window.location.reload();
+        if (shouldSkipRefresh() || inflight) return;
+        inflight = true;
+        fetch(liveUrl, { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (data) {
+                if (data && data.success) renderRows(data.calls || []);
+            })
+            .catch(function () {})
+            .finally(function () { inflight = false; });
     }, REFRESH_MS);
+
+    bindRecordingActions();
 })();
 </script>
 @endsection
