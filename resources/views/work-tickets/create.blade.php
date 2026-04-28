@@ -34,7 +34,7 @@
                 <div class="col-md-3">
                     <label class="form-label fw-semibold">Status <span class="text-danger">*</span></label>
                     <select name="status" class="form-select" required>
-                        @foreach(['Open', 'In Progress', 'Blocked', 'Done', 'Cancelled'] as $status)
+                        @foreach(['Open', 'In Progress', 'Blocked', 'Closed', 'Cancelled'] as $status)
                         <option value="{{ $status }}" {{ old('status', 'Open') === $status ? 'selected' : '' }}>{{ $status }}</option>
                         @endforeach
                     </select>

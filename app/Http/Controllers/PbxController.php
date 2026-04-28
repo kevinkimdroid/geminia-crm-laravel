@@ -713,6 +713,7 @@ class PbxController extends Controller
 
         try {
             $response = Http::timeout(30)
+                ->withOptions(['verify' => false])
                 ->withHeaders($apiKey ? ['Authorization' => 'Bearer ' . $apiKey] : [])
                 ->get($apiUrl);
 
@@ -1088,6 +1089,7 @@ class PbxController extends Controller
             try {
                 if (($ep['method'] ?? 'post') === 'get') {
                     $response = Http::timeout(10)
+                        ->withOptions(['verify' => false])
                         ->withHeaders($secretKey ? ['X-Vtiger-Secret' => $secretKey] : [])
                         ->get($url, ($ep['empty_body'] ?? false) ? [] : $payload);
                 } else {
@@ -1097,10 +1099,10 @@ class PbxController extends Controller
                     ]);
                     $requestPayload = ($ep['empty_body'] ?? false) ? [] : $payload;
                     if ($ep['form'] ?? false) {
-                        $response = Http::timeout(10)->withHeaders($headers)->asForm()->post($url, $requestPayload);
+                        $response = Http::timeout(10)->withOptions(['verify' => false])->withHeaders($headers)->asForm()->post($url, $requestPayload);
                     } else {
                         $headers['Content-Type'] = 'application/json';
-                        $response = Http::timeout(10)->withHeaders($headers)->post($url, $requestPayload);
+                        $response = Http::timeout(10)->withOptions(['verify' => false])->withHeaders($headers)->post($url, $requestPayload);
                     }
                 }
 
@@ -1161,6 +1163,17 @@ class PbxController extends Controller
             }
         }
 
+        $amiResult = $this->originateViaAmi($extension, $number, $context);
+        if (($amiResult['success'] ?? false) === true) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Call initiated via Asterisk AMI. Your phone should ring shortly.',
+            ]);
+        }
+        if (! empty($amiResult['message'])) {
+            $lastError = trim(($lastError ? ($lastError . ' | ') : '') . $amiResult['message']);
+        }
+
         $message = 'Could not reach PBX or call failed.';
         if (stripos($lastError ?? '', 'Error') !== false || stripos($lastError ?? '', 'Authentication') !== false) {
             $message = 'PBX returned error. Check: extension exists in CRM user profile (phone_crm_extension), secret key matches connector, Asterisk is running.';
@@ -1178,6 +1191,121 @@ class PbxController extends Controller
             'message' => $message,
             'detail' => $lastError,
         ], 502);
+    }
+
+    /**
+     * Direct AMI originate fallback for Issabel/Asterisk.
+     * Useful when legacy Vtiger makeCall endpoint is unavailable.
+     *
+     * @return array{success: bool, message?: string}
+     */
+    protected function originateViaAmi(string $extension, string $number, string $context): array
+    {
+        $host = trim((string) env('PBX_AMI_HOST', ''));
+        $port = (int) env('PBX_AMI_PORT', 5038);
+        $username = trim((string) env('PBX_AMI_USERNAME', ''));
+        $secret = trim((string) env('PBX_AMI_SECRET', ''));
+        $dialContext = trim((string) env('PBX_AMI_CONTEXT', $context !== '' ? $context : 'from-internal'));
+        $timeout = max(3, (int) env('PBX_AMI_TIMEOUT', 8));
+
+        if ($host === '' || $username === '' || $secret === '') {
+            return ['success' => false, 'message' => 'AMI fallback not configured (PBX_AMI_HOST/USERNAME/SECRET).'];
+        }
+
+        $errno = 0;
+        $errstr = '';
+        $socket = @fsockopen($host, $port, $errno, $errstr, $timeout);
+        if (! $socket) {
+            return ['success' => false, 'message' => "AMI connect failed: {$errstr} ({$errno})"];
+        }
+
+        stream_set_timeout($socket, $timeout);
+
+        $readResponse = static function ($sock): string {
+            $buffer = '';
+            while (! feof($sock)) {
+                $line = fgets($sock, 4096);
+                if ($line === false) {
+                    break;
+                }
+                $buffer .= $line;
+                if (rtrim($line) === '') {
+                    break;
+                }
+            }
+            return $buffer;
+        };
+
+        $writeAction = static function ($sock, array $fields): void {
+            $payload = '';
+            foreach ($fields as $k => $v) {
+                $payload .= $k . ': ' . $v . "\r\n";
+            }
+            $payload .= "\r\n";
+            fwrite($sock, $payload);
+        };
+
+        try {
+            $readResponse($socket); // banner
+            $writeAction($socket, [
+                'Action' => 'Login',
+                'Username' => $username,
+                'Secret' => $secret,
+                'Events' => 'off',
+            ]);
+            $login = $readResponse($socket);
+            if (stripos($login, 'Success') === false) {
+                fclose($socket);
+                return ['success' => false, 'message' => 'AMI login failed.'];
+            }
+
+            $channels = [
+                "Local/{$extension}@{$dialContext}",
+                "PJSIP/{$extension}",
+                "SIP/{$extension}",
+                "IAX2/{$extension}",
+            ];
+            $lastOriginate = '';
+            foreach ($channels as $channel) {
+                $writeAction($socket, [
+                    'Action' => 'Originate',
+                    'Channel' => $channel,
+                    'Exten' => $number,
+                    'Context' => $dialContext,
+                    'Priority' => '1',
+                    'CallerID' => "CRM <{$number}>",
+                    'Async' => 'true',
+                    'Timeout' => '30000',
+                ]);
+                $originate = $readResponse($socket);
+                $lastOriginate = $originate;
+                if (stripos($originate, 'Success') !== false) {
+                    Log::info('PBX AMI originate queued', [
+                        'channel' => $channel,
+                        'context' => $dialContext,
+                        'extension' => $extension,
+                        'number' => $number,
+                        'response' => trim(preg_replace('/\s+/', ' ', $originate) ?? ''),
+                    ]);
+                    $writeAction($socket, ['Action' => 'Logoff']);
+                    fclose($socket);
+                    return ['success' => true];
+                }
+            }
+
+            $writeAction($socket, ['Action' => 'Logoff']);
+            fclose($socket);
+            Log::warning('PBX AMI originate failed', [
+                'context' => $dialContext,
+                'extension' => $extension,
+                'number' => $number,
+                'response' => trim(preg_replace('/\s+/', ' ', $lastOriginate) ?? ''),
+            ]);
+            return ['success' => false, 'message' => 'AMI originate failed: ' . trim((string) preg_replace('/\s+/', ' ', $lastOriginate))];
+        } catch (\Throwable $e) {
+            @fclose($socket);
+            return ['success' => false, 'message' => 'AMI exception: ' . $e->getMessage()];
+        }
     }
 
     /**

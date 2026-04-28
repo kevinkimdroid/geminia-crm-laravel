@@ -58,7 +58,7 @@
                 <label class="form-label small fw-semibold mb-1">Status</label>
                 <select name="status" class="form-select form-select-sm">
                     <option value="">All statuses</option>
-                    @foreach(['Open', 'In Progress', 'Blocked', 'Done', 'Cancelled'] as $s)
+                    @foreach(['Open', 'In Progress', 'Blocked', 'Closed', 'Cancelled'] as $s)
                     <option value="{{ $s }}" {{ ($status ?? '') === $s ? 'selected' : '' }}>{{ $s }}</option>
                     @endforeach
                 </select>
@@ -100,7 +100,7 @@
                     <td>
                         @php
                             $statusClass = match($ticket->status) {
-                                'Done' => 'bg-success',
+                                'Done', 'Closed' => 'bg-success',
                                 'Blocked' => 'bg-danger',
                                 'In Progress' => 'bg-primary',
                                 'Cancelled' => 'bg-secondary',
@@ -125,9 +125,9 @@
                             $tatDueAt = !empty($ticket->tat_due_at) ? \Carbon\Carbon::parse($ticket->tat_due_at) : null;
                             $tatBreached = false;
                             if ($tatDueAt) {
-                                if (($ticket->status ?? '') === 'Done' && !empty($ticket->completed_at)) {
+                                if (in_array(($ticket->status ?? ''), ['Done', 'Closed'], true) && !empty($ticket->completed_at)) {
                                     $tatBreached = \Carbon\Carbon::parse($ticket->completed_at)->gt($tatDueAt);
-                                } elseif (($ticket->status ?? '') !== 'Done') {
+                                } elseif (!in_array(($ticket->status ?? ''), ['Done', 'Closed'], true)) {
                                     $tatBreached = now()->gt($tatDueAt);
                                 }
                             }

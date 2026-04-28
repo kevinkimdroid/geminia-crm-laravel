@@ -6,6 +6,7 @@ use App\Models\UserReportingLine;
 use App\Models\VtigerUser;
 use App\Models\WorkTicket;
 use App\Models\WorkTicketUpdate;
+use App\Services\WorkTicketNotificationService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Http\RedirectResponse;
@@ -15,6 +16,10 @@ use Illuminate\View\View;
 
 class WorkTicketController extends Controller
 {
+    public function __construct(
+        protected WorkTicketNotificationService $notifications
+    ) {}
+
     public function index(Request $request): View
     {
         $user = Auth::guard('vtiger')->user();
@@ -56,6 +61,7 @@ class WorkTicketController extends Controller
                 WHEN 'In Progress' THEN 2
                 WHEN 'Open' THEN 3
                 WHEN 'Done' THEN 4
+                WHEN 'Closed' THEN 4
                 WHEN 'Cancelled' THEN 5
                 ELSE 6
             END")
@@ -79,15 +85,15 @@ class WorkTicketController extends Controller
             'open' => (clone $statBase)->where('status', 'Open')->count(),
             'in_progress' => (clone $statBase)->where('status', 'In Progress')->count(),
             'blocked' => (clone $statBase)->where('status', 'Blocked')->count(),
-            'done' => (clone $statBase)->where('status', 'Done')->count(),
+            'done' => (clone $statBase)->whereIn('status', ['Done', 'Closed'])->count(),
             'due_today' => (clone $statBase)->whereDate('due_date', now()->toDateString())->count(),
             'tat_breached' => (clone $statBase)
                 ->whereNotNull('tat_due_at')
                 ->where(function (Builder $q): void {
                     $q->where(function (Builder $open): void {
-                        $open->where('status', '!=', 'Done')->where('tat_due_at', '<', now());
+                        $open->whereNotIn('status', ['Done', 'Closed'])->where('tat_due_at', '<', now());
                     })->orWhere(function (Builder $closed): void {
-                        $closed->where('status', 'Done')
+                        $closed->whereIn('status', ['Done', 'Closed'])
                             ->whereNotNull('completed_at')
                             ->whereColumn('completed_at', '>', 'tat_due_at');
                     });
@@ -140,7 +146,7 @@ class WorkTicketController extends Controller
         $validated = $request->validate([
             'title' => 'required|string|max:255',
             'description' => 'nullable|string|max:20000',
-            'status' => 'required|in:Open,In Progress,Blocked,Done,Cancelled',
+            'status' => 'required|in:Open,In Progress,Blocked,Done,Closed,Cancelled',
             'priority' => 'required|in:Low,Medium,High,Urgent',
             'assignee_id' => 'required|integer|min:1',
             'reporting_manager_id' => 'nullable|integer|min:1',
@@ -149,7 +155,7 @@ class WorkTicketController extends Controller
             'initial_update' => 'nullable|string|max:20000',
         ]);
 
-        $status = $validated['status'];
+        $status = $this->normalizeStatus((string) $validated['status']);
         $now = now();
         $assigneeId = (int) $validated['assignee_id'];
         $tatHours = !empty($validated['tat_hours']) ? (int) $validated['tat_hours'] : $this->getTatHoursForPriority((string) $validated['priority']);
@@ -178,6 +184,7 @@ class WorkTicketController extends Controller
         ]);
 
         $this->updateTatBreachState($ticket);
+        $this->notifications->notifyCreated($ticket);
 
         if (!empty(trim((string) ($validated['initial_update'] ?? '')))) {
             WorkTicketUpdate::create([
@@ -320,7 +327,7 @@ class WorkTicketController extends Controller
             'progress_percent' => 'nullable|integer|min:0|max:100',
             'time_spent_minutes' => 'nullable|integer|min:1|max:1440',
             'work_mode' => 'nullable|in:Remote,Office,Field',
-            'status_after_update' => 'nullable|in:Open,In Progress,Blocked,Done,Cancelled',
+            'status_after_update' => 'nullable|in:Open,In Progress,Blocked,Done,Closed,Cancelled',
             'is_blocked' => 'nullable|boolean',
             'blocker_reason' => 'nullable|string|max:20000',
         ]);
@@ -338,25 +345,28 @@ class WorkTicketController extends Controller
             'blocker_reason' => $validated['blocker_reason'] ?? null,
         ]);
 
-        $statusAfterUpdate = $validated['status_after_update'] ?? null;
+        $statusAfterUpdate = isset($validated['status_after_update'])
+            ? $this->normalizeStatus((string) $validated['status_after_update'])
+            : null;
         if ($isBlocked && $statusAfterUpdate === null) {
             $statusAfterUpdate = 'Blocked';
         }
         if (($validated['progress_percent'] ?? null) === 100 && $statusAfterUpdate === null) {
-            $statusAfterUpdate = 'Done';
+            $statusAfterUpdate = 'Closed';
         }
+        $wasClosedBefore = in_array((string) $workTicket->status, ['Done', 'Closed'], true);
         if ($statusAfterUpdate !== null) {
             $workTicket->status = $statusAfterUpdate;
             if ($statusAfterUpdate === 'In Progress' && !$workTicket->started_at) {
                 $workTicket->started_at = now();
             }
-            if ($statusAfterUpdate === 'Done') {
+            if (in_array($statusAfterUpdate, ['Done', 'Closed'], true)) {
                 $workTicket->completed_at = now();
                 if (!$workTicket->started_at) {
                     $workTicket->started_at = now();
                 }
             }
-            if ($statusAfterUpdate !== 'Done') {
+            if (!in_array($statusAfterUpdate, ['Done', 'Closed'], true)) {
                 $workTicket->completed_at = null;
             }
         }
@@ -366,6 +376,9 @@ class WorkTicketController extends Controller
                 : now()->addHours((int) $workTicket->tat_hours);
         }
         $this->updateTatBreachState($workTicket);
+        if (! $wasClosedBefore && in_array((string) $workTicket->status, ['Done', 'Closed'], true)) {
+            $this->notifications->notifyClosed($workTicket, (int) $user->id);
+        }
 
         return redirect()
             ->route('work-tickets.show', $workTicket)
@@ -483,7 +496,7 @@ class WorkTicketController extends Controller
         }
 
         $breachedAt = null;
-        if ((string) $ticket->status === 'Done') {
+        if (in_array((string) $ticket->status, ['Done', 'Closed'], true)) {
             if ($ticket->completed_at && $ticket->completed_at->gt($dueAt)) {
                 $breachedAt = $ticket->completed_at;
             }
@@ -493,5 +506,11 @@ class WorkTicketController extends Controller
 
         $ticket->tat_breached_at = $breachedAt;
         $ticket->save();
+    }
+
+    protected function normalizeStatus(string $status): string
+    {
+        $status = trim($status);
+        return $status === 'Done' ? 'Closed' : $status;
     }
 }

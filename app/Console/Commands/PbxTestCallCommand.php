@@ -55,6 +55,7 @@ class PbxTestCallCommand extends Command
 
         try {
             $response = Http::timeout(15)
+                ->withOptions(['verify' => false])
                 ->withHeaders(['Accept' => '*/*'])
                 ->post($url, []);
 

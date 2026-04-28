@@ -34,7 +34,7 @@
             <div class="card-body">
                 @php
                     $statusClass = match($ticket->status) {
-                        'Done' => 'bg-success',
+                        'Done', 'Closed' => 'bg-success',
                         'Blocked' => 'bg-danger',
                         'In Progress' => 'bg-primary',
                         'Cancelled' => 'bg-secondary',
@@ -43,9 +43,9 @@
                     $tatDueAt = $ticket->tat_due_at ? \Carbon\Carbon::parse($ticket->tat_due_at) : null;
                     $tatBreached = false;
                     if ($tatDueAt) {
-                        if (($ticket->status ?? '') === 'Done' && !empty($ticket->completed_at)) {
+                        if (in_array(($ticket->status ?? ''), ['Done', 'Closed'], true) && !empty($ticket->completed_at)) {
                             $tatBreached = \Carbon\Carbon::parse($ticket->completed_at)->gt($tatDueAt);
-                        } elseif (($ticket->status ?? '') !== 'Done') {
+                        } elseif (!in_array(($ticket->status ?? ''), ['Done', 'Closed'], true)) {
                             $tatBreached = now()->gt($tatDueAt);
                         }
                     }
@@ -135,7 +135,7 @@
                             <label class="form-label small fw-semibold">Set Status</label>
                             <select name="status_after_update" class="form-select">
                                 <option value="">Keep current</option>
-                                @foreach(['Open', 'In Progress', 'Blocked', 'Done', 'Cancelled'] as $status)
+                                @foreach(['Open', 'In Progress', 'Blocked', 'Closed', 'Cancelled'] as $status)
                                 <option value="{{ $status }}" {{ old('status_after_update') === $status ? 'selected' : '' }}>{{ $status }}</option>
                                 @endforeach
                             </select>
