@@ -33,20 +33,8 @@ class WorkTicketNotificationService
             $this->send((string) $assignee->email1, $name, $subject, $body);
         }
 
-        $manager = $ticket->reporting_manager_id ? $this->getUser((int) $ticket->reporting_manager_id) : null;
-        if ($manager && ! empty($manager->email1)) {
-            $name = $this->fullName($manager);
-            $body = "Hello {$name},\n\n"
-                . "A new work ticket has been created for your team.\n\n"
-                . "Ticket: {$ticket->ticket_no}\n"
-                . "Title: {$ticket->title}\n"
-                . "Assignee ID: {$ticket->assignee_id}\n"
-                . "Priority: {$ticket->priority}\n"
-                . "Status: {$ticket->status}\n\n"
-                . "View ticket: {$link}\n\n"
-                . "Kind regards,\n" . config('app.name', 'Geminia CRM');
-            $this->send((string) $manager->email1, $name, $subject, $body);
-        }
+        // Reporting manager immediate email disabled by request.
+        // Manager visibility will be handled via scheduled reporting instead.
     }
 
     public function notifyClosed(WorkTicket $ticket, int $actorUserId): void
