@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Models\PbxCall;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 
 class PbxHealthCommand extends Command
@@ -38,11 +39,28 @@ class PbxHealthCommand extends Command
 
         $cdrAccess = false;
         $cdrError = null;
+        $cdrSource = 'vtiger';
         try {
             DB::connection('vtiger')->table('asteriskcdrdb.cdr')->limit(1)->value('uniqueid');
             $cdrAccess = true;
         } catch (\Throwable $e) {
             $cdrError = $e->getMessage();
+            $directHost = trim((string) env('PBX_CDR_DB_HOST', ''));
+            if ($directHost !== '') {
+                try {
+                    Config::set('database.connections.pbx_cdr.host', env('PBX_CDR_DB_HOST'));
+                    Config::set('database.connections.pbx_cdr.port', env('PBX_CDR_DB_PORT', '3306'));
+                    Config::set('database.connections.pbx_cdr.database', env('PBX_CDR_DB_DATABASE', 'asteriskcdrdb'));
+                    Config::set('database.connections.pbx_cdr.username', env('PBX_CDR_DB_USERNAME'));
+                    Config::set('database.connections.pbx_cdr.password', env('PBX_CDR_DB_PASSWORD'));
+                    DB::connection('pbx_cdr')->table('cdr')->limit(1)->value('uniqueid');
+                    $cdrAccess = true;
+                    $cdrError = null;
+                    $cdrSource = 'pbx_cdr';
+                } catch (\Throwable $directErr) {
+                    $cdrError = $directErr->getMessage();
+                }
+            }
         }
 
         $lastCall = PbxCall::query()->orderByDesc('start_time')->first(['start_time', 'updated_at']);
@@ -65,6 +83,7 @@ class PbxHealthCommand extends Command
                 'error' => $agiError,
             ],
             'cdr' => [
+                'source' => $cdrSource,
                 'select_access' => $cdrAccess,
                 'error' => $cdrError,
             ],
@@ -93,7 +112,7 @@ class PbxHealthCommand extends Command
                 [
                     'CDR SELECT',
                     $cdrAccess ? 'OK' : 'FAIL',
-                    $cdrAccess ? 'asteriskcdrdb.cdr readable' : ($cdrError ?: 'Access denied'),
+                    $cdrAccess ? ("{$cdrSource} readable") : ($cdrError ?: 'Access denied'),
                 ],
                 [
                     'PBX sync freshness',

@@ -113,7 +113,7 @@
                                         $displayStatus = 'completed';
                                     }
                                     $rawReason = trim((string) ($call->reason_for_calling ?? ''));
-                                    $displayReason = $rawReason !== '' ? $rawReason : (($displayStatus === 'completed') ? 'Inbound call' : 'Awaiting sync');
+                                    $displayReason = $rawReason !== '' ? $rawReason : (($displayStatus === 'completed') ? 'Inbound call' : 'No reason provided');
                                     $rawCustomer = trim((string) ($call->customer_name ?? ''));
                                     if (preg_match('/^00?254\d{9}$/', preg_replace('/\s+/', '', $rawCustomer))) {
                                         $displayCustomer = $displayNumber !== '' ? $displayNumber : $rawCustomer;
@@ -703,7 +703,7 @@ document.querySelector('.pbx-claim-latest-btn')?.addEventListener('click', funct
             var rawDuration = parseInt(call.duration_sec || 0, 10) || 0;
             var displayStatus = (rawStatus === 'ringing' && rawDuration > 0) ? 'completed' : rawStatus;
             var rawReason = String(call.reason_for_calling || '').trim();
-            var displayReason = rawReason !== '' ? rawReason : (displayStatus === 'completed' ? 'Inbound call' : 'Awaiting sync');
+            var displayReason = rawReason !== '' ? rawReason : (displayStatus === 'completed' ? 'Inbound call' : 'No reason provided');
             var rawCustomer = String(call.customer_name || '').trim();
             var displayCustomer = (/^00?254\d{9}$/.test(rawCustomer.replace(/\s+/g, '')))
                 ? (displayNumber || rawCustomer)
@@ -715,7 +715,7 @@ document.querySelector('.pbx-claim-latest-btn')?.addEventListener('click', funct
             if (receivedByMe && (displayStatus === 'ringing' || displayStatus === 'missed')) {
                 displayStatus = 'received';
             }
-            if (receivedByMe && (rawReason === '' || displayReason === 'Awaiting sync')) {
+            if (receivedByMe && (rawReason === '' || displayReason === 'No reason provided')) {
                 displayReason = 'Received by ' + (authUserName || 'you');
             }
             var durationLabel = rawDuration > 0 ? (rawDuration + 's') : ((displayStatus === 'completed' || displayStatus === 'received') ? 'Pending sync' : '—');

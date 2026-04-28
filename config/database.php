@@ -52,6 +52,26 @@ return [
             )) : [],
         ],
 
+        // Optional direct PBX CDR connection (use when vtiger user cannot read asteriskcdrdb.cdr).
+        'pbx_cdr' => [
+            'driver' => 'mysql',
+            'host' => env('PBX_CDR_DB_HOST', ''),
+            'port' => env('PBX_CDR_DB_PORT', '3306'),
+            'database' => env('PBX_CDR_DB_DATABASE', 'asteriskcdrdb'),
+            'username' => env('PBX_CDR_DB_USERNAME', ''),
+            'password' => env('PBX_CDR_DB_PASSWORD', ''),
+            'unix_socket' => env('PBX_CDR_DB_SOCKET', ''),
+            'charset' => env('PBX_CDR_DB_CHARSET', 'utf8'),
+            'collation' => env('PBX_CDR_DB_COLLATION', 'utf8_unicode_ci'),
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'strict' => false,
+            'engine' => null,
+            'options' => extension_loaded('pdo_mysql') ? array_filter([
+                PDO::MYSQL_ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
+            ]) : [],
+        ],
+
         'sqlite' => [
             'driver' => 'sqlite',
             'url' => env('DB_URL'),
