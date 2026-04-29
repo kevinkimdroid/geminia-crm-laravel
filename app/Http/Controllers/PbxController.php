@@ -12,6 +12,8 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
@@ -89,7 +91,7 @@ class PbxController extends Controller
             if ($request->list === 'Completed Calls') {
                 $query->where('p.callstatus', 'completed');
             } elseif ($request->list === 'No Response Calls') {
-                $query->whereIn('p.callstatus', ['no-response', 'no-answer', 'busy']);
+                $query->whereIn('p.callstatus', $this->noResponseStatuses());
             } elseif ($request->list === 'Received Calls') {
                 $claimedIds = PbxCallRecipient::where('call_source', 'vtiger')->pluck('call_id')->toArray();
                 $query->whereIn('p.pbxmanagerid', $claimedIds ?: [0]);
@@ -133,13 +135,15 @@ class PbxController extends Controller
 
     protected function indexFromLocal(Request $request)
     {
+        $this->maybeSyncRecentCdr();
+
         $query = PbxCall::query();
 
         if ($request->filled('list')) {
             if ($request->list === 'Completed Calls') {
                 $query->where('call_status', 'completed');
             } elseif ($request->list === 'No Response Calls') {
-                $query->whereIn('call_status', ['no-response', 'no-answer', 'busy']);
+                $query->whereIn('call_status', $this->noResponseStatuses());
             } elseif ($request->list === 'Received Calls') {
                 $claimedIds = PbxCallRecipient::where('call_source', 'local')->pluck('call_id')->toArray();
                 $query->whereIn('id', $claimedIds ?: [0]);
@@ -177,13 +181,15 @@ class PbxController extends Controller
      */
     public function live(Request $request): JsonResponse
     {
+        $this->maybeSyncRecentCdr();
+
         $query = PbxCall::query();
 
         if ($request->filled('list')) {
             if ($request->list === 'Completed Calls') {
                 $query->where('call_status', 'completed');
             } elseif ($request->list === 'No Response Calls') {
-                $query->whereIn('call_status', ['no-response', 'no-answer', 'busy']);
+                $query->whereIn('call_status', $this->noResponseStatuses());
             } elseif ($request->list === 'Received Calls') {
                 $claimedIds = PbxCallRecipient::where('call_source', 'local')->pluck('call_id')->toArray();
                 $query->whereIn('id', $claimedIds ?: [0]);
@@ -343,11 +349,13 @@ class PbxController extends Controller
     {
         $recordingUrl = $row->recording_url ?? null;
         $externalId = trim((string) ($row->external_id ?? ''));
+        $externalLookupId = explode(':', $externalId)[0] ?? $externalId;
+        $externalLookupId = trim((string) $externalLookupId);
         $isUndatedMonitorUrl = is_string($recordingUrl)
             && str_contains($recordingUrl, '/monitor/')
             && ! preg_match('#/monitor/\d{4}/\d{2}/\d{2}/#', $recordingUrl);
-        if ($externalId !== '' && $isUndatedMonitorUrl) {
-            $datedMonitorUrl = $this->resolveRecordingUrlFromCdrUniqueId($externalId);
+        if ($externalLookupId !== '' && $isUndatedMonitorUrl) {
+            $datedMonitorUrl = $this->resolveRecordingUrlFromCdrUniqueId($externalLookupId);
             if (! empty($datedMonitorUrl)) {
                 $recordingUrl = $datedMonitorUrl;
             }
@@ -363,8 +371,8 @@ class PbxController extends Controller
                 }
             }
         }
-        if ($externalId !== '' && ($recordingUrl === null || $recordingUrl === '' || $isLegacyRecordingEndpoint)) {
-            $cdrResolvedUrl = $this->resolveRecordingUrlFromCdrUniqueId($externalId);
+        if ($externalLookupId !== '' && ($recordingUrl === null || $recordingUrl === '' || $isLegacyRecordingEndpoint)) {
+            $cdrResolvedUrl = $this->resolveRecordingUrlFromCdrUniqueId($externalLookupId);
             if (! empty($cdrResolvedUrl)) {
                 $recordingUrl = $cdrResolvedUrl;
             }
@@ -381,16 +389,16 @@ class PbxController extends Controller
         }
         if (! $recordingUrl && ! empty($row->sourceuuid) && $fromVtiger) {
             $recordingUrl = $this->pbxConfig->getRecordingUrl($row->sourceuuid);
-        } elseif (! $recordingUrl && ! $fromVtiger && $externalId !== '') {
-            $recordingUrl = $this->pbxConfig->getRecordingUrl($externalId);
+        } elseif (! $recordingUrl && ! $fromVtiger && $externalLookupId !== '') {
+            $recordingUrl = $this->pbxConfig->getRecordingUrl($externalLookupId);
         }
-        if ($externalId !== '' && is_string($recordingUrl) && str_contains($recordingUrl, '/recording?id=')) {
-            $cdrResolvedUrl = $this->resolveRecordingUrlFromCdrUniqueId($externalId);
+        if ($externalLookupId !== '' && is_string($recordingUrl) && str_contains($recordingUrl, '/recording?id=')) {
+            $cdrResolvedUrl = $this->resolveRecordingUrlFromCdrUniqueId($externalLookupId);
             if (! empty($cdrResolvedUrl)) {
                 $recordingUrl = $cdrResolvedUrl;
             } else {
                 $patternResolvedUrl = $this->resolveRecordingUrlByFilenamePattern(
-                    $externalId,
+                    $externalLookupId,
                     trim((string) ($row->customer_number ?? '')),
                     $row->start_time ? \Carbon\Carbon::parse($row->start_time) : null
                 );
@@ -399,12 +407,12 @@ class PbxController extends Controller
                 }
             }
         }
-        if (! $recordingUrl && $externalId !== '') {
-            $recordingUrl = $this->resolveRecordingUrlFromCdrUniqueId($externalId);
+        if (! $recordingUrl && $externalLookupId !== '') {
+            $recordingUrl = $this->resolveRecordingUrlFromCdrUniqueId($externalLookupId);
         }
-        if (! $recordingUrl && $externalId !== '') {
+        if (! $recordingUrl && $externalLookupId !== '') {
             $recordingUrl = $this->resolveRecordingUrlByFilenamePattern(
-                $externalId,
+                $externalLookupId,
                 trim((string) ($row->customer_number ?? '')),
                 $row->start_time ? \Carbon\Carbon::parse($row->start_time) : null
             );
@@ -1495,6 +1503,71 @@ class PbxController extends Controller
             'failed' => 'failed',
         ];
         return $map[$status] ?? $status ?: 'unknown';
+    }
+
+    /**
+     * Statuses that should appear under "No Response Calls" filter.
+     *
+     * @return array<int,string>
+     */
+    protected function noResponseStatuses(): array
+    {
+        return [
+            'no-response',
+            'no-answer',
+            'no answer',
+            'no_answer',
+            'busy',
+            'failed',
+            'ringing',
+            'missed',
+            'congestion',
+            'chanunavail',
+        ];
+    }
+
+    /**
+     * Fallback auto-sync when scheduler is not running.
+     * Throttled to avoid repeated heavy queries on each request.
+     */
+    protected function maybeSyncRecentCdr(): void
+    {
+        if (! filter_var((string) env('PBX_CDR_SYNC_ENABLED', false), FILTER_VALIDATE_BOOL)) {
+            return;
+        }
+
+        try {
+            $latest = PbxCall::query()->max('start_time');
+            if ($latest && now()->diffInSeconds(\Illuminate\Support\Carbon::parse($latest)) < 70) {
+                return;
+            }
+        } catch (\Throwable) {
+            // If freshness check fails, continue to best-effort sync.
+        }
+
+        $throttleKey = 'pbx:auto-sync:last-run';
+        $lockKey = 'pbx:auto-sync:lock';
+        $lock = Cache::lock($lockKey, 25);
+        if (! $lock->get()) {
+            return;
+        }
+
+        try {
+            $lastRun = (int) Cache::get($throttleKey, 0);
+            if ((time() - $lastRun) < 45) {
+                return;
+            }
+
+            Artisan::call('pbx:sync-cdr', [
+                '--minutes' => 30,
+                '--limit' => 250,
+            ]);
+            Cache::put($throttleKey, time(), now()->addMinutes(10));
+        } catch (\Throwable $e) {
+            Log::warning('PBX auto-sync fallback failed', ['error' => $e->getMessage()]);
+        } finally {
+            optional($lock)->release();
+        }
     }
 
     protected function parsePbxDateTime(mixed $value): ?\Carbon\Carbon
