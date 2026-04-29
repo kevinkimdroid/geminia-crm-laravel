@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Models\PbxCall;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class PbxCallService
@@ -22,20 +24,77 @@ class PbxCallService
      */
     public function getCallsForContact(object $contact, int $limit = 50, int $offset = 0): array
     {
+        $this->maybeSyncRecentCdr();
+
         $phones = $this->getContactPhoneNumbers($contact);
         if (empty($phones)) {
             return [
                 'calls' => collect(),
                 'total' => 0,
-                'from_vtiger' => $this->pbxConfig->isConfigured(),
+                'from_vtiger' => ! $this->shouldPreferLocalLogs() && $this->pbxConfig->isConfigured(),
             ];
         }
 
-        if ($this->pbxConfig->isConfigured()) {
+        if ($this->pbxConfig->isConfigured() && ! $this->shouldPreferLocalLogs()) {
             return $this->getCallsFromVtiger($phones, $limit, $offset);
         }
 
         return $this->getCallsFromLocal($phones, $limit, $offset);
+    }
+
+    /**
+     * Prefer local logs once they exist, to avoid stale vtiger dependency.
+     */
+    protected function shouldPreferLocalLogs(): bool
+    {
+        try {
+            return PbxCall::query()->exists();
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    /**
+     * Fallback sync for contact call history pages when scheduler is not running.
+     */
+    protected function maybeSyncRecentCdr(): void
+    {
+        if (! filter_var((string) env('PBX_CDR_SYNC_ENABLED', false), FILTER_VALIDATE_BOOL)) {
+            return;
+        }
+
+        try {
+            $latest = PbxCall::query()->max('start_time');
+            if ($latest && now()->diffInSeconds(\Illuminate\Support\Carbon::parse($latest)) < 70) {
+                return;
+            }
+        } catch (\Throwable) {
+            // Continue best-effort sync.
+        }
+
+        $throttleKey = 'pbx:auto-sync:last-run';
+        $lockKey = 'pbx:auto-sync:lock';
+        $lock = Cache::lock($lockKey, 25);
+        if (! $lock->get()) {
+            return;
+        }
+
+        try {
+            $lastRun = (int) Cache::get($throttleKey, 0);
+            if ((time() - $lastRun) < 45) {
+                return;
+            }
+
+            Artisan::call('pbx:sync-cdr', [
+                '--minutes' => 30,
+                '--limit' => 250,
+            ]);
+            Cache::put($throttleKey, time(), now()->addMinutes(10));
+        } catch (\Throwable) {
+            // Silent fallback: call pages should still load even if sync fails.
+        } finally {
+            optional($lock)->release();
+        }
     }
 
     protected function getContactPhoneNumbers(object $contact): array
