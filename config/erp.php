@@ -13,7 +13,8 @@ return [
     |
     */
 
-    'enabled' => env('ERP_ENABLED', true),
+    // If OCI8 is missing, force-disable ERP to avoid Yajra/PDO OCI constant errors.
+    'enabled' => (bool) env('ERP_ENABLED', true) && extension_loaded('oci8'),
 
     /*
     |--------------------------------------------------------------------------

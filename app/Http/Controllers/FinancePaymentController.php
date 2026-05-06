@@ -42,6 +42,10 @@ class FinancePaymentController extends Controller
         if ($deny = $this->denyUnlessFinance()) {
             return $deny;
         }
+        if (! config('erp.enabled', true)) {
+            return redirect()->route('dashboard')
+                ->with('error', 'Finance payments require ERP/Oracle. Set ERP_ENABLED=true and enable OCI8 to use this module.');
+        }
 
         $search = trim((string) $request->get('search', ''));
         $source = $request->filled('source') ? (int) $request->get('source') : null;
@@ -123,6 +127,10 @@ class FinancePaymentController extends Controller
     {
         if ($deny = $this->denyUnlessFinance()) {
             return $deny;
+        }
+        if (! config('erp.enabled', true)) {
+            return redirect()->route('dashboard')
+                ->with('error', 'Finance payments require ERP/Oracle. Set ERP_ENABLED=true and enable OCI8 to use this module.');
         }
 
         $validated = $request->validate([
