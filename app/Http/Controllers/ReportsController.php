@@ -23,6 +23,7 @@ use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Response;
 use Illuminate\View\View;
 use Maatwebsite\Excel\Facades\Excel;
@@ -353,7 +354,9 @@ class ReportsController
 
     public function reassignmentAudit(Request $request, UserDepartmentService $userDept): View
     {
-        $limit = min(1000, max(50, (int) $request->get('limit', 200)));
+        $limitRaw = trim((string) $request->get('limit', '200'));
+        $fetchAll = strtolower($limitRaw) === 'all';
+        $limit = $fetchAll ? PHP_INT_MAX : min(1000, max(50, (int) $limitRaw));
         $ticketRef = trim((string) $request->get('ticket', ''));
         $reassignments = $this->buildUnifiedAuditRows($ticketRef, $limit);
         $userIds = collect($reassignments->pluck('from_user_id')->merge($reassignments->pluck('to_user_id')))
@@ -370,6 +373,8 @@ class ReportsController
         return view('reports.reassignment-audit', [
             'reassignments' => $reassignments,
             'limit' => $limit,
+            'limitRaw' => $limitRaw,
+            'fetchAll' => $fetchAll,
             'ticket' => $ticketRef,
         ]);
     }
@@ -514,7 +519,9 @@ class ReportsController
 
     public function exportReassignmentAudit(Request $request, UserDepartmentService $userDept)
     {
-        $limit = min(10000, max(50, (int) $request->get('limit', 1000)));
+        $limitRaw = trim((string) $request->get('limit', '1000'));
+        $fetchAll = strtolower($limitRaw) === 'all';
+        $limit = $fetchAll ? PHP_INT_MAX : min(10000, max(50, (int) $limitRaw));
         $ticketRef = trim((string) $request->get('ticket', ''));
         $reassignments = $this->buildUnifiedAuditRows($ticketRef, $limit);
         $userIds = collect($reassignments->pluck('from_user_id')->merge($reassignments->pluck('to_user_id')))
@@ -524,20 +531,54 @@ class ReportsController
             ->values()
             ->all();
         $departments = $userDept->getDepartmentsForUsers($userIds);
-        $headings = ['Module', 'Ticket', 'Event', 'From', 'From Department', 'To', 'To Department', 'Action By', 'Date', 'Time'];
-        $rows = $reassignments->map(function ($row) use ($departments) {
-            return [
-                $row->module_type === 'work-ticket' ? 'Work Ticket' : 'Ticket',
-                $row->ticket_number ?? ('TT' . ($row->ticket_id ?? '')),
-                $row->event_type ?? 'Reassigned',
-                $row->from_user_name ?? 'Unassigned',
-                $departments[$row->from_user_id ?? 0] ?? '',
-                $row->to_user_name ?? '—',
-                $departments[$row->to_user_id ?? 0] ?? '',
-                $row->reassigned_by_name ?? '—',
-                $this->formatDateTimeValue($row->created_at, 'Y-m-d'),
-                $this->formatDateTimeValue($row->created_at, 'H:i:s'),
-            ];
+        $grouped = $reassignments
+            ->groupBy(function ($row) {
+                $module = (string) ($row->module_type ?? 'ticket');
+                $ticketNumber = trim((string) ($row->ticket_number ?? ''));
+                $ticketId = trim((string) ($row->ticket_id ?? ''));
+                $fallback = $module === 'work-ticket' ? ('WT-' . $ticketId) : ('TT' . $ticketId);
+                return $module . '|' . ($ticketNumber !== '' ? $ticketNumber : $fallback);
+            })
+            ->map(fn ($rows) => $rows->sortBy(fn ($r) => $this->formatDateTimeValue($r->created_at, 'Y-m-d H:i:s'))->values());
+
+        $maxSteps = max(1, (int) $grouped->map(fn ($rows) => $rows->count())->max());
+
+        $headings = ['Ticket Number', 'Total Reassignments'];
+        for ($i = 1; $i <= $maxSteps; $i++) {
+            $headings[] = 'Step ' . $i . ' From';
+            $headings[] = 'Step ' . $i . ' From Department';
+            $headings[] = 'Step ' . $i . ' To';
+            $headings[] = 'Step ' . $i . ' To Department';
+            $headings[] = 'Step ' . $i . ' Reassigned By';
+            $headings[] = 'Step ' . $i . ' Date';
+            $headings[] = 'Step ' . $i . ' Time';
+        }
+
+        $rows = $grouped->map(function ($rows, $key) use ($departments, $maxSteps) {
+            $parts = explode('|', (string) $key, 2);
+            $ticketNumber = $parts[1] ?? ('TT' . ($rows->first()->ticket_id ?? ''));
+            $line = [$ticketNumber, $rows->count()];
+
+            for ($i = 0; $i < $maxSteps; $i++) {
+                $row = $rows->get($i);
+                if (! $row) {
+                    array_push($line, null, null, null, null, null, null, null);
+                    continue;
+                }
+
+                array_push(
+                    $line,
+                    $row->from_user_name ?? 'Unassigned',
+                    $departments[$row->from_user_id ?? 0] ?? '',
+                    $row->to_user_name ?? '—',
+                    $departments[$row->to_user_id ?? 0] ?? '',
+                    $row->reassigned_by_name ?? '—',
+                    $this->formatDateTimeValue($row->created_at, 'Y-m-d'),
+                    $this->formatDateTimeValue($row->created_at, 'H:i:s')
+                );
+            }
+
+            return $line;
         })->values()->toArray();
 
         if ($request->get('format') === 'xlsx') {
@@ -552,21 +593,45 @@ class ReportsController
 
     private function buildUnifiedAuditRows(string $ticketRef, int $limit): Collection
     {
+        $ticketRefNormalized = strtoupper(trim($ticketRef));
+        $ticketDigits = $this->parseTicketDigits($ticketRef);
+
         $crmRows = $this->getCrmTicketAuditRows($ticketRef, $limit);
         $workRows = $this->getWorkTicketAuditRows($ticketRef, $limit);
 
-        return collect($crmRows->all())
+        $rows = collect($crmRows->all())
             ->merge(collect($workRows->all()))
             ->map(fn ($row) => (object) ((array) $row))
+            ->filter(function ($row) use ($ticketRefNormalized, $ticketDigits) {
+                if ($ticketRefNormalized === '') {
+                    return true;
+                }
+
+                $ticketNumber = strtoupper(trim((string) ($row->ticket_number ?? '')));
+                $ticketId = trim((string) ($row->ticket_id ?? ''));
+                if ($ticketNumber !== '' && str_contains($ticketNumber, $ticketRefNormalized)) {
+                    return true;
+                }
+
+                return $ticketDigits !== null && $ticketId !== '' && $ticketId === $ticketDigits;
+            })
             ->sortByDesc(function ($row) {
                 return $this->formatDateTimeValue($row->created_at, 'Y-m-d H:i:s');
             })
-            ->take($limit)
             ->values();
+
+        // When user searches by ticket reference, do not trim again at the merged level.
+        // This prevents older matching events from being hidden by unrelated "recent" rows.
+        if (trim($ticketRef) !== '') {
+            return $rows;
+        }
+
+        return $rows->take($limit)->values();
     }
 
     private function getCrmTicketAuditRows(string $ticketRef, int $limit): Collection
     {
+        $forSpecificTicket = trim($ticketRef) !== '';
         $query = TicketReassignment::query();
         $ticketIds = $this->resolveCrmTicketIdsFromReference($ticketRef, $limit);
         if (! empty($ticketIds)) {
@@ -578,13 +643,20 @@ class ReportsController
             $query->orderByDesc('created_at');
         }
 
-        $reassignmentRows = $query->limit($limit)->get()->map(function (TicketReassignment $row) {
+        $reassignmentRowsQuery = $forSpecificTicket ? $query : $query->limit($limit);
+        $reassignmentRows = $reassignmentRowsQuery->get()->map(function (TicketReassignment $row) {
             return (object) array_merge($row->toArray(), [
                 'module_type' => 'ticket',
                 'event_type' => 'Reassigned',
                 'ticket_number' => 'TT' . $row->ticket_id,
             ]);
         });
+
+        // Keep default report behavior ("original") as reassignment-focused.
+        // Only add Created rows when user searches a specific ticket.
+        if (trim($ticketRef) === '') {
+            return $reassignmentRows->values();
+        }
 
         $createdQuery = Ticket::listQuery();
         if (! empty($ticketIds)) {
@@ -593,7 +665,7 @@ class ReportsController
 
         $createdRows = $createdQuery
             ->orderByDesc('e.createdtime')
-            ->limit($limit)
+            ->when(! $forSpecificTicket, fn ($q) => $q->limit($limit))
             ->get()
             ->map(function ($ticket) {
                 $assigneeName = trim((string) ($ticket->assigned_to_name ?? ''));
@@ -602,7 +674,7 @@ class ReportsController
                 return (object) [
                     'module_type' => 'ticket',
                     'event_type' => 'Created',
-                    'ticket_id' => (int) ($ticket->ticketid ?? 0),
+                    'ticket_id' => (string) ($ticket->ticketid ?? ''),
                     'ticket_number' => $ticket->ticket_no ?: ('TT' . ($ticket->ticketid ?? '')),
                     'from_user_id' => null,
                     'from_user_name' => '—',
@@ -631,28 +703,42 @@ class ReportsController
         }
 
         $ids = collect();
-        $ticketId = $this->parseTicketIdFromReference($ticketRef);
-        if ($ticketId !== null) {
-            $ids->push($ticketId);
+        $ticketDigits = $this->parseTicketDigits($ticketRef);
+        if ($ticketDigits !== null) {
+            $ids->push($ticketDigits);
         }
 
-        $matchedByNumber = Ticket::listQuery()
-            ->where('vtiger_troubletickets.ticket_no', 'like', '%' . $ticketRef . '%')
+        $matchedByNumber = DB::connection('vtiger')
+            ->table('vtiger_troubletickets')
+            ->where('ticket_no', 'like', '%' . $ticketRef . '%')
             ->limit($limit)
-            ->get()
+            ->get(['ticketid'])
             ->pluck('ticketid');
 
         return $ids
             ->merge($matchedByNumber)
-            ->map(fn ($id) => (int) $id)
-            ->filter(fn ($id) => $id > 0)
+            ->map(fn ($id) => trim((string) $id))
+            ->filter(fn ($id) => $id !== '')
             ->unique()
             ->values()
             ->all();
     }
 
+    private function parseTicketDigits(string $ticketRef): ?string
+    {
+        $ticketRef = trim($ticketRef);
+        if ($ticketRef === '') {
+            return null;
+        }
+        $digits = preg_replace('/\D+/', '', $ticketRef) ?? '';
+        $digits = ltrim($digits, '0');
+
+        return $digits !== '' ? $digits : null;
+    }
+
     private function getWorkTicketAuditRows(string $ticketRef, int $limit): Collection
     {
+        $forSpecificTicket = trim($ticketRef) !== '';
         $workQuery = WorkTicket::query()
             ->orderByDesc('created_at');
         if ($ticketRef !== '') {
@@ -662,7 +748,7 @@ class ReportsController
             });
         }
 
-        $workTickets = $workQuery->limit($limit)->get();
+        $workTickets = $forSpecificTicket ? $workQuery->get() : $workQuery->limit($limit)->get();
         if ($workTickets->isEmpty()) {
             return collect();
         }
@@ -671,7 +757,7 @@ class ReportsController
         $updatesByTicket = WorkTicketUpdate::query()
             ->whereIn('work_ticket_id', $ticketIds)
             ->orderByDesc('created_at')
-            ->limit($limit * 3)
+            ->when(! $forSpecificTicket, fn ($q) => $q->limit($limit * 3))
             ->get()
             ->groupBy('work_ticket_id');
 
@@ -722,9 +808,15 @@ class ReportsController
             }
         }
 
-        return $events->sortByDesc(function ($row) {
+        $sorted = $events->sortByDesc(function ($row) {
             return $this->formatDateTimeValue($row->created_at, 'Y-m-d H:i:s');
-        })->take($limit)->values();
+        });
+
+        if ($forSpecificTicket) {
+            return $sorted->values();
+        }
+
+        return $sorted->take($limit)->values();
     }
 
     public function exportSlaBroken(TicketSlaService $sla, UserDepartmentService $userDept, Request $request)
