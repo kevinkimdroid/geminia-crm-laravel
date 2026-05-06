@@ -40,6 +40,9 @@ class WorkTicketController extends Controller
 
         $status = trim((string) $request->get('status', ''));
         $search = trim((string) $request->get('search', ''));
+        $assigneeId = (int) $request->get('assignee_id', 0);
+        $sort = (string) $request->get('sort', 'updated_at');
+        $direction = strtolower((string) $request->get('direction', 'desc')) === 'asc' ? 'asc' : 'desc';
 
         $query = WorkTicket::query();
         $this->applyVisibilityScope($query, (int) $user->id, $scope, $canSeeAll, $reporteeIds);
@@ -54,20 +57,44 @@ class WorkTicketController extends Controller
                     ->orWhere('description', 'like', '%' . $search . '%');
             });
         }
+        if ($assigneeId > 0) {
+            $query->where('assignee_id', $assigneeId);
+        }
 
-        $tickets = $query
-            ->orderByRaw("CASE status
-                WHEN 'Blocked' THEN 1
-                WHEN 'In Progress' THEN 2
-                WHEN 'Open' THEN 3
-                WHEN 'Done' THEN 4
-                WHEN 'Closed' THEN 4
-                WHEN 'Cancelled' THEN 5
-                ELSE 6
-            END")
-            ->orderBy('updated_at', 'desc')
-            ->paginate(20)
-            ->withQueryString();
+        $allowedSorts = ['updated_at', 'created_at', 'ticket_no', 'status', 'priority', 'due_date', 'tat_due_at'];
+        if (!in_array($sort, $allowedSorts, true)) {
+            $sort = 'updated_at';
+        }
+
+        if ($sort === 'status') {
+            $query->orderByRaw("CASE status
+                    WHEN 'Blocked' THEN 1
+                    WHEN 'In Progress' THEN 2
+                    WHEN 'Open' THEN 3
+                    WHEN 'Done' THEN 4
+                    WHEN 'Closed' THEN 4
+                    WHEN 'Cancelled' THEN 5
+                    ELSE 6
+                END " . ($direction === 'asc' ? 'ASC' : 'DESC'));
+        } elseif ($sort === 'priority') {
+            $query->orderByRaw("CASE priority
+                    WHEN 'Urgent' THEN 1
+                    WHEN 'High' THEN 2
+                    WHEN 'Medium' THEN 3
+                    WHEN 'Low' THEN 4
+                    ELSE 5
+                END " . ($direction === 'asc' ? 'ASC' : 'DESC'));
+        } else {
+            $query->orderBy($sort, $direction);
+        }
+
+        // Keep results stable where many rows share same sorted value.
+        if (!in_array($sort, ['updated_at', 'ticket_no'], true)) {
+            $query->orderBy('updated_at', 'desc');
+        }
+        $query->orderBy('id', 'desc');
+
+        $tickets = $query->paginate(20)->withQueryString();
 
         $userIds = $tickets->getCollection()
             ->flatMap(fn (WorkTicket $t) => [(int) $t->assignee_id, (int) ($t->reporting_manager_id ?? 0), (int) $t->created_by])
@@ -77,6 +104,7 @@ class WorkTicketController extends Controller
             ->all();
 
         $usersById = $this->getUsersById($userIds);
+        $assigneeFilterOptions = $this->getAssigneeFilterOptions((int) $user->id, $canSeeAll, $canSeeTeam, $reporteeIds);
 
         $statBase = WorkTicket::query();
         $this->applyVisibilityScope($statBase, (int) $user->id, $scope, $canSeeAll, $reporteeIds);
@@ -109,6 +137,10 @@ class WorkTicketController extends Controller
             'canSeeTeam' => $canSeeTeam,
             'status' => $status,
             'search' => $search,
+            'assigneeId' => $assigneeId,
+            'assigneeFilterOptions' => $assigneeFilterOptions,
+            'sort' => $sort,
+            'direction' => $direction,
             'stats' => $stats,
         ]);
     }
@@ -445,6 +477,36 @@ class WorkTicketController extends Controller
 
         return VtigerUser::on('vtiger')
             ->whereIn('id', $ids)
+            ->get()
+            ->mapWithKeys(fn (VtigerUser $u) => [(int) $u->id => $u->full_name])
+            ->toArray();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function getAssigneeFilterOptions(int $userId, bool $canSeeAll, bool $canSeeTeam, array $reporteeIds): array
+    {
+        if ($canSeeAll) {
+            return VtigerUser::on('vtiger')
+                ->where('status', 'Active')
+                ->orderBy('first_name')
+                ->orderBy('last_name')
+                ->get()
+                ->mapWithKeys(fn (VtigerUser $u) => [(int) $u->id => $u->full_name])
+                ->toArray();
+        }
+
+        $allowedIds = [$userId];
+        if ($canSeeTeam && !empty($reporteeIds)) {
+            $allowedIds = array_values(array_unique(array_merge($allowedIds, $reporteeIds)));
+        }
+
+        return VtigerUser::on('vtiger')
+            ->whereIn('id', $allowedIds)
+            ->where('status', 'Active')
+            ->orderBy('first_name')
+            ->orderBy('last_name')
             ->get()
             ->mapWithKeys(fn (VtigerUser $u) => [(int) $u->id => $u->full_name])
             ->toArray();

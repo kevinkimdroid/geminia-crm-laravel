@@ -14,6 +14,7 @@ return [
         'leads' => 'Leads',
         'tickets' => 'HelpDesk',
         'deals' => 'Potentials',
+        'finance.payments' => null,
         'marketing' => 'Campaigns',
         'marketing.social-media' => null, // Custom module - always visible (not in standard Vtiger profiles)
         'marketing.campaigns' => 'Campaigns',
@@ -51,6 +52,7 @@ return [
             ['key' => 'dashboard', 'label' => 'Dashboard', 'icon' => 'bi-house-door-fill', 'route' => 'dashboard'],
             ['key' => 'deals', 'label' => 'Deals', 'icon' => 'bi-briefcase-fill', 'route' => 'deals.index'],
             ['key' => 'contacts', 'label' => 'Contacts', 'icon' => 'bi-person-lines-fill', 'route' => 'contacts.index'],
+            ['key' => 'finance.payments', 'label' => 'Finance Payments', 'icon' => 'bi-cash-coin', 'route' => 'finance.payments.index'],
         ],
         'modules' => [
             [

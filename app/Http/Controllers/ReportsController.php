@@ -12,12 +12,16 @@ use App\Exports\AssignmentHandlersExport;
 use App\Exports\BouncedEmailsExport;
 use App\Models\Ticket;
 use App\Models\TicketReassignment;
+use App\Models\VtigerUser;
+use App\Models\WorkTicket;
+use App\Models\WorkTicketUpdate;
 use App\Services\CrmService;
 use App\Services\TicketSlaService;
 use App\Services\UserDepartmentService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Response;
 use Illuminate\View\View;
@@ -83,8 +87,19 @@ class ReportsController
         $perPage = max(10, min(200, (int) ($request->get('per_page') ?: 50)));
         $offset = ($page - 1) * $perPage;
 
-        $total = $crm->countTicketsByDateRange($dateFrom, $dateTo, $status, $search, $assignedTo, null, $onlyWithContact);
-        $rowCollection = $crm->getTicketsByDateRange($dateFrom, $dateTo, $perPage, $offset, $status, $search, $assignedTo, null, $onlyWithContact);
+        $cacheKeyBase = 'reports:tickets-by-date:' . sha1(json_encode([
+            'from' => $dateFrom,
+            'to' => $dateTo,
+            'status' => $status,
+            'search' => $search,
+            'assigned_to' => $assignedTo,
+            'only_with_contact' => $onlyWithContact,
+            'per_page' => $perPage,
+            'page' => $page,
+        ]));
+
+        $total = Cache::remember($cacheKeyBase . ':total', 60, fn () => $crm->countTicketsByDateRange($dateFrom, $dateTo, $status, $search, $assignedTo, null, $onlyWithContact));
+        $rowCollection = Cache::remember($cacheKeyBase . ':rows', 60, fn () => $crm->getTicketsByDateRange($dateFrom, $dateTo, $perPage, $offset, $status, $search, $assignedTo, null, $onlyWithContact));
 
         $userIds = $rowCollection->pluck('smownerid')->filter()->unique()->values()->all();
         $departments = $userDept->getDepartmentsForUsers($userIds);
@@ -186,7 +201,8 @@ class ReportsController
     {
         $dateFrom = (string) $request->get('date_from', now()->startOfYear()->format('Y-m-d'));
         $dateTo = (string) $request->get('date_to', now()->format('Y-m-d'));
-        $data = $crm->getManagementUsageReport($dateFrom, $dateTo);
+        $cacheKey = 'reports:management-usage:' . sha1($dateFrom . '|' . $dateTo);
+        $data = Cache::remember($cacheKey, 120, fn () => $crm->getManagementUsageReport($dateFrom, $dateTo));
 
         return view('reports.management-usage', $data);
     }
@@ -339,19 +355,15 @@ class ReportsController
     {
         $limit = min(1000, max(50, (int) $request->get('limit', 200)));
         $ticketRef = trim((string) $request->get('ticket', ''));
-        $ticketId = $this->parseTicketIdFromReference($ticketRef);
-
-        $query = \App\Models\TicketReassignment::query();
-        if ($ticketId !== null) {
-            $query->where('ticket_id', $ticketId)->orderBy('created_at');
-        } else {
-            $query->orderByDesc('created_at');
-        }
-
-        $reassignments = $query->limit($limit)->get();
-        $userIds = collect($reassignments->pluck('from_user_id')->merge($reassignments->pluck('to_user_id')))->filter()->unique()->values()->all();
+        $reassignments = $this->buildUnifiedAuditRows($ticketRef, $limit);
+        $userIds = collect($reassignments->pluck('from_user_id')->merge($reassignments->pluck('to_user_id')))
+            ->merge($reassignments->pluck('reassigned_by_user_id'))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
         $departments = $userDept->getDepartmentsForUsers($userIds);
-        $reassignments = $reassignments->map(fn ($r) => (object) array_merge($r->toArray(), [
+        $reassignments = $reassignments->map(fn ($r) => (object) array_merge((array) $r, [
             'from_user_department' => $r->from_user_id ? ($departments[$r->from_user_id] ?? null) : null,
             'to_user_department' => $r->to_user_id ? ($departments[$r->to_user_id] ?? null) : null,
         ]));
@@ -434,7 +446,7 @@ class ReportsController
         ]);
     }
 
-    public function exportAssignmentHandlers(Request $request): \Symfony\Component\HttpFoundation\BinaryFileResponse
+    public function exportAssignmentHandlers(Request $request)
     {
         $dateFrom = (string) $request->get('date_from', now()->startOfMonth()->format('Y-m-d'));
         $dateTo = (string) $request->get('date_to', now()->format('Y-m-d'));
@@ -488,69 +500,44 @@ class ReportsController
             ];
         })->toArray();
 
-        $filename = 'assignment-handlers-' . $dateFrom . '-to-' . $dateTo . '.xlsx';
-        return Excel::download(new AssignmentHandlersExport($rows), $filename);
+        $filename = 'assignment-handlers-' . $dateFrom . '-to-' . $dateTo;
+        if ($request->get('format') === 'csv') {
+            return $this->csvResponse(
+                $rows,
+                ['Ticket', 'Title', 'Status', 'Created by', 'Checked by', 'Authorized by', 'Closed by', 'Created at'],
+                $filename
+            );
+        }
+
+        return Excel::download(new AssignmentHandlersExport($rows), $filename . '.xlsx');
     }
 
     public function exportReassignmentAudit(Request $request, UserDepartmentService $userDept)
     {
         $limit = min(10000, max(50, (int) $request->get('limit', 1000)));
         $ticketRef = trim((string) $request->get('ticket', ''));
-        $ticketId = $this->parseTicketIdFromReference($ticketRef);
-
-        $query = \App\Models\TicketReassignment::query();
-        if ($ticketId !== null) {
-            $query->where('ticket_id', $ticketId)->orderBy('created_at');
-        } else {
-            $query->orderByDesc('created_at');
-        }
-
-        $reassignments = $query->limit($limit)->get();
-        $userIds = collect($reassignments->pluck('from_user_id')->merge($reassignments->pluck('to_user_id')))->filter()->unique()->values()->all();
+        $reassignments = $this->buildUnifiedAuditRows($ticketRef, $limit);
+        $userIds = collect($reassignments->pluck('from_user_id')->merge($reassignments->pluck('to_user_id')))
+            ->merge($reassignments->pluck('reassigned_by_user_id'))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
         $departments = $userDept->getDepartmentsForUsers($userIds);
-        $groupedByTicket = $reassignments
-            ->groupBy('ticket_id')
-            ->map(function ($trail) {
-                return $trail->sortBy(function ($row) {
-                    return $this->formatDateTimeValue($row->created_at, 'Y-m-d H:i:s');
-                })->values();
-            });
-
-        $maxSteps = (int) $groupedByTicket->map(fn ($trail) => $trail->count())->max();
-        $maxSteps = max(1, $maxSteps);
-
-        $headings = ['Ticket Number', 'Total Reassignments'];
-        for ($i = 1; $i <= $maxSteps; $i++) {
-            $headings[] = 'Step ' . $i . ' From';
-            $headings[] = 'Step ' . $i . ' From Department';
-            $headings[] = 'Step ' . $i . ' To';
-            $headings[] = 'Step ' . $i . ' To Department';
-            $headings[] = 'Step ' . $i . ' Reassigned By';
-            $headings[] = 'Step ' . $i . ' Date';
-            $headings[] = 'Step ' . $i . ' Time';
-        }
-
-        $rows = $groupedByTicket->map(function ($trail, $ticketId) use ($maxSteps, $departments) {
-            $row = ['TT' . $ticketId, $trail->count()];
-            for ($i = 0; $i < $maxSteps; $i++) {
-                $step = $trail->get($i);
-                if ($step === null) {
-                    array_push($row, '', '', '', '', '', '', '');
-                    continue;
-                }
-                array_push(
-                    $row,
-                    $step->from_user_name ?? 'Unassigned',
-                    $departments[$step->from_user_id ?? 0] ?? '',
-                    $step->to_user_name ?? '—',
-                    $departments[$step->to_user_id ?? 0] ?? '',
-                    $step->reassigned_by_name ?? '—',
-                    $this->formatDateTimeValue($step->created_at, 'Y-m-d'),
-                    $this->formatDateTimeValue($step->created_at, 'H:i:s')
-                );
-            }
-
-            return $row;
+        $headings = ['Module', 'Ticket', 'Event', 'From', 'From Department', 'To', 'To Department', 'Action By', 'Date', 'Time'];
+        $rows = $reassignments->map(function ($row) use ($departments) {
+            return [
+                $row->module_type === 'work-ticket' ? 'Work Ticket' : 'Ticket',
+                $row->ticket_number ?? ('TT' . ($row->ticket_id ?? '')),
+                $row->event_type ?? 'Reassigned',
+                $row->from_user_name ?? 'Unassigned',
+                $departments[$row->from_user_id ?? 0] ?? '',
+                $row->to_user_name ?? '—',
+                $departments[$row->to_user_id ?? 0] ?? '',
+                $row->reassigned_by_name ?? '—',
+                $this->formatDateTimeValue($row->created_at, 'Y-m-d'),
+                $this->formatDateTimeValue($row->created_at, 'H:i:s'),
+            ];
         })->values()->toArray();
 
         if ($request->get('format') === 'xlsx') {
@@ -561,6 +548,116 @@ class ReportsController
             $headings,
             'ticket-reassignment-audit'
         );
+    }
+
+    private function buildUnifiedAuditRows(string $ticketRef, int $limit): Collection
+    {
+        $crmRows = $this->getCrmTicketAuditRows($ticketRef, $limit);
+        $workRows = $this->getWorkTicketAuditRows($ticketRef, $limit);
+
+        return collect($crmRows->all())
+            ->merge(collect($workRows->all()))
+            ->map(fn ($row) => (object) ((array) $row))
+            ->sortByDesc(function ($row) {
+                return $this->formatDateTimeValue($row->created_at, 'Y-m-d H:i:s');
+            })
+            ->take($limit)
+            ->values();
+    }
+
+    private function getCrmTicketAuditRows(string $ticketRef, int $limit): Collection
+    {
+        $ticketId = $this->parseTicketIdFromReference($ticketRef);
+        $query = TicketReassignment::query();
+        if ($ticketId !== null) {
+            $query->where('ticket_id', $ticketId)->orderBy('created_at');
+        } else {
+            $query->orderByDesc('created_at');
+        }
+
+        return $query->limit($limit)->get()->map(function (TicketReassignment $row) {
+            return (object) array_merge($row->toArray(), [
+                'module_type' => 'ticket',
+                'event_type' => 'Reassigned',
+                'ticket_number' => 'TT' . $row->ticket_id,
+            ]);
+        })->values();
+    }
+
+    private function getWorkTicketAuditRows(string $ticketRef, int $limit): Collection
+    {
+        $workQuery = WorkTicket::query()
+            ->orderByDesc('created_at');
+        if ($ticketRef !== '') {
+            $workQuery->where(function ($q) use ($ticketRef): void {
+                $q->where('ticket_no', 'like', '%' . $ticketRef . '%')
+                    ->orWhere('title', 'like', '%' . $ticketRef . '%');
+            });
+        }
+
+        $workTickets = $workQuery->limit($limit)->get();
+        if ($workTickets->isEmpty()) {
+            return collect();
+        }
+
+        $ticketIds = $workTickets->pluck('id')->all();
+        $updatesByTicket = WorkTicketUpdate::query()
+            ->whereIn('work_ticket_id', $ticketIds)
+            ->orderByDesc('created_at')
+            ->limit($limit * 3)
+            ->get()
+            ->groupBy('work_ticket_id');
+
+        $userIds = $workTickets->flatMap(function (WorkTicket $ticket) use ($updatesByTicket) {
+            return collect([(int) $ticket->assignee_id, (int) $ticket->created_by])
+                ->merge($updatesByTicket->get($ticket->id, collect())->pluck('user_id')->map(fn ($id) => (int) $id));
+        })->filter(fn ($id) => $id > 0)->unique()->values()->all();
+
+        $users = VtigerUser::on('vtiger')
+            ->whereIn('id', $userIds)
+            ->get()
+            ->mapWithKeys(fn (VtigerUser $u) => [(int) $u->id => $u->full_name])
+            ->toArray();
+        $name = fn (?int $id): ?string => ($id && isset($users[$id])) ? $users[$id] : null;
+
+        $events = collect();
+        foreach ($workTickets as $ticket) {
+            $events->push((object) [
+                'module_type' => 'work-ticket',
+                'event_type' => 'Created',
+                'ticket_id' => (int) $ticket->id,
+                'ticket_number' => (string) $ticket->ticket_no,
+                'from_user_id' => null,
+                'from_user_name' => '—',
+                'to_user_id' => (int) $ticket->assignee_id,
+                'to_user_name' => $name((int) $ticket->assignee_id) ?? ('User #' . (int) $ticket->assignee_id),
+                'reassigned_by_user_id' => (int) $ticket->created_by,
+                'reassigned_by_name' => $name((int) $ticket->created_by) ?? ('User #' . (int) $ticket->created_by),
+                'created_at' => $ticket->created_at,
+                'is_work_ticket' => true,
+            ]);
+
+            foreach ($updatesByTicket->get($ticket->id, collect()) as $update) {
+                $events->push((object) [
+                    'module_type' => 'work-ticket',
+                    'event_type' => !empty($update->status_after_update) ? ('Update: ' . $update->status_after_update) : 'Updated',
+                    'ticket_id' => (int) $ticket->id,
+                    'ticket_number' => (string) $ticket->ticket_no,
+                    'from_user_id' => (int) $ticket->assignee_id,
+                    'from_user_name' => $name((int) $ticket->assignee_id) ?? ('User #' . (int) $ticket->assignee_id),
+                    'to_user_id' => (int) ($update->user_id ?? 0),
+                    'to_user_name' => $name((int) ($update->user_id ?? 0)) ?? ('User #' . (int) ($update->user_id ?? 0)),
+                    'reassigned_by_user_id' => (int) ($update->user_id ?? 0),
+                    'reassigned_by_name' => $name((int) ($update->user_id ?? 0)) ?? ('User #' . (int) ($update->user_id ?? 0)),
+                    'created_at' => $update->created_at,
+                    'is_work_ticket' => true,
+                ]);
+            }
+        }
+
+        return $events->sortByDesc(function ($row) {
+            return $this->formatDateTimeValue($row->created_at, 'Y-m-d H:i:s');
+        })->take($limit)->values();
     }
 
     public function exportSlaBroken(TicketSlaService $sla, UserDepartmentService $userDept, Request $request)

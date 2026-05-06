@@ -301,6 +301,11 @@
                         <i class="bi bi-person-lines-fill"></i><span>Contacts</span>
                     </a>
                     @endif
+                    @if($can('finance.payments'))
+                    <a href="{{ route('finance.payments.index') }}" class="app-nav-link {{ request()->routeIs('finance.payments.*') ? 'active' : '' }}">
+                        <i class="bi bi-cash-coin"></i><span>Finance Payments</span>
+                    </a>
+                    @endif
                 </div>
                 @if($can('leads') || $can('marketing'))
                 <div class="app-nav-group">
@@ -454,6 +459,9 @@
                             @if($can('calendar'))
                             <li><a class="dropdown-item py-2" href="{{ route('activities.create', ['type' => 'Event']) }}"><i class="bi bi-calendar-event me-2"></i>Event</a></li>
                             <li><a class="dropdown-item py-2" href="{{ route('activities.create', ['type' => 'Task']) }}"><i class="bi bi-check2-square me-2"></i>Task</a></li>
+                            @endif
+                            @if($can('finance.payments'))
+                            <li><a class="dropdown-item py-2" href="{{ route('finance.payments.index') }}"><i class="bi bi-cash-coin me-2"></i>Payment</a></li>
                             @endif
                         </ul>
                     </div>

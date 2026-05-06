@@ -20,6 +20,7 @@ class ModuleService
         return [
             ['key' => 'deals', 'label' => 'Opportunities', 'icon' => 'bi-briefcase-fill', 'sort' => 1],
             ['key' => 'contacts', 'label' => 'Customers', 'icon' => 'bi-person-lines-fill', 'sort' => 2],
+            ['key' => 'finance.payments', 'label' => 'Finance Payments', 'icon' => 'bi-cash-coin', 'sort' => 3],
             ['key' => 'leads', 'label' => 'Leads', 'icon' => 'bi-people-fill', 'sort' => 3],
             ['key' => 'calendar', 'label' => 'Calendar', 'icon' => 'bi-calendar3', 'sort' => 4],
             ['key' => 'tickets', 'label' => 'Tickets', 'icon' => 'bi-ticket-perforated-fill', 'sort' => 5],

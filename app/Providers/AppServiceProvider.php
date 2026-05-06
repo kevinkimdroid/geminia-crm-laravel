@@ -57,7 +57,12 @@ class AppServiceProvider extends ServiceProvider
                 $view->with('pbxCanCall', false);
                 $view->with('pbxDefaultExtension', '');
                 $allowed = $view->getData()['allowedModules'] ?? [];
-                $view->with('can', fn ($k) => empty($allowed) || in_array($k, $allowed));
+            $view->with('can', function ($k) use ($allowed) {
+                if ($k === 'finance.payments') {
+                    return false;
+                }
+                return empty($allowed) || in_array($k, $allowed);
+            });
                 return;
             }
 
@@ -102,7 +107,27 @@ class AppServiceProvider extends ServiceProvider
             }
 
             $allowed = $view->getData()['allowedModules'] ?? [];
-            $view->with('can', fn ($k) => empty($allowed) || in_array($k, $allowed));
+            $view->with('can', function ($k) use ($allowed, $user) {
+                $isAllowedByModule = empty($allowed) || in_array($k, $allowed, true);
+                if (!$isAllowedByModule) {
+                    return false;
+                }
+
+                if ($k !== 'finance.payments') {
+                    return true;
+                }
+
+                if (method_exists($user, 'isAdministrator') && $user->isAdministrator()) {
+                    return true;
+                }
+
+                $department = strtolower(trim((string) app(\App\Services\UserDepartmentService::class)->getDepartment((int) $user->id)));
+                $roleName = strtolower(trim((string) ($user->primary_role->rolename ?? '')));
+                $email = strtolower(trim((string) ($user->email1 ?? '')));
+                return str_contains($department, 'finance')
+                    || str_contains($roleName, 'finance')
+                    || str_contains($email, 'finance');
+            });
         });
 
         View::composer('settings', function ($view) {

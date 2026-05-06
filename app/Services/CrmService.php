@@ -24,9 +24,12 @@ class CrmService
 
     public function getTicketCountsByStatus(?int $ownerId = null): array
     {
-        if ($ownerId !== null) {
-            return $this->fetchTicketCountsByStatus($ownerId);
+        if ($ownerId !== null && $ownerId > 0) {
+            return Cache::remember('geminia_ticket_counts_by_status_u' . $ownerId, 120, function () use ($ownerId) {
+                return $this->fetchTicketCountsByStatus($ownerId);
+            });
         }
+
         return Cache::remember('geminia_ticket_counts_by_status', 300, function () {
             return $this->fetchTicketCountsByStatus(null);
         });

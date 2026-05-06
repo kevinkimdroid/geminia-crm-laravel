@@ -3,22 +3,35 @@
 @section('title', 'Assignment Handlers Report')
 
 @section('content')
-<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+@include('partials.reports-audit-styles')
+<div class="reports-audit-page">
+<div class="reports-header d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
     <div>
-        <h1 class="page-title mb-1">Assignment Handlers Report</h1>
-        <p class="text-muted mb-0">Created by, checked by, authorized by, and closed by per ticket.</p>
+        <nav class="reports-breadcrumb mb-2">
+            <a href="{{ route('reports') }}">Reports</a>
+            <span class="reports-breadcrumb-sep">/</span>
+            <span class="reports-breadcrumb-current">Assignment handlers</span>
+        </nav>
+        <h1 class="reports-audit-title mb-1">Assignment Handlers Report</h1>
+        <p class="reports-audit-subtitle mb-0">Created by, checked by, authorized by, and closed by for each ticket.</p>
     </div>
-    <div class="d-flex gap-2">
-        <a href="{{ route('reports.export.assignment-handlers', array_merge(request()->only(['date_from', 'date_to', 'status']), ['limit' => 50000])) }}" class="btn btn-success btn-sm">
+    <div class="d-flex flex-wrap gap-2 align-items-center no-print">
+        <a href="{{ route('reports.export.assignment-handlers', array_merge(request()->only(['date_from', 'date_to', 'status']), ['limit' => 50000, 'format' => 'xlsx'])) }}" class="btn btn-primary btn-sm">
             <i class="bi bi-file-earmark-spreadsheet me-1"></i>Export Excel
         </a>
+        <a href="{{ route('reports.export.assignment-handlers', array_merge(request()->only(['date_from', 'date_to', 'status']), ['limit' => 50000, 'format' => 'csv'])) }}" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-download me-1"></i>Export CSV
+        </a>
+        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="window.print()" title="Print report">
+            <i class="bi bi-printer me-1"></i>Print
+        </button>
         <a href="{{ route('reports') }}" class="btn btn-outline-secondary btn-sm">
             <i class="bi bi-arrow-left me-1"></i>Back to reports
         </a>
     </div>
 </div>
 
-<div class="card border-0 shadow-sm mb-4">
+<div class="card border-0 shadow-sm mb-4 no-print">
     <div class="card-body">
         <form method="GET" action="{{ route('reports.assignment-handlers') }}" class="row g-3 align-items-end">
             <div class="col-md-3">
@@ -103,4 +116,5 @@
     {{ $rows->links() }}
 </div>
 @endif
+</div>
 @endsection

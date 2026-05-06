@@ -29,20 +29,32 @@ class DashboardController extends Controller
         $ownerId = config('dashboard.show_all_stats', true) ? null : crm_owner_filter();
         $stats = $this->crm->getDashboardStats(120, $ownerId);
 
-        // Clients count: don't block on slow ERP API — load via AJAX for fast first paint
+        // Keep Contacts card aligned with Contacts page (owner-filtered view).
+        $contactsOwnerId = crm_owner_filter();
+        $stats['contactsCount'] = (int) $this->crm->getContactsCount($contactsOwnerId);
+        $stats['contactsCountDeferred'] = false;
+
+        // Resolve Clients count on server to avoid "..." stuck state on dashboard.
         $source = config('erp.clients_view_source', 'crm');
-        $stats['clientsCountDeferred'] = in_array($source, ['erp_http', 'erp_sync']);
-        $stats['clientsCount'] = $stats['clientsCountDeferred'] ? null : ($stats['contactsCount'] ?? 0);
-        // Contacts page shows same data as Support > Customers — use same source for count
-        if ($stats['clientsCountDeferred']) {
-            $stats['contactsCount'] = null;
-            $stats['contactsCountDeferred'] = true;
+        if (in_array($source, ['erp_http', 'erp_sync'], true)) {
+            $cachedClientsCount = Cache::get('geminia_clients_count');
+            if ($cachedClientsCount === null) {
+                try {
+                    $cachedClientsCount = (int) ($this->erp->getClientsCount(15) ?? 0);
+                } catch (\Throwable) {
+                    $cachedClientsCount = 0;
+                }
+                Cache::put('geminia_clients_count', (int) $cachedClientsCount, 120);
+            }
+            $stats['clientsCount'] = (int) $cachedClientsCount;
         } else {
-            $stats['contactsCount'] = $stats['contactsCount'] ?? 0;
-            $stats['contactsCountDeferred'] = false;
+            // CRM-only mode: mirror contacts count.
+            $stats['clientsCount'] = (int) ($stats['contactsCount'] ?? 0);
         }
+        $stats['clientsCountDeferred'] = false;
+
         $stats['pbxCanCall'] = $this->pbxConfig->isConfigured();
-        $stats['salesByPerson'] = $this->crm->getSalesByPerson(8);
+        $stats['salesByPerson'] = Cache::remember('geminia_dashboard_sales_by_person_top8', 120, fn () => $this->crm->getSalesByPerson(8));
 
         return view('dashboard', $stats);
     }
@@ -56,7 +68,8 @@ class DashboardController extends Controller
     {
         $source = config('erp.clients_view_source', 'crm');
         if (! in_array($source, ['erp_http', 'erp_sync'])) {
-            return response()->json(['count' => null]);
+            // For CRM-only mode, Clients mirrors local contacts count.
+            return response()->json(['count' => (int) ($this->crm->getContactsCount(crm_owner_filter()) ?? 0)]);
         }
         $count = Cache::remember('geminia_clients_count', 120, function () {
             try {

@@ -52,6 +52,10 @@
         </div>
     </div>
     <div class="card-body border-bottom bg-light">
+        @php
+            $currentSort = $sort ?? 'updated_at';
+            $currentDirection = $direction ?? 'desc';
+        @endphp
         <form method="GET" action="{{ route('work-tickets.index') }}" class="row g-2 align-items-end">
             <input type="hidden" name="scope" value="{{ $scope ?? 'mine' }}">
             <div class="col-md-3">
@@ -67,6 +71,33 @@
                 <label class="form-label small fw-semibold mb-1">Search</label>
                 <input type="text" name="search" value="{{ $search ?? '' }}" class="form-control form-control-sm" placeholder="Ticket no, title, description">
             </div>
+            <div class="col-md-3">
+                <label class="form-label small fw-semibold mb-1">Assignee</label>
+                <select name="assignee_id" class="form-select form-select-sm">
+                    <option value="">All assignees</option>
+                    @foreach(($assigneeFilterOptions ?? []) as $id => $name)
+                    <option value="{{ $id }}" {{ (int)($assigneeId ?? 0) === (int)$id ? 'selected' : '' }}>{{ $name }}</option>
+                    @endforeach
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small fw-semibold mb-1">Sort by</label>
+                <select name="sort" class="form-select form-select-sm">
+                    <option value="updated_at" {{ $currentSort === 'updated_at' ? 'selected' : '' }}>Last updated</option>
+                    <option value="created_at" {{ $currentSort === 'created_at' ? 'selected' : '' }}>Created date</option>
+                    <option value="due_date" {{ $currentSort === 'due_date' ? 'selected' : '' }}>Due date</option>
+                    <option value="priority" {{ $currentSort === 'priority' ? 'selected' : '' }}>Priority</option>
+                    <option value="status" {{ $currentSort === 'status' ? 'selected' : '' }}>Status</option>
+                    <option value="ticket_no" {{ $currentSort === 'ticket_no' ? 'selected' : '' }}>Ticket number</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small fw-semibold mb-1">Direction</label>
+                <select name="direction" class="form-select form-select-sm">
+                    <option value="desc" {{ $currentDirection === 'desc' ? 'selected' : '' }}>Descending</option>
+                    <option value="asc" {{ $currentDirection === 'asc' ? 'selected' : '' }}>Ascending</option>
+                </select>
+            </div>
             <div class="col-auto">
                 <button type="submit" class="btn btn-success btn-sm"><i class="bi bi-search me-1"></i> Filter</button>
             </div>
@@ -77,19 +108,59 @@
     </div>
 
     <div class="table-responsive">
+        @php
+            $sortIcon = function (string $column) use ($currentSort, $currentDirection): string {
+                if ($currentSort !== $column) {
+                    return 'bi-arrow-down-up text-muted';
+                }
+                return $currentDirection === 'asc' ? 'bi-sort-up' : 'bi-sort-down';
+            };
+            $nextDirection = function (string $column) use ($currentSort, $currentDirection): string {
+                if ($currentSort !== $column) {
+                    return 'asc';
+                }
+                return $currentDirection === 'asc' ? 'desc' : 'asc';
+            };
+            $sortUrl = function (string $column) use ($nextDirection) {
+                return route('work-tickets.index', array_merge(request()->except('page'), [
+                    'sort' => $column,
+                    'direction' => $nextDirection($column),
+                ]));
+            };
+        @endphp
         <table class="table table-hover align-middle mb-0">
             <thead class="table-light">
                 <tr>
-                    <th>Ticket #</th>
+                    <th>
+                        <a href="{{ $sortUrl('ticket_no') }}" class="text-decoration-none text-dark">
+                            Ticket # <i class="bi {{ $sortIcon('ticket_no') }} ms-1"></i>
+                        </a>
+                    </th>
                     <th>Title</th>
-                    <th>Status</th>
-                    <th>Priority</th>
+                    <th>
+                        <a href="{{ $sortUrl('status') }}" class="text-decoration-none text-dark">
+                            Status <i class="bi {{ $sortIcon('status') }} ms-1"></i>
+                        </a>
+                    </th>
+                    <th>
+                        <a href="{{ $sortUrl('priority') }}" class="text-decoration-none text-dark">
+                            Priority <i class="bi {{ $sortIcon('priority') }} ms-1"></i>
+                        </a>
+                    </th>
                     <th>Assignee</th>
                     <th>Reporting To</th>
                     <th>TAT</th>
-                    <th>TAT Due</th>
+                    <th>
+                        <a href="{{ $sortUrl('tat_due_at') }}" class="text-decoration-none text-dark">
+                            TAT Due <i class="bi {{ $sortIcon('tat_due_at') }} ms-1"></i>
+                        </a>
+                    </th>
                     <th>SLA</th>
-                    <th>Updated</th>
+                    <th>
+                        <a href="{{ $sortUrl('updated_at') }}" class="text-decoration-none text-dark">
+                            Updated <i class="bi {{ $sortIcon('updated_at') }} ms-1"></i>
+                        </a>
+                    </th>
                 </tr>
             </thead>
             <tbody>

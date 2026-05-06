@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Services\CrmService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 class SearchController extends Controller
 {
@@ -28,7 +29,9 @@ class SearchController extends Controller
         }
 
         $limit = (int) $request->get('limit', 10);
-        $results = $this->crm->globalSearch($q, $limit, crm_owner_filter());
+        $ownerId = crm_owner_filter();
+        $cacheKey = 'global_search:' . sha1($q . '|' . $limit . '|' . ($ownerId ?? 'all'));
+        $results = Cache::remember($cacheKey, 30, fn () => $this->crm->globalSearch($q, $limit, $ownerId));
 
         return response()->json(['results' => $results]);
     }

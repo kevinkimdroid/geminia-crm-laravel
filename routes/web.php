@@ -4,6 +4,7 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DealController;
+use App\Http\Controllers\FinancePaymentController;
 use App\Http\Controllers\LeadController;
 use App\Http\Controllers\SetupController;
 use App\Http\Controllers\SocialAuthController;
@@ -59,7 +60,7 @@ Route::get('/search', [\App\Http\Controllers\SearchController::class, 'index'])-
 Route::redirect('/welcome', '/');
 Route::redirect('/index.php', '/');
 
-Route::get('/contacts', [\App\Http\Controllers\CustomerController::class, 'index'])->name('contacts.index');
+Route::get('/contacts', [ContactController::class, 'index'])->name('contacts.index');
 Route::resource('contacts', ContactController::class)->except(['index']);
 Route::post('contacts/{contact}/followup', [ContactController::class, 'storeFollowup'])->name('contacts.followup.store');
 Route::post('contacts/{contact}/campaigns', [ContactController::class, 'addToCampaign'])->name('contacts.campaigns.add');
@@ -86,6 +87,10 @@ Route::get('/work-tickets/create', [\App\Http\Controllers\WorkTicketController::
 Route::post('/work-tickets', [\App\Http\Controllers\WorkTicketController::class, 'store'])->name('work-tickets.store');
 Route::get('/work-tickets/{workTicket}', [\App\Http\Controllers\WorkTicketController::class, 'show'])->name('work-tickets.show');
 Route::post('/work-tickets/{workTicket}/updates', [\App\Http\Controllers\WorkTicketController::class, 'storeUpdate'])->name('work-tickets.updates.store');
+Route::middleware('finance')->group(function () {
+Route::get('/finance/payments', [FinancePaymentController::class, 'index'])->name('finance.payments.index');
+Route::get('/finance/payments/create-ticket', [FinancePaymentController::class, 'createTicket'])->name('finance.payments.create-ticket');
+});
 
 Route::get('/marketing', fn () => view('marketing'))->name('marketing');
 Route::get('/marketing/social-media', [\App\Http\Controllers\SocialMediaController::class, 'index'])->name('marketing.social-media');

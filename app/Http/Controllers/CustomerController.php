@@ -12,6 +12,8 @@ use Illuminate\View\View;
 
 class CustomerController extends Controller
 {
+    private const CLIENTS_API_CACHE_VERSION = 'v2';
+
     /** @var CrmService */
     protected $crm;
     /** @var ErpClientService */
@@ -247,6 +249,19 @@ class CustomerController extends Controller
             && (in_array($source, ['erp_sync', 'erp_http']) || $this->erp->isConfigured())
             && ($source !== 'erp_http' || ! empty(config('erp.clients_http_url')));
 
+        $apiCacheKey = 'customers:api:' . sha1(json_encode([
+            'v' => self::CLIENTS_API_CACHE_VERSION,
+            'search' => $search,
+            'system' => $system,
+            'page' => $page,
+            'source' => $source,
+            'owner' => crm_owner_filter(),
+        ]));
+        $cachedPayload = \Illuminate\Support\Facades\Cache::get($apiCacheKey);
+        if (is_array($cachedPayload)) {
+            return response()->json($cachedPayload);
+        }
+
         $clientsGrandTotal = null;
         if ($useErp) {
             $skipCache = in_array($system, ['group', 'individual', 'mortgage', 'group_pension'], true)
@@ -282,23 +297,46 @@ class CustomerController extends Controller
 
         $rows = collect($customers)->map(function ($c) use ($source) {
             $c = (object) (is_array($c) ? $c : (array) $c);
-            $policy = trim((string) ($c->policy_no ?? $c->policy_number ?? $c->ipol_policy_no ?? $c->pol_policy_no ?? ''));
+            $row = (array) $c;
+            $policy = trim((string) $this->pickFirstNonEmpty($row, [
+                'policy_no', 'policy_number', 'ipol_policy_no', 'pol_policy_no', 'contract_no', 'scheme_no',
+                'POLICY_NO', 'POLICY_NUMBER', 'IPOL_POLICY_NO', 'POL_POLICY_NO', 'CONTRACT_NO', 'SCHEME_NO',
+            ]));
+            $polPreparedBy = trim((string) $this->pickFirstNonEmpty($row, [
+                'pol_prepared_by', 'POL_PREPARED_BY', 'bra_manager', 'unit_manar',
+            ]));
+            $intermediary = trim((string) $this->pickFirstNonEmpty($row, [
+                'intermediary', 'INTERMEDIARY', 'intermediary_name', 'agency', 'agn_name', 'agnName',
+            ]));
+            $lifeAssured = trim((string) $this->pickFirstNonEmpty($row, [
+                'life_assur', 'life_assured', 'lifeAssur', 'lifeAssured',
+                'client_name', 'CLIENT_NAME', 'name', 'NAME', 'member_name', 'mem_surname',
+            ]));
+            $product = trim((string) $this->pickFirstNonEmpty($row, [
+                'product', 'PRODUCT', 'prod_desc', 'PROD_DESC', 'prod_sht_desc', 'scheme_name', 'SCHEME_NAME',
+            ]));
+            $status = trim((string) $this->pickFirstNonEmpty($row, [
+                'status', 'STATUS', 'mendr_status', 'MENDR_STATUS', 'endr_status', 'ENDR_STATUS', 'policy_status', 'POLICY_STATUS',
+            ]));
+            $email = $this->pickFirstNonEmpty($row, ['email', 'EMAIL', 'email_adr', 'EMAIL_ADR']) ?? null;
+            $mobile = $this->pickFirstNonEmpty($row, ['mobile', 'phone', 'phone_no', 'PHONE_NO']) ?? null;
+
             $isErp = ($c->_erp_source ?? false) && in_array($source, ['erp_sync', 'erp_http']);
-            $lifeSystem = $c->life_system ?? $this->erp->getLifeSystemFromProduct($c->product ?? null);
+            $lifeSystem = $c->life_system ?? $this->erp->getLifeSystemFromProduct($product ?: null);
             return [
                 'policy' => $policy,
                 'policy_no' => $policy,
                 'policy_number' => $policy,
-                'pol_prepared_by' => $c->pol_prepared_by ?? '—',
-                'intermediary' => $c->intermediary ?? '—',
-                'life_assur' => $c->life_assur ?? $c->client_name ?? '—',
-                'product' => $c->product ?? '—',
+                'pol_prepared_by' => $polPreparedBy !== '' ? $polPreparedBy : '—',
+                'intermediary' => $intermediary !== '' ? $intermediary : '—',
+                'life_assur' => $lifeAssured !== '' ? $lifeAssured : '—',
+                'product' => $product !== '' ? $product : '—',
                 'life_system' => $lifeSystem,
-                'status' => $c->status ?? '—',
+                'status' => $status !== '' ? $status : '—',
                 'is_erp' => $isErp,
                 'name' => trim(($c->firstname ?? '') . ' ' . ($c->lastname ?? '')) ?: '—',
-                'email' => personal_email_only($c->email ?? null) ?? '—',
-                'mobile' => $c->mobile ?? '—',
+                'email' => personal_email_only($email) ?? '—',
+                'mobile' => $mobile ?: '—',
             ];
         })->values()->all();
 
@@ -314,6 +352,27 @@ class CustomerController extends Controller
             $payload['grand_total'] = $clientsGrandTotal;
         }
 
+        \Illuminate\Support\Facades\Cache::put($apiCacheKey, $payload, 45);
+
         return response()->json($payload);
+    }
+
+    /**
+     * @param  array<string,mixed>  $row
+     * @param  array<int,string>  $keys
+     */
+    private function pickFirstNonEmpty(array $row, array $keys): mixed
+    {
+        foreach ($keys as $key) {
+            if (! array_key_exists($key, $row)) {
+                continue;
+            }
+            $value = $row[$key];
+            if ($value !== null && trim((string) $value) !== '') {
+                return $value;
+            }
+        }
+
+        return null;
     }
 }

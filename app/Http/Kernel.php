@@ -60,5 +60,6 @@ class Kernel extends HttpKernel
         'erp.api.token' => \App\Http\Middleware\ValidateErpApiToken::class,
         'erp.sync.token' => \App\Http\Middleware\ValidateErpSyncToken::class,
         'admin' => \App\Http\Middleware\EnsureAdministrator::class,
+        'finance' => \App\Http\Middleware\EnsureFinanceDepartment::class,
     ];
 }

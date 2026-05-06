@@ -12,12 +12,12 @@
                 <span class="reports-breadcrumb-sep">/</span>
                 <span class="reports-breadcrumb-current">Reassignment Audit</span>
             </nav>
-            <h1 class="reports-audit-title mb-1">Ticket Reassignment Audit</h1>
-            <p class="reports-audit-subtitle mb-0">Audit trail of all ticket reassignments for compliance and accountability.</p>
+            <h1 class="reports-audit-title mb-1">Ticket Audit Trail</h1>
+            <p class="reports-audit-subtitle mb-0">Audit trail for CRM tickets and work tickets for compliance and accountability.</p>
         </div>
         <div class="d-flex flex-wrap gap-2 align-items-center no-print">
             <form action="{{ route('reports.reassignment-audit') }}" method="GET" class="d-flex flex-wrap gap-2 align-items-center">
-                <input type="text" name="ticket" value="{{ $ticket ?? '' }}" class="form-control form-control-sm" style="width: 180px;" placeholder="Ticket e.g. TT2025809937">
+                <input type="text" name="ticket" value="{{ $ticket ?? '' }}" class="form-control form-control-sm" style="width: 200px;" placeholder="Ticket e.g. TT123 or WT-202605-0001">
                 <label class="text-muted small mb-0">Show</label>
                 <select name="limit" class="form-select form-select-sm" style="width:auto" onchange="this.form.submit()">
                     <option value="50" {{ $limit == 50 ? 'selected' : '' }}>50 recent</option>
@@ -44,7 +44,9 @@
             <table class="table table-hover align-middle mb-0">
                 <thead>
                     <tr>
+                        <th>Module</th>
                         <th>Ticket</th>
+                        <th>Event</th>
                         <th>From</th>
                         <th>From Dept</th>
                         <th>To</th>
@@ -57,10 +59,20 @@
                     @forelse($reassignments ?? [] as $r)
                     <tr>
                         <td>
-                            <a href="{{ route('tickets.show', $r->ticket_id) }}" class="fw-semibold text-primary text-decoration-none font-monospace">
-                                TT{{ $r->ticket_id }}
-                            </a>
+                            {{ ($r->module_type ?? 'ticket') === 'work-ticket' ? 'Work Ticket' : 'Ticket' }}
                         </td>
+                        <td>
+                            @if(($r->module_type ?? 'ticket') === 'work-ticket')
+                                <a href="{{ route('work-tickets.show', $r->ticket_id) }}" class="fw-semibold text-primary text-decoration-none font-monospace">
+                                    {{ $r->ticket_number ?? ('WT-' . $r->ticket_id) }}
+                                </a>
+                            @else
+                                <a href="{{ route('tickets.show', $r->ticket_id) }}" class="fw-semibold text-primary text-decoration-none font-monospace">
+                                    {{ $r->ticket_number ?? ('TT' . $r->ticket_id) }}
+                                </a>
+                            @endif
+                        </td>
+                        <td>{{ e($r->event_type ?? 'Reassigned') }}</td>
                         <td>{{ e($r->from_user_name ?? 'Unassigned') }}</td>
                         <td>{{ e($r->from_user_department ?? '—') }}</td>
                         <td class="fw-semibold">{{ e($r->to_user_name ?? '—') }}</td>
@@ -83,9 +95,9 @@
                     </tr>
                     @empty
                     <tr>
-                        <td colspan="7" class="text-center py-5 text-muted">
+                        <td colspan="9" class="text-center py-5 text-muted">
                             <i class="bi bi-person-badge display-6 d-block mb-2 text-muted"></i>
-                            No reassignments recorded yet. Changes are logged when tickets are reassigned.
+                            No ticket audit records yet. Reassignments and work-ticket updates are logged automatically.
                         </td>
                     </tr>
                     @endforelse

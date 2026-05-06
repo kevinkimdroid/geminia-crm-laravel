@@ -13,6 +13,23 @@
     </div>
 </div>
 
+<div class="card reports-export-card border-0 mb-4">
+    <div class="card-body p-4">
+        <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
+            <div>
+                <h6 class="text-uppercase small fw-bold text-muted mb-2">Quick report workflow</h6>
+                <p class="text-muted small mb-0">1) Open a report 2) set filters 3) click export. You can download in Excel or CSV on each report page.</p>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+                <a href="{{ route('reports.export.all-excel') }}" class="btn btn-primary btn-sm"><i class="bi bi-file-earmark-spreadsheet me-1"></i>Export All (Excel)</a>
+                <a href="{{ route('reports.export.management-usage', ['date_from' => now()->startOfYear()->format('Y-m-d'), 'date_to' => now()->format('Y-m-d'), 'simple' => 1, 'format' => 'xlsx']) }}" class="btn btn-outline-secondary btn-sm"><i class="bi bi-download me-1"></i>Management Summary</a>
+                <a href="{{ route('reports.export.assignment-handlers', ['date_from' => now()->startOfMonth()->format('Y-m-d'), 'date_to' => now()->format('Y-m-d'), 'limit' => 50000, 'format' => 'xlsx']) }}" class="btn btn-outline-secondary btn-sm"><i class="bi bi-download me-1"></i>Assignment Handlers</a>
+                <a href="{{ route('reports.export.tickets-by-date', ['date_from' => now()->startOfMonth()->format('Y-m-d'), 'date_to' => now()->format('Y-m-d'), 'format' => 'xlsx']) }}" class="btn btn-outline-secondary btn-sm"><i class="bi bi-download me-1"></i>Tickets by Date</a>
+            </div>
+        </div>
+    </div>
+</div>
+
 {{-- Audit & Compliance — primary section for auditors --}}
 <div class="reports-section mb-4">
     <h5 class="reports-section-title mb-3">
@@ -83,8 +100,8 @@
                             <span class="badge bg-primary bg-opacity-10 text-primary">Audit trail</span>
                             <i class="bi bi-arrow-right text-muted"></i>
                         </div>
-                        <h6 class="card-title mb-2">Reassignment Audit</h6>
-                        <p class="text-muted small mb-0">Audit trail of ticket reassignments.</p>
+                        <h6 class="card-title mb-2">Ticket Audit Trail</h6>
+                        <p class="text-muted small mb-0">Audit trail of CRM tickets and work tickets.</p>
                     </div>
                 </div>
             </a>

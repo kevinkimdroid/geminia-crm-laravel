@@ -11,6 +11,15 @@ use Illuminate\Support\Facades\Schema;
 
 class ErpClientService
 {
+    protected function httpTimeoutSeconds(int $preferred): int
+    {
+        if (app()->environment('local')) {
+            return max(2, min($preferred, 8));
+        }
+
+        return max(2, $preferred);
+    }
+
     /**
      * Human-readable label for Support > Clients "System" column and client detail.
      */
@@ -271,7 +280,7 @@ class ErpClientService
             $params['offset'] = $offset;
         }
 
-        $response = Http::timeout(30)->get($url, $params);
+        $response = Http::withOptions(['connect_timeout' => 2])->timeout($this->httpTimeoutSeconds(30))->get($url, $params);
 
         if (! $response->successful()) {
             throw new \RuntimeException("ERP API request failed: {$response->status()}");
@@ -628,7 +637,7 @@ class ErpClientService
                         if ($system) {
                             $params .= '&system=' . $system;
                         }
-                        $response = \Illuminate\Support\Facades\Http::timeout(10)->get($url . $sep . $params);
+                        $response = \Illuminate\Support\Facades\Http::withOptions(['connect_timeout' => 2])->timeout($this->httpTimeoutSeconds(10))->get($url . $sep . $params);
                         if (! $response->successful()) {
                             continue;
                         }
@@ -1349,7 +1358,7 @@ class ErpClientService
         }
         try {
             $sep = str_contains($url, '?') ? '&' : '?';
-            $response = Http::timeout(15)->get($url . $sep . 'products=1');
+            $response = Http::withOptions(['connect_timeout' => 2])->timeout($this->httpTimeoutSeconds(15))->get($url . $sep . 'products=1');
             if (! $response->successful()) {
                 return [];
             }
@@ -1381,7 +1390,7 @@ class ErpClientService
             $params['product'] = trim($product);
         }
         try {
-            $response = Http::timeout(30)->get($maturitiesUrl, $params);
+            $response = Http::withOptions(['connect_timeout' => 2])->timeout($this->httpTimeoutSeconds(30))->get($maturitiesUrl, $params);
             if (! $response->successful()) {
                 if ($response->status() === 404) {
                     return $this->getMaturingPoliciesFromClientsFallback($from, $to, $product);
@@ -1542,7 +1551,7 @@ class ErpClientService
             }
 
             $timeout = $timeoutSeconds ?? (($search && trim($search) !== '') ? 30 : 15);
-            $response = Http::timeout($timeout)->get($url, $params);
+            $response = Http::withOptions(['connect_timeout' => 2])->timeout($this->httpTimeoutSeconds($timeout))->get($url, $params);
 
             if (! $response->successful()) {
                 $body = $response->json();
