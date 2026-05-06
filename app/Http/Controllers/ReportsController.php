@@ -567,21 +567,88 @@ class ReportsController
 
     private function getCrmTicketAuditRows(string $ticketRef, int $limit): Collection
     {
-        $ticketId = $this->parseTicketIdFromReference($ticketRef);
         $query = TicketReassignment::query();
-        if ($ticketId !== null) {
-            $query->where('ticket_id', $ticketId)->orderBy('created_at');
+        $ticketIds = $this->resolveCrmTicketIdsFromReference($ticketRef, $limit);
+        if (! empty($ticketIds)) {
+            $query->whereIn('ticket_id', $ticketIds)->orderBy('created_at');
+        } elseif ($ticketRef !== '') {
+            // Ticket filter provided but no matching CRM ticket found.
+            return collect();
         } else {
             $query->orderByDesc('created_at');
         }
 
-        return $query->limit($limit)->get()->map(function (TicketReassignment $row) {
+        $reassignmentRows = $query->limit($limit)->get()->map(function (TicketReassignment $row) {
             return (object) array_merge($row->toArray(), [
                 'module_type' => 'ticket',
                 'event_type' => 'Reassigned',
                 'ticket_number' => 'TT' . $row->ticket_id,
             ]);
-        })->values();
+        });
+
+        $createdQuery = Ticket::listQuery();
+        if (! empty($ticketIds)) {
+            $createdQuery->whereIn('vtiger_troubletickets.ticketid', $ticketIds);
+        }
+
+        $createdRows = $createdQuery
+            ->orderByDesc('e.createdtime')
+            ->limit($limit)
+            ->get()
+            ->map(function ($ticket) {
+                $assigneeName = trim((string) ($ticket->assigned_to_name ?? ''));
+                $creatorName = trim((string) ($ticket->created_by_name ?? ''));
+
+                return (object) [
+                    'module_type' => 'ticket',
+                    'event_type' => 'Created',
+                    'ticket_id' => (int) ($ticket->ticketid ?? 0),
+                    'ticket_number' => $ticket->ticket_no ?: ('TT' . ($ticket->ticketid ?? '')),
+                    'from_user_id' => null,
+                    'from_user_name' => '—',
+                    'to_user_id' => (int) ($ticket->smownerid ?? 0),
+                    'to_user_name' => $assigneeName !== '' ? $assigneeName : 'Unassigned',
+                    'reassigned_by_user_id' => (int) ($ticket->smcreatorid ?? 0),
+                    'reassigned_by_name' => $creatorName !== '' ? $creatorName : 'System',
+                    'created_at' => $ticket->createdtime,
+                ];
+            });
+
+        return $reassignmentRows
+            ->merge($createdRows)
+            ->sortByDesc(function ($row) {
+                return $this->formatDateTimeValue($row->created_at, 'Y-m-d H:i:s');
+            })
+            ->take($limit)
+            ->values();
+    }
+
+    private function resolveCrmTicketIdsFromReference(string $ticketRef, int $limit): array
+    {
+        $ticketRef = trim($ticketRef);
+        if ($ticketRef === '') {
+            return [];
+        }
+
+        $ids = collect();
+        $ticketId = $this->parseTicketIdFromReference($ticketRef);
+        if ($ticketId !== null) {
+            $ids->push($ticketId);
+        }
+
+        $matchedByNumber = Ticket::listQuery()
+            ->where('vtiger_troubletickets.ticket_no', 'like', '%' . $ticketRef . '%')
+            ->limit($limit)
+            ->get()
+            ->pluck('ticketid');
+
+        return $ids
+            ->merge($matchedByNumber)
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
     }
 
     private function getWorkTicketAuditRows(string $ticketRef, int $limit): Collection
