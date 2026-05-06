@@ -13,8 +13,23 @@ return [
     |
     */
 
-    // If OCI8 is missing, force-disable ERP to avoid Yajra/PDO OCI constant errors.
-    'enabled' => (bool) env('ERP_ENABLED', true) && extension_loaded('oci8'),
+    /*
+    | Keep ERP enabled for erp_http / erp_sync even when OCI8 is not installed.
+    | Only direct Oracle mode (CLIENTS_VIEW_SOURCE=erp) requires OCI8.
+    */
+    'enabled' => (function () {
+        $enabled = (bool) env('ERP_ENABLED', true);
+        if (! $enabled) {
+            return false;
+        }
+
+        $viewSource = (string) env('CLIENTS_VIEW_SOURCE', 'crm');
+        if (in_array($viewSource, ['erp_http', 'erp_sync', 'crm'], true)) {
+            return true;
+        }
+
+        return extension_loaded('oci8');
+    })(),
 
     /*
     |--------------------------------------------------------------------------

@@ -42,6 +42,10 @@ class FinancePaymentController extends Controller
         if ($deny = $this->denyUnlessFinance()) {
             return $deny;
         }
+        if (! extension_loaded('oci8')) {
+            return redirect()->route('dashboard')
+                ->with('error', 'Finance payments require direct Oracle access (OCI8 extension is not enabled on this server).');
+        }
         if (! config('erp.enabled', true)) {
             return redirect()->route('dashboard')
                 ->with('error', 'Finance payments require ERP/Oracle. Set ERP_ENABLED=true and enable OCI8 to use this module.');
@@ -127,6 +131,10 @@ class FinancePaymentController extends Controller
     {
         if ($deny = $this->denyUnlessFinance()) {
             return $deny;
+        }
+        if (! extension_loaded('oci8')) {
+            return redirect()->route('dashboard')
+                ->with('error', 'Finance payments require direct Oracle access (OCI8 extension is not enabled on this server).');
         }
         if (! config('erp.enabled', true)) {
             return redirect()->route('dashboard')
