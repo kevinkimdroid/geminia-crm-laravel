@@ -155,6 +155,17 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Clients list lazy load
+    |--------------------------------------------------------------------------
+    |
+    | When true, the Clients page loads rows via JS after first paint.
+    | Keep false on servers where /api/support/clients may be blocked.
+    |
+    */
+    'clients_lazy_load' => env('ERP_CLIENTS_LAZY_LOAD', false),
+
+    /*
+    |--------------------------------------------------------------------------
     | Column mapping (ERP -> API response)
     |--------------------------------------------------------------------------
     |

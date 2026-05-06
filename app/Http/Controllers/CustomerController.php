@@ -170,7 +170,9 @@ class CustomerController extends Controller
 
         // Lazy-load: skip slow ERP call on initial page load for fast first paint.
         // When user has searched (or filtered Group/Individual), load server-side so results display.
-        $lazyLoad = $useErp && in_array($source, ['erp_sync', 'erp_http'])
+        $lazyLoadEnabled = (bool) config('erp.clients_lazy_load', false);
+        $lazyLoad = $lazyLoadEnabled
+            && $useErp && in_array($source, ['erp_sync', 'erp_http'])
             && ! $search && ! $system;
 
         if ($useErp && ! $lazyLoad) {
