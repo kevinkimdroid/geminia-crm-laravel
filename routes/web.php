@@ -83,6 +83,7 @@ Route::get('/activities/create', [\App\Http\Controllers\ActivityController::clas
 Route::post('/activities', [\App\Http\Controllers\ActivityController::class, 'store'])->name('activities.store');
 Route::get('/api/contacts/{contact}/tickets', [\App\Http\Controllers\ActivityController::class, 'ticketsForContact'])->name('api.contacts.tickets');
 Route::get('/work-tickets', [\App\Http\Controllers\WorkTicketController::class, 'index'])->name('work-tickets.index');
+Route::get('/work-tickets/export', [\App\Http\Controllers\WorkTicketController::class, 'export'])->name('work-tickets.export');
 Route::get('/work-tickets/create', [\App\Http\Controllers\WorkTicketController::class, 'create'])->name('work-tickets.create');
 Route::post('/work-tickets', [\App\Http\Controllers\WorkTicketController::class, 'store'])->name('work-tickets.store');
 Route::get('/work-tickets/{workTicket}', [\App\Http\Controllers\WorkTicketController::class, 'show'])->name('work-tickets.show');
@@ -90,6 +91,7 @@ Route::post('/work-tickets/{workTicket}/updates', [\App\Http\Controllers\WorkTic
 Route::middleware('finance')->group(function () {
 Route::get('/finance/payments', [FinancePaymentController::class, 'index'])->name('finance.payments.index');
 Route::get('/finance/payments/create-ticket', [FinancePaymentController::class, 'createTicket'])->name('finance.payments.create-ticket');
+Route::get('/finance/agency-advances', [FinancePaymentController::class, 'agencyAdvances'])->name('finance.agency-advances.index');
 });
 
 Route::get('/marketing', fn () => view('marketing'))->name('marketing');
@@ -217,12 +219,14 @@ Route::get('/reports/sla-broken', [\App\Http\Controllers\ReportsController::clas
 Route::get('/reports/ticket-aging', [\App\Http\Controllers\ReportsController::class, 'ticketAging'])->name('reports.ticket-aging');
 Route::get('/reports/tickets-by-date', [\App\Http\Controllers\ReportsController::class, 'ticketsByDate'])->name('reports.tickets-by-date');
 Route::get('/reports/management-usage', [\App\Http\Controllers\ReportsController::class, 'managementUsage'])->name('reports.management-usage');
+Route::get('/reports/ticket-automation-analysis', [\App\Http\Controllers\ReportsController::class, 'ticketAutomationAnalysis'])->name('reports.ticket-automation-analysis');
 Route::get('/reports/assignment-handlers', [\App\Http\Controllers\ReportsController::class, 'assignmentHandlers'])->name('reports.assignment-handlers');
 Route::get('/reports/contacts-summary', [\App\Http\Controllers\ReportsController::class, 'contactsSummary'])->name('reports.contacts-summary');
 Route::get('/reports/calls-summary', [\App\Http\Controllers\ReportsController::class, 'callsSummary'])->name('reports.calls-summary');
 Route::get('/reports/reassignment-audit', [\App\Http\Controllers\ReportsController::class, 'reassignmentAudit'])->name('reports.reassignment-audit');
 Route::get('/reports/bounced-emails', [\App\Http\Controllers\ReportsController::class, 'bouncedEmailsReport'])->name('reports.bounced-emails');
 Route::get('/reports/export/management-usage', [\App\Http\Controllers\ReportsController::class, 'exportManagementUsage'])->name('reports.export.management-usage');
+Route::get('/reports/export/ticket-automation-analysis', [\App\Http\Controllers\ReportsController::class, 'exportTicketAutomationAnalysis'])->name('reports.export.ticket-automation-analysis');
 Route::get('/reports/export/reassignment-audit', [\App\Http\Controllers\ReportsController::class, 'exportReassignmentAudit'])->name('reports.export.reassignment-audit');
 Route::get('/reports/export/assignment-handlers', [\App\Http\Controllers\ReportsController::class, 'exportAssignmentHandlers'])->name('reports.export.assignment-handlers');
 Route::get('/reports/export/sla-broken', [\App\Http\Controllers\ReportsController::class, 'exportSlaBroken'])->name('reports.export.sla-broken');

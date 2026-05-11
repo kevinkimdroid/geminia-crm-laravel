@@ -37,7 +37,7 @@ class EnsureFinanceDepartment
 
         if (!$isFinance) {
             return redirect()->route('dashboard')
-                ->with('error', 'Access denied: Finance module can only be accessed by Finance department users and Administrators.');
+                ->with('error', 'You cannot open Finance links: your profile is not in the Finance department (and you are not an Administrator). Ask an admin to assign Finance access or add your user to the Finance department.');
         }
 
         return $next($request);

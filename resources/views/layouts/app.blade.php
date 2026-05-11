@@ -302,9 +302,15 @@
                     </a>
                     @endif
                     @if($can('finance.payments'))
-                    <a href="{{ route('finance.payments.index') }}" class="app-nav-link {{ request()->routeIs('finance.payments.*') ? 'active' : '' }}">
-                        <i class="bi bi-cash-coin"></i><span>Finance Payments</span>
-                    </a>
+                    <div class="app-nav-group">
+                        <div class="app-nav-label">Finance</div>
+                        <a href="{{ route('finance.payments.index') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('finance.payments.*') ? 'active' : '' }}">
+                            <i class="bi bi-cash-coin"></i><span>Finance cheques</span>
+                        </a>
+                        <a href="{{ route('finance.agency-advances.index') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('finance.agency-advances.*') ? 'active' : '' }}">
+                            <i class="bi bi-building"></i><span>Agency advances</span>
+                        </a>
+                    </div>
                     @endif
                 </div>
                 @if($can('leads') || $can('marketing'))
@@ -461,7 +467,8 @@
                             <li><a class="dropdown-item py-2" href="{{ route('activities.create', ['type' => 'Task']) }}"><i class="bi bi-check2-square me-2"></i>Task</a></li>
                             @endif
                             @if($can('finance.payments'))
-                            <li><a class="dropdown-item py-2" href="{{ route('finance.payments.index') }}"><i class="bi bi-cash-coin me-2"></i>Payment</a></li>
+                            <li><a class="dropdown-item py-2" href="{{ route('finance.payments.index') }}"><i class="bi bi-cash-coin me-2"></i>Finance cheques</a></li>
+                            <li><a class="dropdown-item py-2" href="{{ route('finance.agency-advances.index') }}"><i class="bi bi-building me-2"></i>Agency advances</a></li>
                             @endif
                         </ul>
                     </div>

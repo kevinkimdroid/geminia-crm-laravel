@@ -3,10 +3,32 @@
 @section('title', 'Finance Cheques')
 
 @section('content')
+@if (session('error'))
+    <div class="alert alert-danger alert-dismissible fade show mt-3" role="alert">
+        <i class="bi bi-exclamation-octagon-fill me-2"></i><strong>Something went wrong.</strong> {{ session('error') }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+@endif
+@if (!empty($blockingError))
+    <div class="alert alert-danger border mt-3" role="alert">
+        <i class="bi bi-plug-fill me-2"></i><strong>Finance cannot connect to ERP.</strong> {{ $blockingError }}
+    </div>
+@endif
+@if (!empty($erpError))
+    <div class="alert alert-danger alert-dismissible fade show mt-3" role="alert">
+        <i class="bi bi-database-exclamation me-2"></i><strong>Data could not be loaded.</strong> {{ $erpError }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+@endif
 <div class="page-header d-flex flex-wrap justify-content-between align-items-start gap-3">
     <div>
         <h1 class="page-title mb-1">Finance Cheques</h1>
         <p class="page-subtitle mb-0">Live cheque feed from FMS source for ticket creation workflow.</p>
+    </div>
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+        <a href="{{ route('finance.agency-advances.index') }}" class="btn btn-outline-primary btn-sm">
+            <i class="bi bi-building me-1"></i> Agency advances
+        </a>
     </div>
 </div>
 
@@ -103,7 +125,13 @@
                         <tr>
                             <td colspan="8" class="text-center py-5 text-muted">
                                 <i class="bi bi-cash-coin fs-3 d-block mb-2"></i>
-                                No finance cheque rows found.
+                                @if (!empty($blockingError))
+                                    Fix the ERP connection issue above to load cheques.
+                                @elseif (!empty($erpError))
+                                    No rows loaded because the query failed.
+                                @else
+                                    No finance cheque rows found.
+                                @endif
                             </td>
                         </tr>
                         @endforelse

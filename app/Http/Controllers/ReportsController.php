@@ -8,6 +8,7 @@ use App\Exports\SlaBrokenExport;
 use App\Exports\TicketAgingExport;
 use App\Exports\TicketsByDateRangeExport;
 use App\Exports\ManagementUsageExport;
+use App\Exports\RealIssuesBacklogExport;
 use App\Exports\AssignmentHandlersExport;
 use App\Exports\BouncedEmailsExport;
 use App\Models\Ticket;
@@ -37,7 +38,7 @@ class ReportsController
 
     public function slaBroken(TicketSlaService $sla, UserDepartmentService $userDept): View
     {
-        $tickets = $sla->getBrokenSlaTickets(100);
+        $tickets = Cache::remember('reports:sla-broken:view', 60, fn () => $sla->getBrokenSlaTickets(100));
         $userIds = $tickets->pluck('smownerid')->filter()->unique()->values()->all();
         $departments = $userDept->getDepartmentsForUsers($userIds);
         $tickets = $tickets->map(fn ($t) => (object) array_merge((array) $t, [
@@ -49,7 +50,8 @@ class ReportsController
     public function ticketAging(CrmService $crm, Request $request, UserDepartmentService $userDept): View
     {
         $days = (int) $request->get('days', 7);
-        $tickets = $crm->getTicketAgingReport($days, 200);
+        $cacheKey = 'reports:ticket-aging:view:' . $days;
+        $tickets = Cache::remember($cacheKey, 60, fn () => $crm->getTicketAgingReport($days, 200));
         $userIds = $tickets->pluck('smownerid')->filter()->unique()->values()->all();
         $departments = $userDept->getDepartmentsForUsers($userIds);
         $tickets = $tickets->map(fn ($t) => (object) array_merge((array) $t, [
@@ -188,13 +190,14 @@ class ReportsController
     public function contactsSummary(CrmService $crm, Request $request): View
     {
         $days = (int) $request->get('days', 30);
-        $summary = $crm->getContactsSummaryReport($days);
+        $cacheKey = 'reports:contacts-summary:' . $days;
+        $summary = Cache::remember($cacheKey, 120, fn () => $crm->getContactsSummaryReport($days));
         return view('reports.contacts-summary', $summary);
     }
 
     public function callsSummary(CrmService $crm): View
     {
-        $data = $crm->getCallsSummaryReport();
+        $data = Cache::remember('reports:calls-summary', 120, fn () => $crm->getCallsSummaryReport());
         return view('reports.calls-summary', $data);
     }
 
@@ -206,6 +209,84 @@ class ReportsController
         $data = Cache::remember($cacheKey, 120, fn () => $crm->getManagementUsageReport($dateFrom, $dateTo));
 
         return view('reports.management-usage', $data);
+    }
+
+    public function ticketAutomationAnalysis(): View
+    {
+        $normalRows = DB::connection('vtiger')
+            ->table('vtiger_troubletickets as t')
+            ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
+            ->where('e.deleted', 0)
+            ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
+            ->select('t.status', DB::raw('COUNT(*) as total'))
+            ->groupBy('t.status')
+            ->get();
+
+        $workRows = DB::table('work_tickets')
+            ->select('status', DB::raw('COUNT(*) as total'))
+            ->groupBy('status')
+            ->get();
+
+        $normalTotal = (int) $normalRows->sum('total');
+        $workTotal = (int) $workRows->sum('total');
+
+        $normalByStatus = $normalRows->mapWithKeys(fn ($r) => [(string) $r->status => (int) $r->total])->toArray();
+        $workByStatus = $workRows->mapWithKeys(fn ($r) => [(string) $r->status => (int) $r->total])->toArray();
+
+        $normalClosed = (int) ($normalByStatus['Closed'] ?? 0);
+        $normalOpen = (int) ($normalByStatus['Open'] ?? 0);
+        $normalInProgress = (int) ($normalByStatus['In Progress'] ?? 0);
+        $normalWait = (int) ($normalByStatus['Wait For Response'] ?? 0);
+        $normalBacklog = $normalOpen + $normalInProgress + $normalWait;
+        $normalClosureRate = $normalTotal > 0 ? round(($normalClosed / $normalTotal) * 100, 1) : 0;
+        $normalBacklogRate = $normalTotal > 0 ? round(($normalBacklog / $normalTotal) * 100, 1) : 0;
+
+        $workClosed = (int) (($workByStatus['Closed'] ?? 0) + ($workByStatus['Done'] ?? 0));
+        $workOpen = (int) ($workByStatus['Open'] ?? 0);
+        $workInProgress = (int) ($workByStatus['In Progress'] ?? 0);
+        $workBlocked = (int) ($workByStatus['Blocked'] ?? 0);
+        $workBacklog = $workOpen + $workInProgress + $workBlocked;
+        $workClosureRate = $workTotal > 0 ? round(($workClosed / $workTotal) * 100, 1) : 0;
+        $workBacklogRate = $workTotal > 0 ? round(($workBacklog / $workTotal) * 100, 1) : 0;
+
+        $overallTotal = $normalTotal + $workTotal;
+        $overallClosed = $normalClosed + $workClosed;
+        $overallBacklog = $normalBacklog + $workBacklog;
+        $overallClosureRate = $overallTotal > 0 ? round(($overallClosed / $overallTotal) * 100, 1) : 0;
+        $overallBacklogRate = $overallTotal > 0 ? round(($overallBacklog / $overallTotal) * 100, 1) : 0;
+
+        $automationRecommendations = [
+            'Implement automatic stale-ticket reminders (no update in 48h) for both modules.',
+            'Add pre-breach and breach alerts for TAT/SLA (assignee + manager escalation).',
+            'Auto-route new tickets by category/keywords to reduce manual assignment.',
+            'Auto-escalate blocked work tickets to reporting managers same day.',
+            'Normalize status lifecycle (e.g. Done -> Closed after verification window).',
+        ];
+
+        if ($workBacklogRate > 30) {
+            $automationRecommendations[] = 'Work ticket backlog is elevated. Prioritize daily automation for update compliance.';
+        }
+        if ($normalWait > 20) {
+            $automationRecommendations[] = 'Wait-for-response volume is high. Add recurring customer nudges via email/SMS.';
+        }
+
+        $realIssueInsights = $this->buildRealIssueInsights();
+
+        return view('reports.ticket-automation-analysis', [
+            'normalTotal' => $normalTotal,
+            'workTotal' => $workTotal,
+            'normalByStatus' => $normalByStatus,
+            'workByStatus' => $workByStatus,
+            'normalClosureRate' => $normalClosureRate,
+            'workClosureRate' => $workClosureRate,
+            'normalBacklogRate' => $normalBacklogRate,
+            'workBacklogRate' => $workBacklogRate,
+            'overallTotal' => $overallTotal,
+            'overallClosureRate' => $overallClosureRate,
+            'overallBacklogRate' => $overallBacklogRate,
+            'automationRecommendations' => $automationRecommendations,
+            'realIssueInsights' => $realIssueInsights,
+        ]);
     }
 
     public function exportManagementUsage(CrmService $crm, Request $request)
@@ -350,6 +431,31 @@ class ReportsController
             ['Section', 'Subject', 'Metric', 'Value', 'Extra 1', 'Extra 2'],
             $filename
         );
+    }
+
+    public function exportTicketAutomationAnalysis(Request $request)
+    {
+        $realIssueInsights = $this->buildRealIssueInsights();
+        $formattedRows = $realIssueInsights->map(function (array $row) {
+            return [
+                (string) ($row['issue'] ?? 'General operations'),
+                (int) ($row['count'] ?? 0),
+                'Normal: ' . (int) (($row['source_mix']['Normal'] ?? 0)) . ' · Work: ' . (int) (($row['source_mix']['Work'] ?? 0)),
+                (string) ($row['most_impacted_owner'] ?? 'Unassigned') . ' (' . (int) ($row['owner_load'] ?? 0) . ')',
+                (string) ($row['action'] ?? ''),
+            ];
+        })->values()->toArray();
+
+        $filename = 'real-issues-backlog-' . date('Y-m-d');
+        if ($request->get('format') === 'csv') {
+            return $this->csvResponse(
+                $formattedRows,
+                ['Issue Theme', 'Active Volume', 'Source Mix', 'Most Impacted Owner', 'Recommended Management Action'],
+                $filename
+            );
+        }
+
+        return Excel::download(new RealIssuesBacklogExport($formattedRows), $filename . '.xlsx');
     }
 
     public function reassignmentAudit(Request $request, UserDepartmentService $userDept): View
@@ -1095,5 +1201,118 @@ class ReportsController
             'smtp_code' => $smtpCode[1] ?? '',
             'reason' => $reason,
         ];
+    }
+
+    private function buildRealIssueInsights(): Collection
+    {
+        $normalActive = DB::connection('vtiger')
+            ->table('vtiger_troubletickets as t')
+            ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
+            ->where('e.deleted', 0)
+            ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
+            ->whereIn('t.status', ['Open', 'In Progress', 'Wait For Response'])
+            ->select('t.category', 'e.smownerid')
+            ->get();
+
+        $normalOwnerIds = $normalActive->pluck('smownerid')->filter()->unique()->values()->all();
+        $normalOwners = empty($normalOwnerIds)
+            ? []
+            : DB::connection('vtiger')->table('vtiger_users')
+                ->whereIn('id', $normalOwnerIds)
+                ->get(['id', 'first_name', 'last_name', 'user_name'])
+                ->mapWithKeys(function ($u) {
+                    $name = trim((string) ($u->first_name ?? '') . ' ' . (string) ($u->last_name ?? ''));
+                    return [(int) $u->id => ($name !== '' ? $name : (string) ($u->user_name ?? ('User #' . $u->id)))];
+                })
+                ->toArray();
+
+        $workActive = WorkTicket::query()
+            ->whereIn('status', ['Open', 'In Progress', 'Blocked'])
+            ->select('title', 'description', 'assignee_id')
+            ->get();
+
+        $workOwnerIds = $workActive->pluck('assignee_id')->filter()->unique()->values()->all();
+        $workOwners = empty($workOwnerIds)
+            ? []
+            : VtigerUser::on('vtiger')
+                ->whereIn('id', $workOwnerIds)
+                ->get()
+                ->mapWithKeys(fn (VtigerUser $u) => [(int) $u->id => $u->full_name])
+                ->toArray();
+
+        $issueBuckets = collect();
+        foreach ($normalActive as $row) {
+            $issue = trim((string) ($row->category ?? ''));
+            $theme = $issue !== '' ? $issue : 'General';
+            $issueBuckets->push([
+                'source' => 'Normal',
+                'theme' => $theme,
+                'owner_name' => $normalOwners[(int) ($row->smownerid ?? 0)] ?? 'Unassigned',
+            ]);
+        }
+
+        foreach ($workActive as $row) {
+            $theme = $this->classifyIssueTheme((string) ($row->title ?? '') . ' ' . (string) ($row->description ?? ''));
+            $issueBuckets->push([
+                'source' => 'Work',
+                'theme' => $theme,
+                'owner_name' => $workOwners[(int) ($row->assignee_id ?? 0)] ?? ('User #' . (int) ($row->assignee_id ?? 0)),
+            ]);
+        }
+
+        return $issueBuckets
+            ->groupBy('theme')
+            ->map(function ($rows, $theme) {
+                $owners = collect($rows)->groupBy('owner_name')->map->count()->sortDesc();
+                return [
+                    'issue' => (string) $theme,
+                    'count' => (int) collect($rows)->count(),
+                    'source_mix' => collect($rows)->groupBy('source')->map->count()->map(fn ($v) => (int) $v)->toArray(),
+                    'most_impacted_owner' => (string) ($owners->keys()->first() ?? 'Unassigned'),
+                    'owner_load' => (int) ($owners->first() ?? 0),
+                    'action' => $this->recommendedActionForIssue((string) $theme),
+                ];
+            })
+            ->sortByDesc('count')
+            ->values()
+            ->take(20);
+    }
+
+    private function classifyIssueTheme(string $text): string
+    {
+        $text = strtolower($text);
+        $maps = [
+            'Claims processing' => ['claim', 'claims', 'benefit', 'settlement', 'hospital', 'admission'],
+            'Policy servicing' => ['policy', 'endorsement', 'amendment', 'correction', 'certificate'],
+            'Renewals and maturities' => ['renewal', 'maturity', 'lapse', 'reinstatement'],
+            'Payment and finance' => ['payment', 'receipt', 'invoice', 'premium', 'refund', 'reconciliation'],
+            'System access and support' => ['login', 'password', 'system', 'error', 'bug', 'access', 'portal', 'sync'],
+            'Customer follow-up' => ['follow up', 'callback', 'response', 'email', 'sms', 'client'],
+            'Document and compliance' => ['document', 'compliance', 'kyc', 'approval', 'audit', 'form'],
+        ];
+
+        foreach ($maps as $theme => $tokens) {
+            foreach ($tokens as $token) {
+                if (str_contains($text, $token)) {
+                    return $theme;
+                }
+            }
+        }
+
+        return 'General operations';
+    }
+
+    private function recommendedActionForIssue(string $theme): string
+    {
+        return match ($theme) {
+            'Claims processing' => 'Automate claim triage, SLA alerts, and fast-lane assignment for high-impact claims.',
+            'Policy servicing' => 'Automate policy update workflows with standardized forms and validation checks.',
+            'Renewals and maturities' => 'Automate renewal reminder journeys and maturity follow-up tasks.',
+            'Payment and finance' => 'Automate payment exception matching and aging finance ticket escalations.',
+            'System access and support' => 'Automate first-line troubleshooting and route repeated issues to IT queue.',
+            'Customer follow-up' => 'Automate multi-channel follow-up nudges and closure reminders.',
+            'Document and compliance' => 'Automate document checklist validation and compliance approval routing.',
+            default => 'Automate assignment, stale-ticket reminders, and manager escalation for unresolved cases.',
+        };
     }
 }

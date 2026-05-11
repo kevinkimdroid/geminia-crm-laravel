@@ -8,6 +8,18 @@
 @endpush
 
 @section('content')
+@if (session('error'))
+    <div class="alert alert-danger alert-dismissible fade show mx-3 mx-md-4 mt-3" role="alert">
+        <i class="bi bi-exclamation-octagon-fill me-2"></i>{{ session('error') }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+@endif
+@if (session('warning'))
+    <div class="alert alert-warning alert-dismissible fade show mx-3 mx-md-4 mt-3" role="alert">
+        <i class="bi bi-exclamation-triangle-fill me-2"></i>{{ session('warning') }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+@endif
 @php
     $hour = (int) now()->format('G');
     $greeting = $hour < 12 ? 'Good morning' : ($hour < 17 ? 'Good afternoon' : 'Good evening');
@@ -108,6 +120,175 @@
             <a href="{{ route('leads.create') }}" class="dashboard-action-btn"><i class="bi bi-plus-circle"></i> Add Lead</a>
             <a href="{{ route('contacts.index') }}" class="dashboard-action-btn"><i class="bi bi-person"></i> Contacts</a>
             <a href="{{ route('deals.index') }}" class="dashboard-action-btn"><i class="bi bi-currency-dollar"></i> Deals</a>
+        </div>
+    </section>
+
+    {{-- Section: Needs Attention (urgent first) --}}
+    <section class="dashboard-section">
+        <h2 class="dashboard-section-title"><i class="bi bi-exclamation-triangle-fill"></i> Needs Attention</h2>
+        <div class="dashboard-section-grid">
+            <div class="dashboard-card dashboard-card-overdue">
+                <div class="dashboard-card-head">
+                    <h3 class="dashboard-card-title"><i class="bi bi-exclamation-triangle"></i> Overdue Activities</h3>
+                    <div class="dashboard-card-actions">
+                        <div class="dropdown">
+                            <button class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">Mine</button>
+                            <ul class="dropdown-menu dropdown-menu-end">
+                                <li><a class="dropdown-item active" href="#">Mine</a></li>
+                                <li><a class="dropdown-item" href="{{ route('activities.index') }}">View all</a></li>
+                            </ul>
+                        </div>
+                        <a href="{{ route('activities.index') }}" class="dashboard-card-link">View</a>
+                    </div>
+                </div>
+                <div class="dashboard-list dashboard-list-overdue">
+                    @forelse(($overdueActivities ?? []) as $activity)
+                        <div class="dashboard-list-row dashboard-list-row-overdue">
+                            <i class="bi bi-exclamation-circle"></i>
+                            <div>
+                                <span>{{ $activity['subject'] }}</span>
+                                <small>{{ $activity['due_date'] ? \Carbon\Carbon::parse($activity['due_date'])->diffForHumans() : '—' }}</small>
+                            </div>
+                        </div>
+                    @empty
+                        <div class="dashboard-empty">
+                            <i class="bi bi-check-circle-fill text-success"></i>
+                            <span>No overdue activities</span>
+                        </div>
+                    @endforelse
+                </div>
+            </div>
+        </div>
+    </section>
+
+    {{-- Section: Support & Tickets --}}
+    <section class="dashboard-section">
+        <h2 class="dashboard-section-title"><i class="bi bi-headset"></i> Support & Tickets</h2>
+        <div class="dashboard-section-grid dashboard-section-grid-2">
+            <div class="dashboard-card">
+                <div class="dashboard-card-head">
+                    <h3 class="dashboard-card-title"><i class="bi bi-bar-chart"></i> Ticket Statistics</h3>
+                    <a href="{{ route('tickets.index') }}" class="dashboard-card-link">View all</a>
+                </div>
+                <div class="dashboard-ticket-grid">
+                    <a href="{{ route('tickets.index', ['list' => 'Open']) }}" class="dashboard-ticket-item">
+                        <span class="dashboard-ticket-num">{{ $open }}</span>
+                        <span class="dashboard-ticket-lbl">Open</span>
+                        <div class="dashboard-ticket-bar"><div class="dashboard-ticket-fill" style="width:{{ ($open/$max)*100 }}%"></div></div>
+                    </a>
+                    <a href="{{ route('tickets.index', ['list' => 'In Progress']) }}" class="dashboard-ticket-item">
+                        <span class="dashboard-ticket-num">{{ $inProgress }}</span>
+                        <span class="dashboard-ticket-lbl">In Progress</span>
+                        <div class="dashboard-ticket-bar"><div class="dashboard-ticket-fill" style="width:{{ ($inProgress/$max)*100 }}%"></div></div>
+                    </a>
+                    <a href="{{ route('tickets.index', ['list' => 'Wait For Response']) }}" class="dashboard-ticket-item">
+                        <span class="dashboard-ticket-num">{{ $waitResp }}</span>
+                        <span class="dashboard-ticket-lbl">Waiting</span>
+                        <div class="dashboard-ticket-bar"><div class="dashboard-ticket-fill" style="width:{{ ($waitResp/$max)*100 }}%"></div></div>
+                    </a>
+                    <a href="{{ route('tickets.index', ['list' => 'Closed']) }}" class="dashboard-ticket-item">
+                        <span class="dashboard-ticket-num">{{ $closed }}</span>
+                        <span class="dashboard-ticket-lbl">Closed</span>
+                        <div class="dashboard-ticket-bar"><div class="dashboard-ticket-fill" style="width:{{ ($closed/$max)*100 }}%"></div></div>
+                    </a>
+                </div>
+            </div>
+
+            {{-- Ticket Resolution --}}
+            <div class="dashboard-card">
+                <div class="dashboard-card-head">
+                    <h3 class="dashboard-card-title"><i class="bi bi-pie-chart-fill"></i> Ticket Resolution</h3>
+                    <a href="{{ route('tickets.index') }}" class="dashboard-card-link">View all</a>
+                </div>
+                <div class="dashboard-donut">
+                    <div class="dashboard-donut-chart">
+                        <svg viewBox="0 0 36 36">
+                            <path class="dashboard-donut-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                            <path class="dashboard-donut-resolved" stroke-dasharray="{{ $ticketResolvedPct }}, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                            <path class="dashboard-donut-pending" stroke-dasharray="{{ 100 - $ticketResolvedPct }}, 100" stroke-dashoffset="{{ -$ticketResolvedPct }}" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                        </svg>
+                        <div class="dashboard-donut-center">{{ $ticketResolvedPct }}%</div>
+                    </div>
+                    <div class="dashboard-donut-legend">
+                        <span><i style="background:#0d9488"></i> Closed {{ $ticketClosed }}</span>
+                        <span><i style="background:#3d8fd9"></i> Open {{ $ticketOpen }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    {{-- Section: Sales & Pipeline --}}
+    <section class="dashboard-section">
+        <h2 class="dashboard-section-title"><i class="bi bi-currency-dollar"></i> Sales & Pipeline</h2>
+        <div class="dashboard-section-grid dashboard-section-grid-3">
+            <div class="dashboard-card">
+                <div class="dashboard-card-head">
+                    <h3 class="dashboard-card-title"><i class="bi bi-currency-dollar"></i> Revenue by Salesperson</h3>
+                    <a href="{{ route('reports') }}" class="dashboard-card-link">View</a>
+                </div>
+                @php $salesByPerson = $salesByPerson ?? collect(); @endphp
+                @if ($salesByPerson->isNotEmpty())
+                    <div class="dashboard-list">
+                        @foreach ($salesByPerson->take(5) as $row)
+                            <div class="dashboard-list-row">
+                                <span>{{ $row->name }}</span>
+                                <span class="dashboard-list-amount">KES {{ number_format($row->total ?? 0, 0) }}</span>
+                            </div>
+                        @endforeach
+                    </div>
+                @else
+                    <div class="dashboard-empty">
+                        <i class="bi bi-currency-dollar"></i>
+                        <span>No opportunities matched</span>
+                        <a href="{{ route('deals.index') }}" class="btn btn-sm btn-primary mt-2">View Deals</a>
+                    </div>
+                @endif
+            </div>
+
+            <div class="dashboard-card">
+                <div class="dashboard-card-head">
+                    <h3 class="dashboard-card-title"><i class="bi bi-pie-chart"></i> Leads by Source</h3>
+                    <a href="{{ route('leads.index') }}" class="dashboard-card-link">View</a>
+                </div>
+                @php $leadsBySource = $leadsBySource ?? []; $totalLeads = array_sum($leadsBySource); @endphp
+                @if (count($leadsBySource) > 0)
+                    <div class="dashboard-bars">
+                        @foreach ($leadsBySource as $source => $cnt)
+                            <div class="dashboard-bar">
+                                <span class="dashboard-bar-label">{{ $source }}</span>
+                                <div class="dashboard-bar-track"><div class="dashboard-bar-fill" style="width:{{ $totalLeads > 0 ? ($cnt/$totalLeads)*100 : 0 }}%"></div></div>
+                                <span class="dashboard-bar-count">{{ $cnt }}</span>
+                            </div>
+                        @endforeach
+                    </div>
+                @else
+                    <div class="dashboard-empty"><i class="bi bi-pie-chart"></i><span>No data yet</span></div>
+                @endif
+            </div>
+
+            <div class="dashboard-card">
+                <div class="dashboard-card-head">
+                    <h3 class="dashboard-card-title"><i class="bi bi-calendar-check"></i> Deals Closing Soon</h3>
+                    <a href="{{ route('deals.index') }}" class="dashboard-card-link">View</a>
+                </div>
+                @php $dealsClosingSoon = $dealsClosingSoon ?? collect(); @endphp
+                @if ($dealsClosingSoon->isNotEmpty())
+                    <div class="dashboard-list">
+                        @foreach ($dealsClosingSoon->take(5) as $deal)
+                            <a href="{{ route('deals.show', $deal->potentialid) }}" class="dashboard-list-row dashboard-list-row-link">
+                                <div>
+                                    <strong>{{ $deal->potentialname }}</strong>
+                                    <small>{{ $deal->closingdate ? \Carbon\Carbon::parse($deal->closingdate)->format('M j, Y') : '—' }}</small>
+                                </div>
+                                <span class="dashboard-list-badge">KES {{ number_format($deal->amount ?? 0, 0) }}</span>
+                            </a>
+                        @endforeach
+                    </div>
+                @else
+                    <div class="dashboard-empty"><i class="bi bi-calendar-x"></i><span>No deals in 30 days</span><a href="{{ route('deals.index') }}" class="btn btn-sm btn-primary mt-2">View Deals</a></div>
+                @endif
+            </div>
         </div>
     </section>
 
@@ -426,6 +607,21 @@
 @push('scripts')
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    var c = document.getElementById('clientsCountValue');
+    var t = document.getElementById('contactsCountValue');
+    if (c || t) {
+        fetch('{{ route("api.dashboard.clients-count") }}', { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                var n = d.count != null ? (d.count).toLocaleString() : '—';
+                if (c) c.textContent = n;
+                if (t) t.textContent = n;
+            })
+            .catch(function() {
+                if (c) c.textContent = '—';
+                if (t) t.textContent = '—';
+            });
+    }
     if (window.Echo) window.Echo.channel('dashboard').listen('.stats.updated', function() { location.reload(); });
 });
 </script>

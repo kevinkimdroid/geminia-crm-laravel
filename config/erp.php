@@ -210,4 +210,19 @@ return [
         'INTERMEDIARY' => 'intermediary',
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Agency advances notification (finance:notify-agency-advances)
+    |--------------------------------------------------------------------------
+    |
+    | When FINANCE_AGENCY_ADVANCES_NOTIFY_ENABLED=true, the scheduler runs
+    | finance:notify-agency-advances daily and emails the recipient only if
+    | ERP returns at least one AGNADV row (cqr_bbr_code NULL, active status).
+    |
+    */
+
+    'agency_advances_notify_enabled' => filter_var(env('FINANCE_AGENCY_ADVANCES_NOTIFY_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
+
+    'agency_advances_notify_recipient' => env('FINANCE_AGENCY_ADVANCES_NOTIFY_RECIPIENT', 'kelvin.kimutai@geminialife.co.ke'),
+
 ];

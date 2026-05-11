@@ -93,6 +93,20 @@
             </a>
         </div>
         <div class="col-lg-4">
+            <a href="{{ route('reports.ticket-automation-analysis') }}" class="text-decoration-none">
+                <div class="card reports-audit-card h-100">
+                    <div class="card-body p-4">
+                        <div class="d-flex align-items-center justify-content-between mb-2">
+                            <span class="badge bg-primary bg-opacity-10 text-primary">Automation</span>
+                            <i class="bi bi-arrow-right text-muted"></i>
+                        </div>
+                        <h6 class="card-title mb-2">Ticket Automation Analysis</h6>
+                        <p class="text-muted small mb-0">Standalone report for normal vs work tickets and automation priorities.</p>
+                    </div>
+                </div>
+            </a>
+        </div>
+        <div class="col-lg-4">
             <a href="{{ route('reports.reassignment-audit') }}" class="text-decoration-none">
                 <div class="card reports-audit-card h-100">
                     <div class="card-body p-4">

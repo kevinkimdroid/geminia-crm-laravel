@@ -24,6 +24,10 @@ class Kernel extends ConsoleKernel
         if (filter_var(env('MAIL_AUTO_FETCH_ENABLED', true), FILTER_VALIDATE_BOOLEAN)) {
             $schedule->command('mail:fetch')->everyFiveMinutes();
         }
+
+        if (config('erp.agency_advances_notify_enabled', false)) {
+            $schedule->command('finance:notify-agency-advances')->dailyAt('07:30');
+        }
     }
 
     /**

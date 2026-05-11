@@ -2,7 +2,7 @@
 
 namespace App\Http\Controllers;
 
-use App\Exports\TicketsExport;
+use App\Exports\TicketsWorkbookExport;
 use App\Models\Ticket;
 use App\Services\CrmService;
 use App\Services\ErpClientService;
@@ -130,8 +130,32 @@ class TicketController extends Controller
             ];
         })->toArray();
 
+        $ticketCollection = collect($tickets);
+        $total = $ticketCollection->count();
+        $closedCount = $ticketCollection->where('status', 'Closed')->count();
+        $openCount = $ticketCollection->where('status', 'Open')->count();
+        $inProgressCount = $ticketCollection->where('status', 'In Progress')->count();
+        $waitingCount = $ticketCollection->where('status', 'Wait For Response')->count();
+        $closureRate = $total > 0 ? round(($closedCount / $total) * 100, 1) : 0;
+        $activeBacklog = $openCount + $inProgressCount + $waitingCount;
+        $backlogRate = $total > 0 ? round(($activeBacklog / $total) * 100, 1) : 0;
+
+        $analysisRows = [
+            ['Summary', 'Total Tickets', $total, 'Keep monthly trend tracking active.'],
+            ['Summary', 'Closed Tickets', $closedCount, 'Maintain closure SLA by team and category.'],
+            ['Summary', 'Closure Rate (%)', $closureRate, $closureRate < 85 ? 'Escalate aging queue ownership daily.' : 'Closure performance is healthy.'],
+            ['Backlog', 'Open Tickets', $openCount, $openCount > 100 ? 'Automate daily reminders for stale open tickets (48h no update).' : 'Backlog is manageable; keep monitoring.'],
+            ['Backlog', 'In Progress Tickets', $inProgressCount, $inProgressCount > 50 ? 'Auto-flag tickets in progress > 72h without activity.' : 'No urgent automation pressure from in-progress volume.'],
+            ['Backlog', 'Wait For Response Tickets', $waitingCount, $waitingCount > 20 ? 'Auto-send customer follow-up nudges every 2 days.' : 'Low waiting queue; periodic nudges still recommended.'],
+            ['Automation Priority', 'Assignment', 'High', 'Auto-route tickets by keyword/category to default assignees.'],
+            ['Automation Priority', 'Aging Alerts', 'High', 'Auto-alert assignee + manager before SLA breach.'],
+            ['Automation Priority', 'Status Hygiene', 'Medium', 'Auto-close resolved tickets after confirmation window.'],
+            ['Automation Priority', 'Customer Follow-up', 'Medium', 'Auto-reminder emails/SMS for wait-for-response tickets.'],
+            ['Automation Priority', 'Escalation Rules', 'High', 'Escalate unresolved urgent/high priority tickets after TAT threshold.'],
+        ];
+
         $filename = 'tickets-' . date('Y-m-d') . '.xlsx';
-        return Excel::download(new TicketsExport($rows), $filename);
+        return Excel::download(new TicketsWorkbookExport($rows, $analysisRows), $filename);
     }
 
     public function create(Request $request): View

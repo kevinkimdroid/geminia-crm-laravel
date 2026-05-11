@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Exports\WorkTicketsWorkbookExport;
 use App\Models\UserReportingLine;
 use App\Models\VtigerUser;
 use App\Models\WorkTicket;
@@ -13,6 +14,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\View\View;
+use Maatwebsite\Excel\Facades\Excel;
 
 class WorkTicketController extends Controller
 {
@@ -168,6 +170,112 @@ class WorkTicketController extends Controller
             'canManageReportingLines' => $user->isAdministrator(),
             'tatByPriority' => $this->getPriorityTatMap(),
         ]);
+    }
+
+    public function export(Request $request)
+    {
+        $user = Auth::guard('vtiger')->user();
+        abort_unless($user, 401);
+
+        $requestedScope = (string) $request->get('scope', 'mine');
+        $reporteeIds = $this->getReporteeIds((int) $user->id);
+        $canSeeAll = $user->isAdministrator();
+        $canSeeTeam = $canSeeAll || !empty($reporteeIds);
+
+        $scope = in_array($requestedScope, ['mine', 'team', 'all'], true) ? $requestedScope : 'mine';
+        if ($scope === 'all' && !$canSeeAll) {
+            $scope = 'mine';
+        }
+        if ($scope === 'team' && !$canSeeTeam) {
+            $scope = 'mine';
+        }
+
+        $status = trim((string) $request->get('status', ''));
+        $search = trim((string) $request->get('search', ''));
+        $assigneeId = (int) $request->get('assignee_id', 0);
+        $limit = min(50000, max(100, (int) $request->get('limit', 20000)));
+
+        $query = WorkTicket::query()->orderByDesc('updated_at')->orderByDesc('id');
+        $this->applyVisibilityScope($query, (int) $user->id, $scope, $canSeeAll, $reporteeIds);
+
+        if ($status !== '') {
+            $query->where('status', $status);
+        }
+        if ($search !== '') {
+            $query->where(function (Builder $q) use ($search): void {
+                $q->where('ticket_no', 'like', '%' . $search . '%')
+                    ->orWhere('title', 'like', '%' . $search . '%')
+                    ->orWhere('description', 'like', '%' . $search . '%');
+            });
+        }
+        if ($assigneeId > 0) {
+            $query->where('assignee_id', $assigneeId);
+        }
+
+        $tickets = $query->limit($limit)->get();
+        $userIds = $tickets->flatMap(fn (WorkTicket $t) => [(int) $t->assignee_id, (int) ($t->reporting_manager_id ?? 0), (int) $t->created_by])
+            ->filter(fn (int $id) => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+        $usersById = $this->getUsersById($userIds);
+
+        $rows = $tickets->map(function (WorkTicket $t) use ($usersById) {
+            return [
+                $t->ticket_no,
+                $t->title,
+                $t->status,
+                $t->priority,
+                $usersById[(int) $t->assignee_id] ?? ('User #' . (int) $t->assignee_id),
+                $usersById[(int) ($t->reporting_manager_id ?? 0)] ?? '',
+                $usersById[(int) $t->created_by] ?? ('User #' . (int) $t->created_by),
+                optional($t->created_at)->format('Y-m-d H:i:s'),
+                optional($t->updated_at)->format('Y-m-d H:i:s'),
+                optional($t->due_date)->format('Y-m-d'),
+                (int) ($t->tat_hours ?? 0),
+                optional($t->tat_due_at)->format('Y-m-d H:i:s'),
+                optional($t->tat_breached_at)->format('Y-m-d H:i:s'),
+                optional($t->completed_at)->format('Y-m-d H:i:s'),
+                (string) ($t->description ?? ''),
+            ];
+        })->toArray();
+
+        $total = $tickets->count();
+        $closedCount = $tickets->where('status', 'Closed')->count() + $tickets->where('status', 'Done')->count();
+        $openCount = $tickets->where('status', 'Open')->count();
+        $inProgressCount = $tickets->where('status', 'In Progress')->count();
+        $blockedCount = $tickets->where('status', 'Blocked')->count();
+        $closureRate = $total > 0 ? round(($closedCount / $total) * 100, 1) : 0;
+        $activeBacklog = $openCount + $inProgressCount + $blockedCount;
+        $backlogRate = $total > 0 ? round(($activeBacklog / $total) * 100, 1) : 0;
+        $tatBreached = $tickets->filter(function (WorkTicket $t) {
+            if (!$t->tat_due_at) {
+                return false;
+            }
+            if (in_array((string) $t->status, ['Done', 'Closed'], true)) {
+                return $t->completed_at && $t->completed_at->gt($t->tat_due_at);
+            }
+            return now()->gt($t->tat_due_at);
+        })->count();
+
+        $analysisRows = [
+            ['Summary', 'Total Work Tickets', $total, 'Track team throughput weekly.'],
+            ['Summary', 'Closed/Done Tickets', $closedCount, 'Keep closure trend above 85%.'],
+            ['Summary', 'Closure Rate (%)', $closureRate, $closureRate < 85 ? 'Add manager review for stale tasks every morning.' : 'Closure performance is healthy.'],
+            ['Backlog', 'Active Backlog (%)', $backlogRate, $backlogRate > 30 ? 'Automate follow-up nudges on open/in-progress tasks with no daily update.' : 'Backlog level acceptable; monitor continuously.'],
+            ['Backlog', 'Blocked Tickets', $blockedCount, $blockedCount > 10 ? 'Auto-escalate blockers to reporting manager within same day.' : 'Keep blocker escalation as a standard workflow.'],
+            ['SLA/TAT', 'TAT Breached Tickets', $tatBreached, $tatBreached > 0 ? 'Automate pre-breach alerts at T-4h and breach notifications at due time.' : 'No current breach signal; keep alerts enabled.'],
+            ['Automation Priority', 'Daily Update Compliance', 'High', 'Auto-remind assignees if no update logged by end of day.'],
+            ['Automation Priority', 'Status Normalization', 'Medium', 'Auto-convert Done to Closed after manager review window.'],
+            ['Automation Priority', 'Manager Escalation', 'High', 'Auto-notify reporting manager for blocked or overdue urgent tasks.'],
+            ['Automation Priority', 'TAT Risk Detection', 'High', 'Auto-tag tasks nearing TAT breach to prioritize queue.'],
+            ['Automation Priority', 'Assignment Balancing', 'Medium', 'Auto-suggest reassignment when assignee workload crosses threshold.'],
+        ];
+
+        return Excel::download(
+            new WorkTicketsWorkbookExport($rows, $analysisRows),
+            'work-tickets-' . date('Y-m-d') . '.xlsx'
+        );
     }
 
     public function store(Request $request): RedirectResponse
