@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\FinanceErpHttpClient;
 use App\Services\UserDepartmentService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -14,6 +15,10 @@ use Throwable;
 
 class FinancePaymentController extends Controller
 {
+    public function __construct(
+        private FinanceErpHttpClient $financeErpHttp,
+    ) {}
+
     private function denyUnlessFinance(): ?RedirectResponse
     {
         $user = Auth::guard('vtiger')->user();
@@ -72,6 +77,22 @@ class FinancePaymentController extends Controller
                 'sourceOptions' => collect(),
                 'blockingError' => $blockingError,
                 'erpError' => null,
+            ]);
+        }
+
+        if ($this->financeErpHttp->isConfigured()) {
+            $bundle = $this->financeErpHttp->fetchPaymentsIndex($request);
+
+            return view('finance.payments.index', [
+                'payments' => $bundle['payments'],
+                'search' => $search,
+                'source' => $source,
+                'dateFrom' => $dateFrom,
+                'dateTo' => $dateTo,
+                'stats' => $bundle['stats'],
+                'sourceOptions' => $bundle['sourceOptions'],
+                'blockingError' => null,
+                'erpError' => $bundle['erpError'],
             ]);
         }
 
@@ -175,41 +196,47 @@ class FinancePaymentController extends Controller
         $loadError = null;
 
         if ($blockingError === null) {
-            try {
-                $raw = DB::connection('erp')
-                    ->table('fms_cheques as c')
-                    ->join('lms_agencies as a', 'a.agn_name', '=', 'c.cqr_payee')
-                    ->where('c.cqr_pmt_type', 'AGNADV')
-                    ->whereNull('c.cqr_bbr_code')
-                    ->whereRaw("TO_CHAR(c.cqr_ref_date, 'RRRR') = ?", [(string) $year])
-                    ->where('c.cqr_cst_status', 'AC')
-                    ->select([
-                        'c.cqr_no',
-                        'c.cqr_payee',
-                        'c.cqr_ref_date',
-                        'c.cqr_bbr_code',
-                        'c.cqr_cpy_acc_no',
-                        'a.agn_bank_acc_no',
-                        'a.agn_bbr_code',
-                    ])
-                    ->orderByDesc('c.cqr_ref_date')
-                    ->get();
+            if ($this->financeErpHttp->isConfigured()) {
+                $adv = $this->financeErpHttp->fetchAgencyAdvances($year);
+                $rows = $adv['rows'];
+                $loadError = $adv['loadError'];
+            } else {
+                try {
+                    $raw = DB::connection('erp')
+                        ->table('fms_cheques as c')
+                        ->join('lms_agencies as a', 'a.agn_name', '=', 'c.cqr_payee')
+                        ->where('c.cqr_pmt_type', 'AGNADV')
+                        ->whereNull('c.cqr_bbr_code')
+                        ->whereRaw("TO_CHAR(c.cqr_ref_date, 'RRRR') = ?", [(string) $year])
+                        ->where('c.cqr_cst_status', 'AC')
+                        ->select([
+                            'c.cqr_no',
+                            'c.cqr_payee',
+                            'c.cqr_ref_date',
+                            'c.cqr_bbr_code',
+                            'c.cqr_cpy_acc_no',
+                            'a.agn_bank_acc_no',
+                            'a.agn_bbr_code',
+                        ])
+                        ->orderByDesc('c.cqr_ref_date')
+                        ->get();
 
-                foreach ($raw as $row) {
-                    $a = array_change_key_case((array) $row, CASE_LOWER);
-                    $rows[] = [
-                        'cqr_no' => isset($a['cqr_no']) ? trim((string) $a['cqr_no']) : '',
-                        'cqr_payee' => isset($a['cqr_payee']) ? trim((string) $a['cqr_payee']) : '',
-                        'cqr_ref_date' => $a['cqr_ref_date'] ?? null,
-                        'cqr_bbr_code' => isset($a['cqr_bbr_code']) ? trim((string) $a['cqr_bbr_code']) : '',
-                        'cqr_cpy_acc_no' => isset($a['cqr_cpy_acc_no']) ? trim((string) $a['cqr_cpy_acc_no']) : '',
-                        'agn_bank_acc_no' => isset($a['agn_bank_acc_no']) ? trim((string) $a['agn_bank_acc_no']) : '',
-                        'agn_bbr_code' => isset($a['agn_bbr_code']) ? trim((string) $a['agn_bbr_code']) : '',
-                    ];
+                    foreach ($raw as $row) {
+                        $a = array_change_key_case((array) $row, CASE_LOWER);
+                        $rows[] = [
+                            'cqr_no' => isset($a['cqr_no']) ? trim((string) $a['cqr_no']) : '',
+                            'cqr_payee' => isset($a['cqr_payee']) ? trim((string) $a['cqr_payee']) : '',
+                            'cqr_ref_date' => $a['cqr_ref_date'] ?? null,
+                            'cqr_bbr_code' => isset($a['cqr_bbr_code']) ? trim((string) $a['cqr_bbr_code']) : '',
+                            'cqr_cpy_acc_no' => isset($a['cqr_cpy_acc_no']) ? trim((string) $a['cqr_cpy_acc_no']) : '',
+                            'agn_bank_acc_no' => isset($a['agn_bank_acc_no']) ? trim((string) $a['agn_bank_acc_no']) : '',
+                            'agn_bbr_code' => isset($a['agn_bbr_code']) ? trim((string) $a['agn_bbr_code']) : '',
+                        ];
+                    }
+                } catch (Throwable $e) {
+                    Log::warning('Finance agency advances ERP query failed', ['error' => $e->getMessage()]);
+                    $loadError = $this->formatErpFailureMessage($e, 'Agency advances');
                 }
-            } catch (Throwable $e) {
-                Log::warning('Finance agency advances ERP query failed', ['error' => $e->getMessage()]);
-                $loadError = $this->formatErpFailureMessage($e, 'Agency advances');
             }
         }
 
@@ -237,9 +264,16 @@ class FinancePaymentController extends Controller
             'source' => 'required|integer',
         ]);
 
-        try {
-            $record = $this->financeChequesBaseQuery()
-                ->selectRaw('
+        if ($this->financeErpHttp->isConfigured()) {
+            $got = $this->financeErpHttp->fetchChequeForTicket($validated['ref'], (int) $validated['source']);
+            if ($got['error'] !== null) {
+                return redirect()->route('finance.payments.index')->with('error', $got['error']);
+            }
+            $record = $got['record'];
+        } else {
+            try {
+                $record = $this->financeChequesBaseQuery()
+                    ->selectRaw('
                 s.sys_name as sys_source,
                 c.cqr_ref,
                 c.cqr_ref_date,
@@ -249,14 +283,15 @@ class FinancePaymentController extends Controller
                 c.cqr_amount,
                 c.cqr_payee
             ')
-                ->where('c.cqr_ref', $validated['ref'])
-                ->where('c.cqr_source', $validated['source'])
-                ->first();
-        } catch (Throwable $e) {
-            Log::warning('Finance create-ticket ERP lookup failed', ['error' => $e->getMessage()]);
+                    ->where('c.cqr_ref', $validated['ref'])
+                    ->where('c.cqr_source', $validated['source'])
+                    ->first();
+            } catch (Throwable $e) {
+                Log::warning('Finance create-ticket ERP lookup failed', ['error' => $e->getMessage()]);
 
-            return redirect()->route('finance.payments.index')
-                ->with('error', $this->formatErpFailureMessage($e, 'Could not load that cheque from ERP'));
+                return redirect()->route('finance.payments.index')
+                    ->with('error', $this->formatErpFailureMessage($e, 'Could not load that cheque from ERP'));
+            }
         }
 
         if (!$record) {
@@ -293,9 +328,13 @@ class FinancePaymentController extends Controller
      */
     private function financeEnvironmentError(): ?string
     {
+        if ($this->financeErpHttp->isConfigured()) {
+            return null;
+        }
         if (! extension_loaded('oci8')) {
-            return 'Finance cannot load: the PHP OCI8 extension is not enabled on this server. '
-                . 'Install Oracle Instant Client, enable the oci8 extension in php.ini, and restart Apache/PHP-FPM.';
+            return 'Finance cannot load: the PHP OCI8 extension is not enabled on this server, and no Finance HTTP API is configured. '
+                . 'Either install Oracle Instant Client, enable the oci8 extension in php.ini, and restart Apache/PHP-FPM, '
+                . 'or set FINANCE_ERP_HTTP_BASE (or use ERP_CLIENTS_HTTP_URL with the same host as erp-clients-api) so Finance can load cheques over HTTP.';
         }
         if (! config('erp.enabled', true)) {
             return 'Finance cannot load: ERP is disabled (ERP_ENABLED=false in .env). '

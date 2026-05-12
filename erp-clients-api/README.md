@@ -5,6 +5,8 @@ Standalone API that fetches clients from Oracle `LMS_INDIVIDUAL_CRM_VIEW`.
 
 The Geminia Laravel CRM fetches clients from this API when `CLIENTS_VIEW_SOURCE=erp_http`.
 
+**Finance (FMS cheques):** Laravel can call `GET /finance/cheques` (same base URL) when `FINANCE_ERP_HTTP_BASE` is set or derived from `ERP_CLIENTS_HTTP_URL`, so the CRM web server does not need PHP OCI8. Optional shared token: set `ERP_FINANCE_API_TOKEN` here and `FINANCE_ERP_HTTP_TOKEN` (or `ERP_API_TOKEN`) in Laravel.
+
 ## Setup
 
 1. **Install dependencies:**

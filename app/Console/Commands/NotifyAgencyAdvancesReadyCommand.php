@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Services\FinanceErpHttpClient;
 use App\Services\PlainTextMailSender;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -29,17 +30,19 @@ class NotifyAgencyAdvancesReadyCommand extends Command
 
     protected $description = 'Query ERP for agency advances ready for bank details; email recipient when rows exist';
 
-    public function handle(PlainTextMailSender $mail): int
+    public function handle(PlainTextMailSender $mail, FinanceErpHttpClient $financeHttp): int
     {
-        if (! extension_loaded('oci8')) {
-            $this->error('OCI8 is not loaded; cannot query ERP.');
+        if (! $financeHttp->isConfigured()) {
+            if (! extension_loaded('oci8')) {
+                $this->error('OCI8 is not loaded and FINANCE_ERP_HTTP_BASE / ERP_CLIENTS_HTTP_URL is not set; cannot query ERP.');
 
-            return self::FAILURE;
-        }
-        if (! config('erp.enabled', true)) {
-            $this->error('ERP is disabled (ERP_ENABLED=false).');
+                return self::FAILURE;
+            }
+            if (! config('erp.enabled', true)) {
+                $this->error('ERP is disabled (ERP_ENABLED=false).');
 
-            return self::FAILURE;
+                return self::FAILURE;
+            }
         }
 
         $year = (string) ($this->option('year') ?: now()->year);
@@ -50,23 +53,33 @@ class NotifyAgencyAdvancesReadyCommand extends Command
             return self::FAILURE;
         }
 
-        $rows = DB::connection('erp')
-            ->table('fms_cheques as c')
-            ->join('lms_agencies as a', 'a.agn_name', '=', 'c.cqr_payee')
-            ->where('c.cqr_pmt_type', 'AGNADV')
-            ->whereNull('c.cqr_bbr_code')
-            ->whereRaw("TO_CHAR(c.cqr_ref_date, 'RRRR') = ?", [$year])
-            ->where('c.cqr_cst_status', 'AC')
-            ->select([
-                'c.cqr_no',
-                'c.cqr_bbr_code',
-                'c.cqr_cpy_acc_no',
-                'a.agn_bank_acc_no',
-                'a.agn_bbr_code',
-            ])
-            ->get();
+        if ($financeHttp->isConfigured()) {
+            $res = $financeHttp->fetchAgencyAdvancesForNotify((int) $year);
+            if ($res['error'] !== null) {
+                $this->error((string) $res['error']);
 
-        $count = $rows->count();
+                return self::FAILURE;
+            }
+            $rows = $res['rows'];
+            $count = $res['count'];
+        } else {
+            $rows = DB::connection('erp')
+                ->table('fms_cheques as c')
+                ->join('lms_agencies as a', 'a.agn_name', '=', 'c.cqr_payee')
+                ->where('c.cqr_pmt_type', 'AGNADV')
+                ->whereNull('c.cqr_bbr_code')
+                ->whereRaw("TO_CHAR(c.cqr_ref_date, 'RRRR') = ?", [$year])
+                ->where('c.cqr_cst_status', 'AC')
+                ->select([
+                    'c.cqr_no',
+                    'c.cqr_bbr_code',
+                    'c.cqr_cpy_acc_no',
+                    'a.agn_bank_acc_no',
+                    'a.agn_bbr_code',
+                ])
+                ->get();
+            $count = $rows->count();
+        }
         $this->info("Rows for year {$year}: {$count}");
 
         if ($count === 0) {

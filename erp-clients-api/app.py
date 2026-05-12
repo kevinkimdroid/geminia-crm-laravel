@@ -3,9 +3,13 @@
 ERP Clients API - Fetches clients from Oracle LMS_INDIVIDUAL_CRM_VIEW.
 Deploy on a machine with reliable Oracle connectivity (e.g. where Toad works).
 Laravel CRM fetches clients via this API when CLIENTS_VIEW_SOURCE=erp_http.
+Finance (FMS cheques) endpoints under /finance/* when Laravel uses FINANCE_ERP_HTTP_BASE
+or the same base as ERP_CLIENTS_HTTP_URL (no PHP OCI8 on the CRM server).
 """
+import datetime
 import os
 import re
+from decimal import Decimal
 from pathlib import Path
 
 _DOTENV_PATH = Path(__file__).parent / ".env"
@@ -1756,6 +1760,256 @@ def group_test():
     except Exception as e:
         result["error"] = str(e)
     return jsonify(result)
+
+
+# ---------------------------------------------------------------------------
+# Finance (FMS cheques) — used by Laravel when FINANCE_ERP_HTTP_BASE is set
+# so PHP OCI8 is not required on the CRM web server.
+# ---------------------------------------------------------------------------
+
+
+def _finance_expected_token():
+    return (os.environ.get("ERP_FINANCE_API_TOKEN") or os.environ.get("ERP_API_TOKEN") or "").strip()
+
+
+def _finance_token_authorize():
+    expected = _finance_expected_token()
+    if not expected:
+        return None
+    auth = (request.headers.get("Authorization") or "").strip()
+    if auth.lower().startswith("bearer "):
+        got = auth[7:].strip()
+    else:
+        got = (request.headers.get("X-ERP-Finance-Token") or "").strip()
+    if got != expected:
+        return jsonify({"error": "Unauthorized"}), 401
+    return None
+
+
+def _finance_json_scalar(v):
+    if v is None:
+        return None
+    if isinstance(v, datetime.datetime):
+        return v.isoformat(sep=" ", timespec="seconds")
+    if isinstance(v, datetime.date):
+        return v.isoformat()
+    if isinstance(v, Decimal):
+        return float(v)
+    return v
+
+
+def _finance_cheques_from_where(search, source, date_from, date_to):
+    parts = [
+        "c.cqr_cst_status = :cst",
+        "b.brn_reg_code = :reg",
+        "EXTRACT(YEAR FROM c.cqr_ref_date) > 2025",
+    ]
+    binds = {"cst": "AC", "reg": 28}
+    if search:
+        parts.append(
+            "(c.cqr_ref LIKE :search OR c.cqr_payee LIKE :search OR "
+            "c.cqr_narrative LIKE :search OR c.cqr_fms_remarks LIKE :search)"
+        )
+        binds["search"] = "%" + search + "%"
+    if source is not None and str(source).strip() != "":
+        parts.append("c.cqr_source = :src")
+        binds["src"] = int(source)
+    if date_from:
+        parts.append("TRUNC(c.cqr_ref_date) >= TO_DATE(:df, 'YYYY-MM-DD')")
+        binds["df"] = date_from
+    if date_to:
+        parts.append("TRUNC(c.cqr_ref_date) <= TO_DATE(:dt, 'YYYY-MM-DD')")
+        binds["dt"] = date_to
+    where_sql = " AND ".join(parts)
+    from_sql = """
+FROM fms_cheques c
+JOIN tqc_branches b ON c.cqr_brh_code = b.brn_code
+JOIN TQ_CRM.TQC_SYSTEMS s ON c.cqr_source = s.sys_code
+WHERE """ + where_sql
+    return from_sql, binds
+
+
+@app.route("/finance/cheques", methods=["GET"])
+@app.route("/api/finance/cheques", methods=["GET"])
+def finance_cheques():
+    bad = _finance_token_authorize()
+    if bad:
+        return bad
+    if not PASSWORD:
+        return jsonify({"error": "ORACLE_PASSWORD not set"}), 503
+    search = (request.args.get("search") or "").strip()
+    source = request.args.get("source", type=int)
+    date_from = (request.args.get("date_from") or "").strip()
+    date_to = (request.args.get("date_to") or "").strip()
+    stats_date = (request.args.get("stats_date") or "").strip()
+    if not stats_date:
+        stats_date = datetime.date.today().isoformat()
+    page = max(1, request.args.get("page", default=1, type=int) or 1)
+    per_page = min(100, max(1, request.args.get("per_page", default=20, type=int) or 20))
+    from_sql, binds = _finance_cheques_from_where(search, source, date_from, date_to)
+
+    select_list = """
+        s.sys_name AS sys_source,
+        c.cqr_source,
+        c.cqr_ref,
+        c.cqr_ref_date,
+        c.cqr_narrative,
+        c.cqr_brh_code,
+        c.cqr_fms_remarks,
+        c.cqr_amount,
+        c.cqr_payee
+    """
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+
+        cur.execute("SELECT COUNT(*) " + from_sql, binds)
+        total = int(cur.fetchone()[0])
+
+        stats_binds = dict(binds)
+        stats_binds["stats_today"] = stats_date
+
+        cur.execute("SELECT NVL(SUM(c.cqr_amount), 0) " + from_sql, binds)
+        total_amount = float(cur.fetchone()[0] or 0)
+
+        today_where = from_sql + " AND TRUNC(c.cqr_ref_date) = TO_DATE(:stats_today, 'YYYY-MM-DD')"
+        cur.execute("SELECT COUNT(*) " + today_where, stats_binds)
+        today_count = int(cur.fetchone()[0])
+
+        cur.execute("SELECT COUNT(DISTINCT c.cqr_payee) " + from_sql, binds)
+        distinct_payees = int(cur.fetchone()[0])
+
+        lo = (page - 1) * per_page
+        hi = page * per_page
+        page_binds = dict(binds)
+        page_binds["rn_hi"] = hi
+        page_binds["rn_lo"] = lo
+        page_sql = f"""
+SELECT sys_source, cqr_source, cqr_ref, cqr_ref_date, cqr_narrative, cqr_brh_code,
+       cqr_fms_remarks, cqr_amount, cqr_payee
+FROM (
+  SELECT t.*, ROWNUM AS rnum FROM (
+    SELECT {select_list}
+    {from_sql}
+    ORDER BY c.cqr_ref_date DESC NULLS LAST
+  ) t WHERE ROWNUM <= :rn_hi
+) WHERE rnum > :rn_lo
+"""
+        cur.execute(page_sql, page_binds)
+        cols = [d[0].lower() for d in cur.description] if cur.description else []
+        rows = []
+        for r in cur.fetchall():
+            d = {}
+            for i, name in enumerate(cols):
+                d[name] = _finance_json_scalar(r[i] if i < len(r) else None)
+            rows.append(d)
+
+        cur.execute(
+            """
+SELECT c.cqr_source AS source_code, s.sys_name AS source_name
+"""
+            + from_sql
+            + " GROUP BY c.cqr_source, s.sys_name ORDER BY s.sys_name",
+            binds,
+        )
+        source_options = []
+        for r in cur.fetchall():
+            source_options.append(
+                {"source_code": r[0], "source_name": _finance_json_scalar(r[1])}
+            )
+
+        cur.close()
+        conn.close()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    return jsonify(
+        {
+            "data": rows,
+            "total": total,
+            "per_page": per_page,
+            "current_page": page,
+            "stats": {
+                "total_count": total,
+                "total_amount": total_amount,
+                "today_count": today_count,
+                "distinct_payees": distinct_payees,
+            },
+            "source_options": source_options,
+        }
+    )
+
+
+@app.route("/finance/cheques/lookup", methods=["GET"])
+@app.route("/api/finance/cheques/lookup", methods=["GET"])
+def finance_cheques_lookup():
+    bad = _finance_token_authorize()
+    if bad:
+        return bad
+    if not PASSWORD:
+        return jsonify({"error": "ORACLE_PASSWORD not set"}), 503
+    ref = (request.args.get("ref") or "").strip()
+    source = request.args.get("source", type=int)
+    if ref == "" or source is None:
+        return jsonify({"error": "ref and source are required"}), 400
+    from_sql, binds = _finance_cheques_from_where("", source, "", "")
+    binds["cref"] = ref
+    from_sql = from_sql + " AND c.cqr_ref = :cref"
+    sql = f"""
+SELECT s.sys_name AS sys_source, c.cqr_source, c.cqr_ref, c.cqr_ref_date, c.cqr_narrative,
+       c.cqr_brh_code, c.cqr_fms_remarks, c.cqr_amount, c.cqr_payee
+{from_sql}
+AND ROWNUM = 1
+"""
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute(sql, binds)
+        cols = [d[0].lower() for d in cur.description] if cur.description else []
+        r = cur.fetchone()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    if not r:
+        return jsonify({"data": None})
+    d = {cols[i]: _finance_json_scalar(r[i]) for i in range(len(cols))}
+    return jsonify({"data": d})
+
+
+@app.route("/finance/agency-advances", methods=["GET"])
+@app.route("/api/finance/agency-advances", methods=["GET"])
+def finance_agency_advances():
+    bad = _finance_token_authorize()
+    if bad:
+        return bad
+    if not PASSWORD:
+        return jsonify({"error": "ORACLE_PASSWORD not set"}), 503
+    year = str(request.args.get("year") or datetime.date.today().year)
+    sql = """
+SELECT c.cqr_no, c.cqr_payee, c.cqr_ref_date, c.cqr_bbr_code, c.cqr_cpy_acc_no,
+       a.agn_bank_acc_no, a.agn_bbr_code
+FROM fms_cheques c
+JOIN lms_agencies a ON a.agn_name = c.cqr_payee
+WHERE c.cqr_pmt_type = 'AGNADV'
+  AND c.cqr_bbr_code IS NULL
+  AND TO_CHAR(c.cqr_ref_date, 'RRRR') = :yr
+  AND c.cqr_cst_status = 'AC'
+ORDER BY c.cqr_ref_date DESC
+"""
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute(sql, {"yr": year})
+        cols = [d[0].lower() for d in cur.description] if cur.description else []
+        rows = []
+        for r in cur.fetchall():
+            rows.append({cols[i]: _finance_json_scalar(r[i]) for i in range(len(cols))})
+        cur.close()
+        conn.close()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    return jsonify({"data": rows})
 
 
 @app.route("/routes", methods=["GET"])

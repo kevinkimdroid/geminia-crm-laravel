@@ -225,4 +225,31 @@ return [
 
     'agency_advances_notify_recipient' => env('FINANCE_AGENCY_ADVANCES_NOTIFY_RECIPIENT', 'kelvin.kimutai@geminialife.co.ke'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Finance (FMS cheques) via HTTP — no PHP OCI8 on the CRM server
+    |--------------------------------------------------------------------------
+    |
+    | When set, Finance cheques and agency advances load from erp-clients-api
+    | (same Oracle host as /clients). Base URL only, e.g. http://10.1.4.101:5000
+    |
+    | If empty, the base URL is derived from ERP_CLIENTS_HTTP_URL when possible.
+    |
+    */
+
+    'finance_http_base' => (function () {
+        $b = rtrim((string) env('FINANCE_ERP_HTTP_BASE', ''), '/');
+        if ($b !== '') {
+            return $b;
+        }
+        $clients = (string) env('ERP_CLIENTS_HTTP_URL', '');
+        if (preg_match('#^(https?://[^/]+)#i', $clients, $m)) {
+            return rtrim($m[1], '/');
+        }
+
+        return '';
+    })(),
+
+    'finance_http_token' => env('FINANCE_ERP_HTTP_TOKEN', env('ERP_API_TOKEN', '')),
+
 ];
