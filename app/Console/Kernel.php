@@ -28,6 +28,15 @@ class Kernel extends ConsoleKernel
         if (config('erp.agency_advances_notify_enabled', false)) {
             $schedule->command('finance:notify-agency-advances')->dailyAt('07:30');
         }
+
+        if (config('erp.messages_auto_send_enabled', false)) {
+            $limit = max(1, min(500, (int) config('erp.messages_auto_send_limit', 50)));
+            // Run as artisan command (not queued job) so schedule:work is not limited by queue:listen --timeout=60.
+            $schedule->command('erp:send-sms-messages', ['--limit' => $limit])
+                ->everyFiveMinutes()
+                ->withoutOverlapping(15)
+                ->runInBackground();
+        }
     }
 
     /**

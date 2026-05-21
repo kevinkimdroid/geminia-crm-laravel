@@ -12,4 +12,6 @@ return [
     'apikey' => env('ADVANTA_API_KEY', ''),
     'partner_id' => env('ADVANTA_PARTNER_ID', ''),
     'shortcode' => env('ADVANTA_SHORTCODE', ''),
+    'http_timeout' => (int) env('ADVANTA_HTTP_TIMEOUT', 15),
+    'connect_timeout' => (int) env('ADVANTA_CONNECT_TIMEOUT', 5),
 ];

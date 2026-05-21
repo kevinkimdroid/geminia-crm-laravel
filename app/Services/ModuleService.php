@@ -37,7 +37,8 @@ class ModuleService
             ['key' => 'tools.pdf-maker', 'label' => 'PDF Maker', 'icon' => 'bi-file-pdf', 'sort' => 16],
             ['key' => 'tools.recycle-bin', 'label' => 'Recycle Bin', 'icon' => 'bi-trash', 'sort' => 17],
             ['key' => 'support.sms-notifier', 'label' => 'SMS Notifier', 'icon' => 'bi-chat-dots', 'sort' => 18],
-            ['key' => 'compliance.complaints', 'label' => 'Complaint Register', 'icon' => 'bi-clipboard2-data', 'sort' => 19],
+            ['key' => 'tools.erp-messaging', 'label' => 'ERP Messaging', 'icon' => 'bi-chat-square-text', 'sort' => 19],
+            ['key' => 'compliance.complaints', 'label' => 'Complaint Register', 'icon' => 'bi-clipboard2-data', 'sort' => 20],
         ];
     }
 

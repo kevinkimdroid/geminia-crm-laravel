@@ -37,6 +37,37 @@ class WorkTicketNotificationService
         // Manager visibility will be handled via scheduled reporting instead.
     }
 
+    public function notifyReassigned(WorkTicket $ticket, int $actorUserId, int $previousAssigneeId): void
+    {
+        $subject = "Work ticket reassigned to you: {$ticket->ticket_no}";
+        $link = rtrim((string) config('app.url', ''), '/') . '/work-tickets/' . $ticket->id;
+
+        $assignee = $this->getUser((int) $ticket->assignee_id);
+        if (! $assignee || empty($assignee->email1)) {
+            return;
+        }
+
+        $actor = $this->getUser($actorUserId);
+        $previousAssignee = $this->getUser($previousAssigneeId);
+        $name = $this->fullName($assignee);
+        $actorName = $actor ? $this->fullName($actor) : ('User #' . $actorUserId);
+        $previousName = $previousAssignee ? $this->fullName($previousAssignee) : ('User #' . $previousAssigneeId);
+
+        $body = "Hello {$name},\n\n"
+            . "A work ticket has been reassigned to you.\n\n"
+            . "Ticket: {$ticket->ticket_no}\n"
+            . "Title: {$ticket->title}\n"
+            . "Priority: {$ticket->priority}\n"
+            . "Status: {$ticket->status}\n"
+            . "Previous assignee: {$previousName}\n"
+            . "Reassigned by: {$actorName}\n"
+            . "Due date: " . ($ticket->due_date?->toDateString() ?: 'N/A') . "\n\n"
+            . "View ticket: {$link}\n\n"
+            . "Kind regards,\n" . config('app.name', 'Geminia CRM');
+
+        $this->send((string) $assignee->email1, $name, $subject, $body);
+    }
+
     public function notifyClosed(WorkTicket $ticket, int $actorUserId): void
     {
         $subject = "Work ticket closed: {$ticket->ticket_no}";

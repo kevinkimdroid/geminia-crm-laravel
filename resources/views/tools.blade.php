@@ -21,15 +21,18 @@
         </div>
     </div>
     <div class="col-md-6 col-lg-4">
+        <a href="{{ route('tools.erp-messaging') }}" class="text-decoration-none text-dark">
         <div class="card tools-card h-100">
             <div class="card-body p-4 d-flex align-items-center gap-3">
-                <div class="tools-icon"><i class="bi bi-grid-1x2"></i></div>
+                <div class="tools-icon"><i class="bi bi-chat-square-text"></i></div>
                 <div>
-                    <h6 class="fw-bold mb-0">Integrations</h6>
-                    <p class="text-muted small mb-0">Connect external apps</p>
+                    <h6 class="fw-bold mb-0">ERP Messaging</h6>
+                    <p class="text-muted small mb-1">Send draft ERP SMS only (not resends)</p>
+                    <a href="{{ route('tools.erp-messaging.sent') }}" class="small">View sent history & times</a>
                 </div>
             </div>
         </div>
+        </a>
     </div>
     <div class="col-md-6 col-lg-4">
         <div class="card tools-card h-100">
@@ -46,8 +49,8 @@
         <div class="card tools-coming-card overflow-hidden">
             <div class="card-body p-5 text-center">
                 <div class="tools-coming-icon"><i class="bi bi-tools"></i></div>
-                <h4 class="mt-4 mb-2">Tools Coming Soon</h4>
-                <p class="text-muted mb-0">Workflows, integrations, and developer tools will be available here.</p>
+                <h4 class="mt-4 mb-2">More Tools Coming Soon</h4>
+                <p class="text-muted mb-0">Additional workflows, integrations, and developer tools will be available here.</p>
             </div>
         </div>
     </div>

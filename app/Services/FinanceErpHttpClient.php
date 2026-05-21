@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\ErpHttpBaseUrl;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
@@ -18,9 +19,12 @@ class FinanceErpHttpClient
         return trim((string) config('erp.finance_http_base')) !== '';
     }
 
+    /**
+     * erp-clients-api root (scheme + host + port + optional path prefix). Trailing /clients etc. stripped in config / {@see ErpHttpBaseUrl}.
+     */
     public function baseUrl(): string
     {
-        return rtrim((string) config('erp.finance_http_base'), '/');
+        return ErpHttpBaseUrl::normalizeBase(rtrim((string) config('erp.finance_http_base'), '/'));
     }
 
     /**
@@ -35,6 +39,21 @@ class FinanceErpHttpClient
         }
 
         return $req;
+    }
+
+    /**
+     * GET erp-clients-api finance route. If /finance/* returns 404, retry /api/finance/*
+     * (some local/proxy setups only expose the /api prefix).
+     */
+    private function getFinance(string $path, array $params = []): \Illuminate\Http\Client\Response
+    {
+        $base = $this->baseUrl();
+        $response = $this->http()->get($base . $path, $params);
+        if ($response->status() === 404 && str_starts_with($path, '/finance/')) {
+            $response = $this->http()->get($base . '/api' . $path, $params);
+        }
+
+        return $response;
     }
 
     /**
@@ -63,9 +82,9 @@ class FinanceErpHttpClient
             $params['source'] = (int) $request->get('source');
         }
 
-        $response = $this->http()->get($this->baseUrl() . '/finance/cheques', $params);
+        $response = $this->getFinance('/finance/cheques', $params);
         if (! $response->successful()) {
-            $msg = $response->json('error') ?? ('ERP API HTTP ' . $response->status());
+            $msg = $this->financeHttpErrorMessage($response);
 
             return [
                 'payments' => $this->emptyPaginator($request, 20),
@@ -76,7 +95,7 @@ class FinanceErpHttpClient
                     'distinct_payees' => 0,
                 ],
                 'sourceOptions' => collect(),
-                'erpError' => is_string($msg) ? $msg : 'Finance ERP API request failed.',
+                'erpError' => $msg,
             ];
         }
 
@@ -126,16 +145,14 @@ class FinanceErpHttpClient
      */
     public function fetchChequeForTicket(string $ref, int $source): array
     {
-        $response = $this->http()->get($this->baseUrl() . '/finance/cheques/lookup', [
+        $response = $this->getFinance('/finance/cheques/lookup', [
             'ref' => $ref,
             'source' => $source,
         ]);
         if (! $response->successful()) {
-            $msg = $response->json('error');
-
             return [
                 'record' => null,
-                'error' => is_string($msg) ? $msg : ('ERP API HTTP ' . $response->status()),
+                'error' => $this->financeHttpErrorMessage($response),
             ];
         }
         $data = $response->json('data');
@@ -154,13 +171,11 @@ class FinanceErpHttpClient
      */
     public function fetchAgencyAdvances(int $year): array
     {
-        $response = $this->http()->get($this->baseUrl() . '/finance/agency-advances', [
+        $response = $this->getFinance('/finance/agency-advances', [
             'year' => $year,
         ]);
         if (! $response->successful()) {
-            $msg = $response->json('error') ?? ('ERP API HTTP ' . $response->status());
-
-            return ['rows' => [], 'loadError' => is_string($msg) ? $msg : 'Agency advances request failed.'];
+            return ['rows' => [], 'loadError' => $this->financeHttpErrorMessage($response)];
         }
         $data = $response->json('data');
         if (! is_array($data)) {
@@ -191,16 +206,14 @@ class FinanceErpHttpClient
      */
     public function fetchAgencyAdvancesForNotify(int $year): array
     {
-        $response = $this->http()->get($this->baseUrl() . '/finance/agency-advances', [
+        $response = $this->getFinance('/finance/agency-advances', [
             'year' => $year,
         ]);
         if (! $response->successful()) {
-            $msg = $response->json('error');
-
             return [
                 'rows' => collect(),
                 'count' => 0,
-                'error' => is_string($msg) ? $msg : ('HTTP ' . $response->status()),
+                'error' => $this->financeHttpErrorMessage($response),
             ];
         }
         $data = $response->json('data');
@@ -221,5 +234,21 @@ class FinanceErpHttpClient
             max(1, (int) $request->input('page', 1)),
             ['path' => $request->url(), 'query' => $request->query()]
         );
+    }
+
+    private function financeHttpErrorMessage(\Illuminate\Http\Client\Response $response): string
+    {
+        $status = $response->status();
+        $body = $response->json('error');
+        if (is_string($body) && $body !== '') {
+            return $body;
+        }
+        if ($status === 404) {
+            return 'ERP API HTTP 404 — erp-clients-api on '.$this->baseUrl().' is running old code (no /finance routes) or the wrong folder. '
+                .'Stop the process on port 5000, then from erp-clients-api run: python app.py (or start.bat). '
+                .'Test: curl "'.$this->baseUrl().'/finance/cheques?page=1&per_page=1&stats_date='.now()->toDateString().'" should return JSON, not 404.';
+        }
+
+        return 'ERP API HTTP '.$status;
     }
 }

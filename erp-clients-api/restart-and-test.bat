@@ -18,4 +18,8 @@ echo.
 echo [4] Group clients:
 curl -s -m 5 "http://localhost:5000/clients?limit=2&offset=0&system=group" 2>nul
 echo.
+echo [5] SMS routes (should list /messages/sms and /api/messages/sms):
+curl -s -m 5 "http://localhost:5000/routes" 2>nul | findstr /i "messages"
+if errorlevel 1 echo    No messages routes - deploy latest app.py and restart this API.
+echo.
 pause

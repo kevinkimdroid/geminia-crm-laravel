@@ -227,27 +227,79 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | ERP SMS life messaging (erp:send-sms-messages)
+    |--------------------------------------------------------------------------
+    |
+    | Pending messages are fetched from tq_crm.tqc_smslife_messages using the
+    | supplied ERP query where sms_status = D. Successful sends are marked with
+    | ERP_MESSAGES_SENT_STATUS (default OK). Failed sends remain pending for retry.
+    |
+    */
+
+    'messages_table' => env('ERP_MESSAGES_TABLE', 'tq_crm.tqc_smslife_messages'),
+    'messages_status_column' => env('ERP_MESSAGES_STATUS_COLUMN', 'sms_status'),
+    'messages_pending_status' => env('ERP_MESSAGES_PENDING_STATUS', 'D'),
+    'messages_sent_status' => env('ERP_MESSAGES_SENT_STATUS', 'OK'),
+    'messages_sent_date_column' => env('ERP_MESSAGES_SENT_DATE_COLUMN', ''),
+    'messages_auto_send_enabled' => filter_var(env('ERP_MESSAGES_AUTO_SEND_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
+    'messages_auto_send_limit' => (int) env('ERP_MESSAGES_AUTO_SEND_LIMIT', 50),
+    'messages_http_timeout' => (int) env('ERP_MESSAGES_HTTP_TIMEOUT', 45),
+    'messages_http_connect_timeout' => (int) env('ERP_MESSAGES_HTTP_CONNECT_TIMEOUT', 5),
+    'messages_mark_batch_size' => max(10, min(200, (int) env('ERP_MESSAGES_MARK_BATCH_SIZE', 100))),
+    'messages_send_via_queue' => filter_var(env('ERP_MESSAGES_SEND_VIA_QUEUE', true), FILTER_VALIDATE_BOOLEAN),
+
+    /*
+    | When false (default), erp:resend-sms is blocked — only draft/pending ERP rows are sent.
+    */
+    'messages_allow_history_resend' => filter_var(env('ERP_SMS_ALLOW_HISTORY_RESEND', false), FILTER_VALIDATE_BOOLEAN),
+
+    /*
+    | How CRM loads / updates ERP SMS rows:
+    |   auto   — use erp-clients-api when a messages/finance HTTP base is set (recommended; avoids ORA-03113 from PHP OCI8)
+    |   http   — always use erp-clients-api (fails if base URL missing)
+    |   oracle — always use direct Oracle (erp connection + OCI8)
+    */
+    'messages_http' => strtolower(trim((string) env('ERP_MESSAGES_HTTP', 'auto'))),
+
+    /*
+    | Optional: ERP SMS API base only (scheme + host + port). When empty, uses finance_http_base
+    | (FINANCE_ERP_HTTP_BASE or host derived from ERP_CLIENTS_HTTP_URL).
+    */
+    'messages_http_base' => (function () {
+        $m = rtrim(trim((string) env('ERP_MESSAGES_HTTP_BASE', '')), '/');
+        if ($m === '') {
+            return '';
+        }
+
+        return \App\Support\ErpHttpBaseUrl::normalizeBase($m);
+    })(),
+
+    /*
+    | Optional Bearer for /messages/* only; when empty uses finance_http_token.
+    */
+    'messages_http_token' => env('ERP_MESSAGES_HTTP_TOKEN', ''),
+
+    /*
+    |--------------------------------------------------------------------------
     | Finance (FMS cheques) via HTTP — no PHP OCI8 on the CRM server
     |--------------------------------------------------------------------------
     |
     | When set, Finance cheques and agency advances load from erp-clients-api
-    | (same Oracle host as /clients). Base URL only, e.g. http://10.1.4.101:5000
+    | Base URL only (scheme + host + port), e.g. http://10.1.4.101:5000 — not …/clients.
+    | If FINANCE_ERP_HTTP_BASE accidentally ends with /clients, it is stripped automatically.
     |
-    | If empty, the base URL is derived from ERP_CLIENTS_HTTP_URL when possible.
+    | If empty, the base URL is derived from ERP_CLIENTS_HTTP_URL when possible
+    | (path prefix before …/api/clients is preserved — see App\Support\ErpHttpBaseUrl).
     |
     */
 
     'finance_http_base' => (function () {
-        $b = rtrim((string) env('FINANCE_ERP_HTTP_BASE', ''), '/');
-        if ($b !== '') {
-            return $b;
-        }
-        $clients = (string) env('ERP_CLIENTS_HTTP_URL', '');
-        if (preg_match('#^(https?://[^/]+)#i', $clients, $m)) {
-            return rtrim($m[1], '/');
+        $explicit = rtrim(trim((string) env('FINANCE_ERP_HTTP_BASE', '')), '/');
+        if ($explicit !== '') {
+            return \App\Support\ErpHttpBaseUrl::normalizeBase($explicit);
         }
 
-        return '';
+        return \App\Support\ErpHttpBaseUrl::deriveFromClientsHttpUrl((string) env('ERP_CLIENTS_HTTP_URL', ''));
     })(),
 
     'finance_http_token' => env('FINANCE_ERP_HTTP_TOKEN', env('ERP_API_TOKEN', '')),

@@ -294,6 +294,8 @@
 
 </div>
 
+@include('partials.dashboard-staff-banner')
+
 <style>
 :root {
     --dash-bg: #f8fafc;

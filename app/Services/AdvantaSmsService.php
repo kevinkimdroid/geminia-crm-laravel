@@ -82,7 +82,10 @@ class AdvantaSmsService
         }
 
         try {
-            $response = Http::asForm()->post($this->apiUrl . '/', [
+            $response = Http::withOptions(['connect_timeout' => max(2, (int) config('advanta.connect_timeout', 5))])
+                ->timeout(max(5, (int) config('advanta.http_timeout', 15)))
+                ->asForm()
+                ->post($this->apiUrl . '/', [
                 'apikey' => $this->apikey,
                 'partnerID' => $this->partnerId,
                 'message' => $message,
@@ -94,13 +97,28 @@ class AdvantaSmsService
 
             if ($response->successful()) {
                 $r0 = is_array($body) ? ($body['responses'][0] ?? null) : null;
-                $success = is_array($body) && is_array($r0) && (
-                    ($r0['response-description'] ?? $r0['response_description'] ?? $r0['status'] ?? '') === 'Success'
-                    || ($r0['response-code'] ?? $r0['response_code'] ?? null) === 200
-                ) || (is_array($body) && ($body['status'] ?? '') === 'Success');
+                $messageId = is_array($r0)
+                    ? trim((string) ($r0['messageid'] ?? $r0['messageId'] ?? $r0['message_id'] ?? ''))
+                    : '';
+                $desc = is_array($r0)
+                    ? (string) ($r0['response-description'] ?? $r0['response_description'] ?? $r0['status'] ?? '')
+                    : '';
+                $code = is_array($r0) ? ($r0['response-code'] ?? $r0['response_code'] ?? null) : null;
+                $success = $messageId !== ''
+                    || $desc === 'Success'
+                    || $code === 200
+                    || (is_array($body) && ($body['status'] ?? '') === 'Success');
+                if ($success && $messageId === '' && is_array($r0)) {
+                    Log::warning('AdvantaSmsService::send accepted without messageid', [
+                        'mobile' => $mobile,
+                        'body' => $body,
+                    ]);
+                }
+
                 return [
                     'success' => $success,
                     'response' => $body,
+                    'advanta_message_id' => $messageId !== '' ? $messageId : null,
                     'error' => $success ? null : $this->extractErrorMessage($body),
                 ];
             }

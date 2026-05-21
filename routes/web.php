@@ -86,6 +86,7 @@ Route::get('/work-tickets', [\App\Http\Controllers\WorkTicketController::class, 
 Route::get('/work-tickets/export', [\App\Http\Controllers\WorkTicketController::class, 'export'])->name('work-tickets.export');
 Route::get('/work-tickets/create', [\App\Http\Controllers\WorkTicketController::class, 'create'])->name('work-tickets.create');
 Route::post('/work-tickets', [\App\Http\Controllers\WorkTicketController::class, 'store'])->name('work-tickets.store');
+Route::post('/work-tickets/{workTicket}/reassign', [\App\Http\Controllers\WorkTicketController::class, 'reassign'])->name('work-tickets.reassign');
 Route::get('/work-tickets/{workTicket}', [\App\Http\Controllers\WorkTicketController::class, 'show'])->name('work-tickets.show');
 Route::post('/work-tickets/{workTicket}/updates', [\App\Http\Controllers\WorkTicketController::class, 'storeUpdate'])->name('work-tickets.updates.store');
 Route::middleware('finance')->group(function () {
@@ -138,6 +139,9 @@ Route::get('/support/clients/debug-api', [\App\Http\Controllers\CustomerControll
 Route::get('/support/clients/debug-products', [\App\Http\Controllers\CustomerController::class, 'debugProducts'])->name('support.clients.debug-products');
 Route::get('/support/clients/create-ticket', [\App\Http\Controllers\ServeClientController::class, 'createTicketFromPolicy'])->name('support.clients.create-ticket');
 Route::get('/tools', fn () => view('tools'))->name('tools');
+Route::get('/tools/erp-messaging', [\App\Http\Controllers\ErpMessagingController::class, 'index'])->name('tools.erp-messaging');
+Route::get('/tools/erp-messaging/sent', [\App\Http\Controllers\ErpMessagingController::class, 'sent'])->name('tools.erp-messaging.sent');
+Route::post('/tools/erp-messaging/send', [\App\Http\Controllers\ErpMessagingController::class, 'send'])->name('tools.erp-messaging.send');
 Route::get('/tools/email-templates', [\App\Http\Controllers\EmailTemplateController::class, 'index'])->name('tools.email-templates');
 Route::get('/tools/email-templates/create', [\App\Http\Controllers\EmailTemplateController::class, 'create'])->name('tools.email-templates.create');
 Route::post('/tools/email-templates', [\App\Http\Controllers\EmailTemplateController::class, 'store'])->name('tools.email-templates.store');

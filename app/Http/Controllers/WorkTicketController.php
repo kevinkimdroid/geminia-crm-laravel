@@ -445,14 +445,79 @@ class WorkTicketController extends Controller
             ->all();
 
         $usersById = $this->getUsersById($userIds);
+        $activeUsers = VtigerUser::on('vtiger')
+            ->where('status', 'Active')
+            ->orderBy('first_name')
+            ->orderBy('last_name')
+            ->get();
 
         return view('work-tickets.show', [
             'ticket' => $workTicket,
             'updates' => $updates,
             'usersById' => $usersById,
+            'activeUsers' => $activeUsers,
             'canSeeAll' => $user->isAdministrator(),
             'canSeeTeam' => $user->isAdministrator() || !empty($this->getReporteeIds((int) $user->id)),
         ]);
+    }
+
+    public function reassign(Request $request, WorkTicket $workTicket): RedirectResponse
+    {
+        $user = Auth::guard('vtiger')->user();
+        abort_unless($user, 401);
+
+        abort_unless($this->canAccessTicket((int) $user->id, $user->isAdministrator(), $workTicket), 403);
+
+        $validated = $request->validate([
+            'assignee_id' => 'required|integer|min:1',
+        ]);
+
+        $newAssigneeId = (int) $validated['assignee_id'];
+        $newAssignee = VtigerUser::on('vtiger')
+            ->where('status', 'Active')
+            ->where('id', $newAssigneeId)
+            ->first();
+
+        if (! $newAssignee) {
+            return back()->withErrors(['assignee_id' => 'Select an active user to reassign this work ticket.']);
+        }
+
+        $previousAssigneeId = (int) $workTicket->assignee_id;
+        if ($previousAssigneeId === $newAssigneeId) {
+            return back()->with('success', 'Work ticket is already assigned to that user.');
+        }
+
+        $managerId = UserReportingLine::query()
+            ->where('user_id', $newAssigneeId)
+            ->value('manager_id');
+        $namesById = $this->getUsersById([$previousAssigneeId, $newAssigneeId, (int) $user->id]);
+        $previousName = $namesById[$previousAssigneeId] ?? ('User #' . $previousAssigneeId);
+        $newName = $namesById[$newAssigneeId] ?? $newAssignee->full_name;
+        $actorName = $namesById[(int) $user->id] ?? ('User #' . (int) $user->id);
+
+        DB::transaction(function () use ($workTicket, $newAssigneeId, $managerId, $user, $previousName, $newName, $actorName): void {
+            $workTicket->assignee_id = $newAssigneeId;
+            $workTicket->reporting_manager_id = $managerId ? (int) $managerId : null;
+            $workTicket->save();
+
+            WorkTicketUpdate::create([
+                'work_ticket_id' => $workTicket->id,
+                'user_id' => (int) $user->id,
+                'update_text' => "Reassigned from {$previousName} to {$newName} by {$actorName}.",
+                'status_after_update' => $workTicket->status,
+                'work_mode' => null,
+            ]);
+        });
+
+        $workTicket->refresh();
+        $this->notifications->notifyReassigned($workTicket, (int) $user->id, $previousAssigneeId);
+
+        $redirectRoute = $this->canAccessTicket((int) $user->id, $user->isAdministrator(), $workTicket)
+            ? route('work-tickets.show', $workTicket)
+            : route('work-tickets.index');
+
+        return redirect($redirectRoute)
+            ->with('success', 'Work ticket reassigned successfully.');
     }
 
     public function storeUpdate(Request $request, WorkTicket $workTicket): RedirectResponse

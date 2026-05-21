@@ -5,6 +5,7 @@ Deploy on a machine with reliable Oracle connectivity (e.g. where Toad works).
 Laravel CRM fetches clients via this API when CLIENTS_VIEW_SOURCE=erp_http.
 Finance (FMS cheques) endpoints under /finance/* when Laravel uses FINANCE_ERP_HTTP_BASE
 or the same base as ERP_CLIENTS_HTTP_URL (no PHP OCI8 on the CRM server).
+ERP SMS life messages under /messages/sms/* (pending list + mark sent) for Tools > ERP Messaging.
 """
 import datetime
 import os
@@ -2012,9 +2013,229 @@ ORDER BY c.cqr_ref_date DESC
     return jsonify({"data": rows})
 
 
+# ---------------------------------------------------------------------------
+# ERP SMS life messages (Laravel Tools > ERP Messaging) — same auth as /finance/*
+# Runs Oracle on this host (stable) when CRM PHP gets ORA-03113 on direct OCI8.
+# ---------------------------------------------------------------------------
+
+
+def _messages_sms_table_env():
+    return (os.environ.get("ERP_MESSAGES_TABLE") or "tq_crm.tqc_smslife_messages").strip()
+
+
+def _messages_sms_status_col_env():
+    return (os.environ.get("ERP_MESSAGES_STATUS_COLUMN") or "sms_status").strip()
+
+
+def _messages_sms_pending_status_env():
+    return (os.environ.get("ERP_MESSAGES_PENDING_STATUS") or "D").strip()
+
+
+def _messages_sms_sent_status_env():
+    return (os.environ.get("ERP_MESSAGES_SENT_STATUS") or "OK").strip()
+
+
+@app.route("/messages/sms/pending", methods=["GET"])
+@app.route("/api/messages/sms/pending", methods=["GET"])
+def messages_sms_pending():
+    bad = _finance_token_authorize()
+    if bad:
+        return bad
+    if not PASSWORD:
+        return jsonify({"error": "ORACLE_PASSWORD not set"}), 503
+    table = _messages_sms_table_env()
+    status_col = _messages_sms_status_col_env()
+    pending = _messages_sms_pending_status_env()
+    if request.args.get("count_only", type=int) == 1:
+        sql = f"SELECT COUNT(*) AS cnt FROM {table} WHERE {status_col} = :st"
+        binds = {"st": pending}
+        try:
+            conn = get_connection()
+            cur = conn.cursor()
+            cur.execute(sql, binds)
+            row = cur.fetchone()
+            cur.close()
+            conn.close()
+            cnt = int(row[0] if row else 0)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+        return jsonify({"count": cnt})
+    limit = min(500, max(1, request.args.get("limit", default=50, type=int) or 50))
+    sql = f"""
+SELECT * FROM (
+    SELECT
+        sms_code AS message_id,
+        sms_pol_no AS policy_no,
+        sms_tel_no AS phone,
+        sms_msg AS message_body,
+        DECODE(sms_sys_module, 'U', 'UNDERWRITING', 'R', 'RECEIPTING', sms_sys_module) AS sys_module,
+        sms_prepared_date AS created_date
+    FROM {table}
+    WHERE {status_col} = :st
+    ORDER BY sms_prepared_date
+)
+WHERE ROWNUM <= :lim
+"""
+    binds = {"st": pending, "lim": limit}
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute(sql, binds)
+        cols = [d[0].lower() for d in cur.description] if cur.description else []
+        rows = []
+        for r in cur.fetchall():
+            rows.append({cols[i]: _finance_json_scalar(r[i]) for i in range(len(cols))})
+        cur.close()
+        conn.close()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    return jsonify({"data": rows})
+
+
+@app.route("/messages/sms/sent", methods=["GET"])
+@app.route("/api/messages/sms/sent", methods=["GET"])
+def messages_sms_sent():
+    bad = _finance_token_authorize()
+    if bad:
+        return bad
+    if not PASSWORD:
+        return jsonify({"error": "ORACLE_PASSWORD not set"}), 503
+    table = _messages_sms_table_env()
+    status_col = _messages_sms_status_col_env()
+    sent = _messages_sms_sent_status_env()
+    limit = min(500, max(1, request.args.get("limit", default=200, type=int) or 200))
+    sent_date_col = (os.environ.get("ERP_MESSAGES_SENT_DATE_COLUMN") or "").strip()
+    sent_date_select = f"{sent_date_col} AS sent_date," if sent_date_col else "CAST(NULL AS DATE) AS sent_date,"
+    sql = f"""
+SELECT * FROM (
+    SELECT
+        sms_code AS message_id,
+        sms_pol_no AS policy_no,
+        sms_tel_no AS phone,
+        sms_msg AS message_body,
+        DECODE(sms_sys_module, 'U', 'UNDERWRITING', 'R', 'RECEIPTING', sms_sys_module) AS sys_module,
+        sms_prepared_date AS created_date,
+        {sent_date_select}
+        {status_col} AS erp_status
+    FROM {table}
+    WHERE {status_col} = :st
+    ORDER BY sms_prepared_date DESC
+)
+WHERE ROWNUM <= :lim
+"""
+    binds = {"st": sent, "lim": limit}
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute(sql, binds)
+        cols = [d[0].lower() for d in cur.description] if cur.description else []
+        rows = []
+        for r in cur.fetchall():
+            rows.append({cols[i]: _finance_json_scalar(r[i]) for i in range(len(cols))})
+        cur.close()
+        conn.close()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    return jsonify({"data": rows})
+
+
+@app.route("/messages/sms/mark-sent", methods=["POST"])
+@app.route("/api/messages/sms/mark-sent", methods=["POST"])
+def messages_sms_mark_sent():
+    bad = _finance_token_authorize()
+    if bad:
+        return bad
+    if not PASSWORD:
+        return jsonify({"error": "ORACLE_PASSWORD not set"}), 503
+    body = request.get_json(silent=True) or {}
+    sms_code = str(body.get("sms_code") or body.get("message_id") or "").strip()
+    if not sms_code:
+        return jsonify({"error": "sms_code or message_id is required"}), 400
+    table = _messages_sms_table_env()
+    status_col = _messages_sms_status_col_env()
+    from_status = str(body.get("from_status") or _messages_sms_pending_status_env()).strip()
+    to_status = str(body.get("to_status") or _messages_sms_sent_status_env()).strip()
+    sent_date_col = (os.environ.get("ERP_MESSAGES_SENT_DATE_COLUMN") or "").strip()
+    if sent_date_col:
+        sql = (
+            f"UPDATE {table} SET {status_col} = :to_st, {sent_date_col} = SYSDATE "
+            f"WHERE sms_code = :code AND {status_col} = :from_st"
+        )
+        binds = {"to_st": to_status, "code": sms_code, "from_st": from_status}
+    else:
+        sql = f"UPDATE {table} SET {status_col} = :to_st WHERE sms_code = :code AND {status_col} = :from_st"
+        binds = {"to_st": to_status, "code": sms_code, "from_st": from_status}
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute(sql, binds)
+        updated = int(cur.rowcount or 0)
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    return jsonify({"updated": updated})
+
+
+@app.route("/messages/sms/mark-sent-batch", methods=["POST"])
+@app.route("/api/messages/sms/mark-sent-batch", methods=["POST"])
+def messages_sms_mark_sent_batch():
+    """Mark many pending SMS rows sent in one Oracle round-trip (faster than per-row mark-sent)."""
+    bad = _finance_token_authorize()
+    if bad:
+        return bad
+    if not PASSWORD:
+        return jsonify({"error": "ORACLE_PASSWORD not set"}), 503
+    body = request.get_json(silent=True) or {}
+    raw_codes = body.get("sms_codes") or body.get("message_ids") or []
+    if not isinstance(raw_codes, list):
+        return jsonify({"error": "sms_codes must be an array"}), 400
+    codes = []
+    for c in raw_codes:
+        s = str(c or "").strip()
+        if s and s not in codes:
+            codes.append(s)
+    if not codes:
+        return jsonify({"error": "sms_codes is required"}), 400
+    if len(codes) > 200:
+        return jsonify({"error": "sms_codes max 200 per request"}), 400
+    table = _messages_sms_table_env()
+    status_col = _messages_sms_status_col_env()
+    from_status = str(body.get("from_status") or _messages_sms_pending_status_env()).strip()
+    to_status = str(body.get("to_status") or _messages_sms_sent_status_env()).strip()
+    sent_date_col = (os.environ.get("ERP_MESSAGES_SENT_DATE_COLUMN") or "").strip()
+    placeholders = ", ".join([f":c{i}" for i in range(len(codes))])
+    binds = {f"c{i}": codes[i] for i in range(len(codes))}
+    binds["from_st"] = from_status
+    binds["to_st"] = to_status
+    if sent_date_col:
+        sql = (
+            f"UPDATE {table} SET {status_col} = :to_st, {sent_date_col} = SYSDATE "
+            f"WHERE sms_code IN ({placeholders}) AND {status_col} = :from_st"
+        )
+    else:
+        sql = (
+            f"UPDATE {table} SET {status_col} = :to_st "
+            f"WHERE sms_code IN ({placeholders}) AND {status_col} = :from_st"
+        )
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute(sql, binds)
+        updated = int(cur.rowcount or 0)
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    return jsonify({"updated": updated, "requested": len(codes)})
+
+
 @app.route("/routes", methods=["GET"])
+@app.route("/api/routes", methods=["GET"])
 def list_routes():
-    """List all registered routes - use to debug 404s."""
+    """List all registered routes - use to debug 404s (no auth)."""
     rules = []
     for rule in app.url_map.iter_rules():
         rules.append({"rule": str(rule), "methods": list(rule.methods - {"HEAD", "OPTIONS"})})

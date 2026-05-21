@@ -27,6 +27,7 @@ return [
         'support.email-client' => null,
         'support.customers' => null,
         'tools' => null,
+        'tools.erp-messaging' => null,
         'tools.email-templates' => null,
         'tools.recycle-bin' => null,
         'tools.pbx-manager' => null,
@@ -73,6 +74,7 @@ return [
         ],
         'tools' => [
             ['key' => 'tools', 'label' => 'Tools', 'icon' => 'bi-tools', 'route' => 'tools'],
+            ['key' => 'tools.erp-messaging', 'label' => 'ERP Messaging', 'icon' => 'bi-chat-square-text', 'route' => 'tools.erp-messaging'],
             ['key' => 'calendar', 'label' => 'Calendar', 'icon' => 'bi-calendar3', 'route' => 'activities.index'],
             ['key' => 'reports', 'label' => 'Reports', 'icon' => 'bi-file-text', 'route' => 'reports'],
             ['key' => 'settings', 'label' => 'Settings', 'icon' => 'bi-gear-fill', 'route' => 'settings'],

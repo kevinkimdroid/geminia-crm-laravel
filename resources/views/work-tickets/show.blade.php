@@ -28,6 +28,13 @@
     </div>
 @endif
 
+@if ($errors->any())
+    <div class="alert alert-danger alert-dismissible fade show mt-3" role="alert">
+        <i class="bi bi-exclamation-triangle-fill me-1"></i> Please check the highlighted fields and try again.
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+@endif
+
 <div class="row g-3 mt-1">
     <div class="col-xl-4">
         <div class="card border-0 shadow-sm">
@@ -89,6 +96,29 @@
                     <dt class="col-5 text-muted">Last Update</dt>
                     <dd class="col-7">{{ $ticket->updated_at?->diffForHumans() }}</dd>
                 </dl>
+            </div>
+        </div>
+
+        <div class="card border-0 shadow-sm mt-3">
+            <div class="card-body">
+                <h6 class="fw-semibold mb-2">Reassign Work Ticket</h6>
+                <form action="{{ route('work-tickets.reassign', $ticket) }}" method="POST">
+                    @csrf
+                    <label class="form-label small fw-semibold">New Assignee</label>
+                    <select name="assignee_id" class="form-select" required>
+                        <option value="">Select assignee</option>
+                        @foreach(($activeUsers ?? collect()) as $u)
+                            <option value="{{ $u->id }}" {{ (string) old('assignee_id', $ticket->assignee_id) === (string) $u->id ? 'selected' : '' }}>
+                                {{ $u->full_name }}
+                            </option>
+                        @endforeach
+                    </select>
+                    @error('assignee_id')<div class="text-danger small mt-1">{{ $message }}</div>@enderror
+                    <div class="form-text">Reporting manager will update automatically from reporting lines.</div>
+                    <button type="submit" class="btn btn-outline-primary btn-sm mt-3">
+                        <i class="bi bi-person-plus me-1"></i> Reassign
+                    </button>
+                </form>
             </div>
         </div>
 
