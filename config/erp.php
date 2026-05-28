@@ -240,6 +240,7 @@ return [
     'messages_status_column' => env('ERP_MESSAGES_STATUS_COLUMN', 'sms_status'),
     'messages_pending_status' => env('ERP_MESSAGES_PENDING_STATUS', 'D'),
     'messages_sent_status' => env('ERP_MESSAGES_SENT_STATUS', 'OK'),
+    'messages_failed_status' => env('ERP_MESSAGES_FAILED_STATUS', 'E'),
     'messages_sent_date_column' => env('ERP_MESSAGES_SENT_DATE_COLUMN', ''),
     'messages_auto_send_enabled' => filter_var(env('ERP_MESSAGES_AUTO_SEND_ENABLED', false), FILTER_VALIDATE_BOOLEAN),
     'messages_auto_send_limit' => (int) env('ERP_MESSAGES_AUTO_SEND_LIMIT', 50),
@@ -247,6 +248,12 @@ return [
     'messages_http_connect_timeout' => (int) env('ERP_MESSAGES_HTTP_CONNECT_TIMEOUT', 5),
     'messages_mark_batch_size' => max(10, min(200, (int) env('ERP_MESSAGES_MARK_BATCH_SIZE', 100))),
     'messages_send_via_queue' => filter_var(env('ERP_MESSAGES_SEND_VIA_QUEUE', true), FILTER_VALIDATE_BOOLEAN),
+    'messages_failure_notify_enabled' => filter_var(env('ERP_MESSAGES_FAILURE_NOTIFY_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
+    'messages_failure_notify_recipient' => env('ERP_MESSAGES_FAILURE_NOTIFY_RECIPIENT', 'kelvin.kimutai@geminialife.co.ke'),
+    'messages_failure_notify_cc' => array_values(array_filter(array_map(
+        'trim',
+        explode(',', (string) env('ERP_MESSAGES_FAILURE_NOTIFY_CC', ''))
+    ))),
 
     /*
     | When false (default), erp:resend-sms is blocked — only draft/pending ERP rows are sent.

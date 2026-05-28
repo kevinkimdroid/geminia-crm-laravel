@@ -362,7 +362,63 @@ class ErpSmsMessageService
                 continue;
             }
 
+            if ($this->alreadyLoggedAsSent($messageId)) {
+                $markResult = $this->markManyAsSent([$messageId]);
+                $marked = in_array($messageId, $markResult['marked'], true);
+                if ($marked) {
+                    $summary['sent']++;
+                } else {
+                    $summary['failed']++;
+                }
+                $summary['results'][] = [
+                    'message_id' => $messageId,
+                    'phone' => $this->sms->normalizePhone($phone),
+                    'success' => $marked,
+                    'skipped' => true,
+                    'error' => $marked ? null : ('Already sent in CRM before, but ERP status update still failed: ' . ($markResult['error'] ?? 'unknown ERP update error')),
+                    'erp_marked' => $marked,
+                ];
+
+                continue;
+            }
+
             $normalizedPhone = $this->sms->normalizePhone($phone);
+            if (! $this->isValidKenyanMobile($normalizedPhone)) {
+                $error = 'Invalid phone number: ' . $normalizedPhone;
+                $this->logSms(
+                    $normalizedPhone,
+                    $body,
+                    false,
+                    $error,
+                    $userId,
+                    $messageId,
+                    (string) ($message->policy_no ?? ''),
+                    null,
+                    null
+                );
+
+                $failedMark = $this->markAsFailed($messageId);
+                $summary['failed']++;
+                $summary['results'][] = [
+                    'message_id' => $messageId,
+                    'phone' => $normalizedPhone,
+                    'success' => false,
+                    'skipped' => false,
+                    'error' => $failedMark
+                        ? $error
+                        : ($error . ' (and ERP row could not be moved to failed status)'),
+                    'erp_marked' => $failedMark,
+                ];
+                Log::warning('ERP SMS message has invalid phone and was quarantined', [
+                    'message_id' => $messageId,
+                    'phone' => $normalizedPhone,
+                    'failed_status' => $this->failedStatus(),
+                    'erp_marked' => $failedMark,
+                ]);
+
+                continue;
+            }
+
             if ($dryRun) {
                 $summary['skipped']++;
                 $summary['results'][] = [
@@ -378,6 +434,7 @@ class ErpSmsMessageService
             $result = $this->sms->send($normalizedPhone, $body);
             $success = (bool) ($result['success'] ?? false);
             $error = $success ? null : (string) ($result['error'] ?? 'SMS send failed.');
+            $advantaMessageId = $result['advanta_message_id'] ?? null;
 
             $this->logSms(
                 $normalizedPhone,
@@ -387,7 +444,8 @@ class ErpSmsMessageService
                 $userId,
                 $messageId,
                 (string) ($message->policy_no ?? ''),
-                $result['response'] ?? null
+                $result['response'] ?? null,
+                $advantaMessageId
             );
 
             if ($success) {
@@ -438,6 +496,19 @@ class ErpSmsMessageService
         return $summary;
     }
 
+    private function alreadyLoggedAsSent(string $erpMessageId): bool
+    {
+        $erpMessageId = trim($erpMessageId);
+        if ($erpMessageId === '') {
+            return false;
+        }
+
+        return SmsLog::query()
+            ->where('erp_message_id', $erpMessageId)
+            ->whereIn('status', ['sent', 'delivered'])
+            ->exists();
+    }
+
     private function logSms(
         string $phone,
         string $message,
@@ -446,13 +517,15 @@ class ErpSmsMessageService
         ?int $userId,
         ?string $erpMessageId = null,
         ?string $erpPolicyNo = null,
-        mixed $providerResponse = null
+        mixed $providerResponse = null,
+        ?string $advantaMessageId = null
     ): void {
         try {
             SmsLog::create([
                 'contact_id' => null,
                 'erp_message_id' => $erpMessageId,
                 'erp_policy_no' => $erpPolicyNo !== '' ? $erpPolicyNo : null,
+                'advanta_message_id' => $advantaMessageId,
                 'phone' => $phone,
                 'message' => $message,
                 'status' => $success ? 'sent' : 'failed',
@@ -689,8 +762,10 @@ class ErpSmsMessageService
         }
 
         $deliveryStatus = strtolower(trim((string) ($log?->delivery_status ?? 'unknown')));
+        $advantaLabel = trim((string) ($log?->advanta_status ?? ''));
         $deliveryState = match (true) {
             in_array($deliveryStatus, ['delivered', 'delivery_confirmed'], true) => 'delivered',
+            in_array($deliveryStatus, ['blacklisted', 'failed'], true) => 'failed',
             in_array($deliveryStatus, ['submitted', 'sent', 'accepted'], true) => 'pending',
             default => 'unknown',
         };
@@ -698,6 +773,9 @@ class ErpSmsMessageService
 
         return array_merge($row, [
             'crm_sent_at' => $log?->sent_at,
+            'advanta_message_id' => $log?->advanta_message_id,
+            'advanta_status' => $advantaLabel !== '' ? $advantaLabel : null,
+            'advanta_delivery_tat' => $log?->advanta_delivery_tat,
             'delivery_status' => $deliveryStatus !== '' ? $deliveryStatus : 'unknown',
             'delivery_state' => $deliveryState,
             'delivered_at' => $log?->delivered_at,
@@ -724,6 +802,39 @@ class ErpSmsMessageService
     private function sentStatus(): string
     {
         return (string) config('erp.messages_sent_status', 'OK');
+    }
+
+    private function failedStatus(): string
+    {
+        return (string) config('erp.messages_failed_status', 'E');
+    }
+
+    private function isValidKenyanMobile(string $phone): bool
+    {
+        return preg_match('/^2547\d{8}$/', $phone) === 1;
+    }
+
+    private function markAsFailed(string $messageId): bool
+    {
+        $messageId = trim($messageId);
+        if ($messageId === '') {
+            return false;
+        }
+
+        if ($this->transportUsesHttp()) {
+            $res = $this->messagingHttp->markSmsSent($messageId, $this->pendingStatus(), $this->failedStatus());
+
+            return $res['error'] === null && (int) $res['updated'] >= 1;
+        }
+
+        $updated = $this->withErpReconnect(function () use ($messageId): int {
+            return DB::connection('erp')->update(
+                "UPDATE {$this->table()} SET {$this->statusColumn()} = ? WHERE sms_code = ? AND {$this->statusColumn()} = ?",
+                [$this->failedStatus(), $messageId, $this->pendingStatus()]
+            );
+        });
+
+        return (int) $updated >= 1;
     }
 
     private function transportUsesHttp(): bool

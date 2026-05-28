@@ -166,9 +166,9 @@
             </summary>
             <div class="card-body border-top pt-3 small text-muted">
                 <ul class="mb-0 ps-3">
-                    <li><strong>Delivery</strong> and <strong>read</strong> come from <code>sms_logs</code> after the gateway accepts the message.</li>
-                    <li>Until delivery callbacks update CRM, most rows stay <em>submitted</em> (not handset-delivered).</li>
-                    <li>Standard SMS does not include read receipts; <em>Read</em> only appears if you set <code>read_at</code> from a provider callback.</li>
+                    <li><strong>Advanta status</strong> (Success, Blacklisted, etc.) is loaded from Advanta’s <code>getdlr</code> API — the same source as the Advanta portal.</li>
+                    <li>CRM runs <code>advanta:sync-delivery</code> every 10 minutes (or run it manually).</li>
+                    <li><strong>Submitted</strong> means accepted by Advanta; refresh after a few minutes for final delivery status.</li>
                 </ul>
             </div>
         </details>
@@ -303,7 +303,7 @@
                             <th scope="col">Phone</th>
                             <th scope="col">ERP sent</th>
                             <th scope="col">CRM sent</th>
-                            <th scope="col">Delivery</th>
+                            <th scope="col">Advanta status</th>
                             <th scope="col">Read</th>
                             <th scope="col" class="d-none d-md-table-cell">Module</th>
                             <th scope="col">Message</th>
@@ -316,9 +316,13 @@
                             $readState = $message->read_state ?? 'unknown';
                             $deliveryBadge = match ($deliveryState) {
                                 'delivered' => 'success',
+                                'failed' => 'danger',
                                 'pending' => 'warning',
                                 default => 'secondary',
                             };
+                            $displayLabel = trim((string) ($message->advanta_status ?? '')) !== ''
+                                ? $message->advanta_status
+                                : $deliveryLabel;
                             $readBadge = match ($readState) {
                                 'read' => 'primary',
                                 'not_read' => 'warning',
@@ -351,9 +355,15 @@
                                 {{ $message->crm_sent_at ? $message->crm_sent_at->format('Y-m-d H:i') : '—' }}
                             </td>
                             <td>
-                                <span class="badge rounded-pill text-bg-{{ $deliveryBadge }}">{{ $deliveryLabel }}</span>
+                                <span class="badge rounded-pill text-bg-{{ $deliveryBadge }}">{{ $displayLabel }}</span>
+                                @if (!empty($message->advanta_message_id))
+                                    <div class="text-muted small mt-1 font-monospace">ID {{ $message->advanta_message_id }}</div>
+                                @endif
                                 @if (!empty($message->delivered_at))
                                     <div class="text-muted small mt-1">{{ $message->delivered_at->format('Y-m-d H:i') }}</div>
+                                @endif
+                                @if (!empty($message->advanta_delivery_tat))
+                                    <div class="text-muted small">{{ $message->advanta_delivery_tat }} after send</div>
                                 @endif
                             </td>
                             <td>

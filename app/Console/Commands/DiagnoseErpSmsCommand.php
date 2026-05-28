@@ -39,12 +39,17 @@ class DiagnoseErpSmsCommand extends Command
         $this->line('API base: ' . $base);
 
         $batchUrl = $base . '/messages/sms/mark-sent-batch';
-        $batchProbe = Http::withOptions(['connect_timeout' => 3])->timeout(10)
-            ->post($batchUrl, ['sms_codes' => ['0']]);
-        if ($batchProbe->status() === 404) {
-            $this->error('mark-sent-batch route missing (HTTP 404). Restart erp-clients-api (python app.py) so batch ERP updates work.');
-        } else {
-            $this->info('mark-sent-batch route: HTTP ' . $batchProbe->status() . ' (expected 200 or 400, not 404)');
+        try {
+            $batchProbe = Http::withOptions(['connect_timeout' => 3])->timeout(10)
+                ->post($batchUrl, ['sms_codes' => ['0']]);
+            if ($batchProbe->status() === 404) {
+                $this->error('mark-sent-batch route missing (HTTP 404). Restart erp-clients-api (python app.py) so batch ERP updates work.');
+            } else {
+                $this->info('mark-sent-batch route: HTTP ' . $batchProbe->status() . ' (expected 200 or 400, not 404)');
+            }
+        } catch (\Throwable $e) {
+            $this->error('Cannot reach ERP API at ' . $base . ' — ' . $e->getMessage());
+            $this->line('  Start: erp-clients-api\\start.bat  OR  composer run dev  (includes erp-api on port 5000)');
         }
 
         try {
@@ -95,6 +100,21 @@ class DiagnoseErpSmsCommand extends Command
             } else {
                 $this->error('Advanta failed: ' . ($result['error'] ?? 'unknown'));
             }
+        }
+
+        $schedulerLog = storage_path('logs/erp-sms-scheduler.log');
+        if (is_file($schedulerLog)) {
+            $tail = array_slice(file($schedulerLog, FILE_IGNORE_NEW_LINES) ?: [], -5);
+            if ($tail !== []) {
+                $this->newLine();
+                $this->line('Last lines of erp-sms-scheduler.log:');
+                foreach ($tail as $line) {
+                    $this->line('  ' . $line);
+                }
+            }
+        } else {
+            $this->warn('No erp-sms-scheduler.log yet — scheduler has not run erp:send-sms-messages since this log was added.');
+            $this->line('  Start: scripts\\run-scheduler-loop.bat  OR  php artisan schedule:work');
         }
 
         $this->newLine();

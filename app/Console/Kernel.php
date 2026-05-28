@@ -31,12 +31,18 @@ class Kernel extends ConsoleKernel
 
         if (config('erp.messages_auto_send_enabled', false)) {
             $limit = max(1, min(500, (int) config('erp.messages_auto_send_limit', 50)));
-            // Run as artisan command (not queued job) so schedule:work is not limited by queue:listen --timeout=60.
             $schedule->command('erp:send-sms-messages', ['--limit' => $limit])
                 ->everyFiveMinutes()
-                ->withoutOverlapping(15)
-                ->runInBackground();
+                ->withoutOverlapping(10)
+                ->appendOutputTo(storage_path('logs/erp-sms-scheduler.log'))
+                ->onFailure(function () {
+                    \Illuminate\Support\Facades\Log::error('Scheduled erp:send-sms-messages failed');
+                });
         }
+
+        $schedule->command('advanta:sync-delivery', ['--limit' => 100, '--hours' => 72])
+            ->everyTenMinutes()
+            ->withoutOverlapping(5);
     }
 
     /**
