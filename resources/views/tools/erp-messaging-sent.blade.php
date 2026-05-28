@@ -320,6 +320,12 @@
                                 'pending' => 'warning',
                                 default => 'secondary',
                             };
+                            $deliveryLabel = match ($deliveryState) {
+                                'delivered' => 'Delivered',
+                                'failed' => 'Failed',
+                                'pending' => 'Submitted',
+                                default => 'Unknown',
+                            };
                             $displayLabel = trim((string) ($message->advanta_status ?? '')) !== ''
                                 ? $message->advanta_status
                                 : $deliveryLabel;
@@ -332,11 +338,6 @@
                                 'read' => 'Read',
                                 'not_read' => 'Not read',
                                 default => 'N/A',
-                            };
-                            $deliveryLabel = match ($deliveryState) {
-                                'delivered' => 'Delivered',
-                                'pending' => 'Submitted',
-                                default => 'Unknown',
                             };
                             $searchBlob = strtolower(implode(' ', array_filter([
                                 $message->message_id,

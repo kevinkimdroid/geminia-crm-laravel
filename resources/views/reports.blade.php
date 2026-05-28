@@ -23,6 +23,7 @@
             <div class="d-flex flex-wrap gap-2">
                 <a href="{{ route('reports.export.all-excel') }}" class="btn btn-primary btn-sm"><i class="bi bi-file-earmark-spreadsheet me-1"></i>Export All (Excel)</a>
                 <a href="{{ route('reports.export.management-usage', ['date_from' => now()->startOfYear()->format('Y-m-d'), 'date_to' => now()->format('Y-m-d'), 'simple' => 1, 'format' => 'xlsx']) }}" class="btn btn-outline-secondary btn-sm"><i class="bi bi-download me-1"></i>Management Summary</a>
+                <a href="{{ route('reports.ticket-workload-performance') }}" class="btn btn-outline-secondary btn-sm"><i class="bi bi-table me-1"></i>Ticket Workload</a>
                 <a href="{{ route('reports.export.assignment-handlers', ['date_from' => now()->startOfMonth()->format('Y-m-d'), 'date_to' => now()->format('Y-m-d'), 'limit' => 50000, 'format' => 'xlsx']) }}" class="btn btn-outline-secondary btn-sm"><i class="bi bi-download me-1"></i>Assignment Handlers</a>
                 <a href="{{ route('reports.export.tickets-by-date', ['date_from' => now()->startOfMonth()->format('Y-m-d'), 'date_to' => now()->format('Y-m-d'), 'format' => 'xlsx']) }}" class="btn btn-outline-secondary btn-sm"><i class="bi bi-download me-1"></i>Tickets by Date</a>
             </div>
@@ -93,6 +94,20 @@
             </a>
         </div>
         <div class="col-lg-4">
+            <a href="{{ route('reports.ticket-workload-performance') }}" class="text-decoration-none">
+                <div class="card reports-audit-card h-100">
+                    <div class="card-body p-4">
+                        <div class="d-flex align-items-center justify-content-between mb-2">
+                            <span class="badge bg-primary bg-opacity-10 text-primary">Workload</span>
+                            <i class="bi bi-arrow-right text-muted"></i>
+                        </div>
+                        <h6 class="card-title mb-2">Ticket Workload Performance</h6>
+                        <p class="text-muted small mb-0">Work tickets handled + reassigned tickets received per user.</p>
+                    </div>
+                </div>
+            </a>
+        </div>
+        <div class="col-lg-4">
             <a href="{{ route('reports.ticket-automation-analysis') }}" class="text-decoration-none">
                 <div class="card reports-audit-card h-100">
                     <div class="card-body p-4">
@@ -154,6 +169,7 @@
         <a href="{{ route('reports.export.ticket-aging', ['format' => 'xlsx']) }}" class="btn btn-outline-primary btn-sm"><i class="bi bi-file-earmark-spreadsheet me-1"></i>Ticket Aging</a>
         <a href="{{ route('reports.export.tickets-by-date', array_merge(request()->only([]), ['date_from' => now()->startOfMonth()->format('Y-m-d'), 'date_to' => now()->format('Y-m-d'), 'format' => 'xlsx'])) }}" class="btn btn-outline-primary btn-sm"><i class="bi bi-file-earmark-spreadsheet me-1"></i>Tickets by date</a>
         <a href="{{ route('reports.export.reassignment-audit', ['format' => 'xlsx']) }}" class="btn btn-outline-primary btn-sm"><i class="bi bi-file-earmark-spreadsheet me-1"></i>Reassignment Audit</a>
+        <a href="{{ route('reports.export.ticket-workload-performance', ['date_from' => now()->startOfMonth()->format('Y-m-d'), 'date_to' => now()->format('Y-m-d'), 'target' => 200, 'format' => 'xlsx']) }}" class="btn btn-outline-primary btn-sm"><i class="bi bi-file-earmark-spreadsheet me-1"></i>Ticket Workload</a>
         <a href="{{ route('reports.bounced-emails') }}" class="btn btn-outline-primary btn-sm"><i class="bi bi-envelope-x me-1"></i>Bounced Emails (.xlsx)</a>
     </div>
 </div>

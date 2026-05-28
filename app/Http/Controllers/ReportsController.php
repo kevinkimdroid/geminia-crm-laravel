@@ -11,6 +11,8 @@ use App\Exports\ManagementUsageExport;
 use App\Exports\RealIssuesBacklogExport;
 use App\Exports\AssignmentHandlersExport;
 use App\Exports\BouncedEmailsExport;
+use App\Exports\TicketWorkloadPerformanceExport;
+use Carbon\Carbon;
 use App\Models\Ticket;
 use App\Models\TicketReassignment;
 use App\Models\VtigerUser;
@@ -209,6 +211,33 @@ class ReportsController
         $data = Cache::remember($cacheKey, 120, fn () => $crm->getManagementUsageReport($dateFrom, $dateTo));
 
         return view('reports.management-usage', $data);
+    }
+
+    public function ticketWorkloadPerformance(Request $request, UserDepartmentService $userDept): View
+    {
+        $dateFrom = (string) $request->get('date_from', now()->startOfMonth()->format('Y-m-d'));
+        $dateTo = (string) $request->get('date_to', now()->format('Y-m-d'));
+        if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateFrom)) {
+            $dateFrom = now()->startOfMonth()->format('Y-m-d');
+        }
+        if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateTo)) {
+            $dateTo = now()->format('Y-m-d');
+        }
+        if ($dateFrom > $dateTo) {
+            [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
+        }
+        // Management minimum per user per month.
+        $target = max(200, min(2000, (int) $request->get('target', 200)));
+        $dataset = $this->buildTicketWorkloadPerformanceDataset($dateFrom, $dateTo, $target, $userDept);
+
+        return view('reports.ticket-workload-performance', [
+            'rows' => $dataset['rows'],
+            'months' => $dataset['months'],
+            'dateFrom' => $dateFrom,
+            'dateTo' => $dateTo,
+            'target' => $target,
+            'summary' => $dataset['summary'],
+        ]);
     }
 
     public function ticketAutomationAnalysis(): View
@@ -431,6 +460,214 @@ class ReportsController
             ['Section', 'Subject', 'Metric', 'Value', 'Extra 1', 'Extra 2'],
             $filename
         );
+    }
+
+    public function exportTicketWorkloadPerformance(Request $request, UserDepartmentService $userDept)
+    {
+        $dateFrom = (string) $request->get('date_from', now()->startOfMonth()->format('Y-m-d'));
+        $dateTo = (string) $request->get('date_to', now()->format('Y-m-d'));
+        if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateFrom)) {
+            $dateFrom = now()->startOfMonth()->format('Y-m-d');
+        }
+        if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateTo)) {
+            $dateTo = now()->format('Y-m-d');
+        }
+        if ($dateFrom > $dateTo) {
+            [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
+        }
+        $target = max(200, min(2000, (int) $request->get('target', 200)));
+        $dataset = $this->buildTicketWorkloadPerformanceDataset($dateFrom, $dateTo, $target, $userDept);
+        $months = $dataset['months'];
+        $rows = $dataset['rows']->map(function ($row) use ($months) {
+            $line = [
+                (string) ($row->user_name ?? ''),
+                (string) ($row->department ?? ''),
+                (int) ($row->overall_normal ?? 0),
+                (int) ($row->overall_work ?? 0),
+            ];
+            foreach ($months as $month) {
+                $key = (string) ($month['key'] ?? '');
+                $line[] = (int) ($row->monthly[$key]['total'] ?? 0);
+                $line[] = (float) ($row->monthly[$key]['achievement'] ?? 0);
+            }
+            $line[] = (int) ($row->overall_total ?? 0);
+
+            return $line;
+        })->toArray();
+
+        $headings = ['User', 'Section', 'Normal Tickets', 'Work Tickets'];
+        foreach ($months as $month) {
+            $headings[] = (string) ($month['label'] ?? 'Month');
+            $headings[] = (string) ($month['label'] ?? 'Month') . ' %';
+        }
+        $headings[] = 'Total Worked';
+
+        $filename = 'ticket-workload-performance-' . $dateFrom . '-to-' . $dateTo;
+        if ($request->get('format') === 'csv') {
+            return $this->csvResponse(
+                $rows,
+                $headings,
+                $filename
+            );
+        }
+
+        return Excel::download(new TicketWorkloadPerformanceExport($rows, $headings), $filename . '.xlsx');
+    }
+
+    /**
+     * @return array{
+     *   months: array<int, array{key: string, label: string}>,
+     *   rows: \Illuminate\Support\Collection<int, object>,
+     *   summary: array<string, int>
+     * }
+     */
+    private function buildTicketWorkloadPerformanceDataset(string $dateFrom, string $dateTo, int $target, UserDepartmentService $userDept): array
+    {
+        $start = Carbon::parse($dateFrom)->startOfMonth();
+        $end = Carbon::parse($dateTo)->startOfMonth();
+        $months = [];
+        $cursor = $start->copy();
+        while ($cursor->lte($end)) {
+            $months[] = [
+                'key' => $cursor->format('Y-m'),
+                'label' => $cursor->format('M Y'),
+            ];
+            $cursor->addMonth();
+        }
+
+        $rangeStart = $dateFrom . ' 00:00:00';
+        $rangeEnd = $dateTo . ' 23:59:59';
+
+        $workAssignedRows = WorkTicket::query()
+            ->selectRaw("assignee_id as user_id, DATE_FORMAT(created_at, '%Y-%m') as ym, id as ticket_id")
+            ->whereBetween('created_at', [$rangeStart, $rangeEnd])
+            ->whereNotNull('assignee_id')
+            ->get();
+        $workWorkedRows = WorkTicketUpdate::query()
+            ->selectRaw("user_id, DATE_FORMAT(created_at, '%Y-%m') as ym, work_ticket_id as ticket_id")
+            ->whereBetween('created_at', [$rangeStart, $rangeEnd])
+            ->whereNotNull('user_id')
+            ->get();
+        $normalAssignedRows = DB::connection('vtiger')
+            ->table('vtiger_troubletickets as t')
+            ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
+            ->where('e.deleted', 0)
+            ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
+            ->whereBetween('e.createdtime', [$rangeStart, $rangeEnd])
+            ->whereNotNull('e.smownerid')
+            ->selectRaw("e.smownerid as user_id, DATE_FORMAT(e.createdtime, '%Y-%m') as ym, t.ticketid as ticket_id")
+            ->get();
+        $normalReassignedRows = TicketReassignment::query()
+            ->selectRaw("to_user_id as user_id, DATE_FORMAT(created_at, '%Y-%m') as ym, ticket_id")
+            ->whereBetween('created_at', [$rangeStart, $rangeEnd])
+            ->whereNotNull('to_user_id')
+            ->get();
+
+        $userIds = collect()
+            ->merge($workAssignedRows->pluck('user_id'))
+            ->merge($workWorkedRows->pluck('user_id'))
+            ->merge($normalAssignedRows->pluck('user_id'))
+            ->merge($normalReassignedRows->pluck('user_id'))
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+
+        $users = empty($userIds)
+            ? collect()
+            : VtigerUser::on('vtiger')
+                ->whereIn('id', $userIds)
+                ->get()
+                ->mapWithKeys(fn (VtigerUser $u) => [(int) $u->id => $u->full_name]);
+        $departments = $userDept->getDepartmentsForUsers($userIds);
+
+        $monthlyBuckets = [];
+        $overallNormalByUser = [];
+        $overallWorkByUser = [];
+
+        $addInvolvement = function (int $userId, string $monthKey, string $ticketKey, string $module) use (&$monthlyBuckets, &$overallNormalByUser, &$overallWorkByUser): void {
+            if ($userId <= 0 || $monthKey === '' || $ticketKey === '') {
+                return;
+            }
+            $bucketKey = $userId . '|' . $monthKey;
+            if (! isset($monthlyBuckets[$bucketKey])) {
+                $monthlyBuckets[$bucketKey] = [
+                    'all' => [],
+                    'normal' => [],
+                    'work' => [],
+                ];
+            }
+            $monthlyBuckets[$bucketKey]['all'][$ticketKey] = true;
+            $monthlyBuckets[$bucketKey][$module][$ticketKey] = true;
+
+            if ($module === 'normal') {
+                if (! isset($overallNormalByUser[$userId])) {
+                    $overallNormalByUser[$userId] = [];
+                }
+                $overallNormalByUser[$userId][$ticketKey] = true;
+            }
+            if ($module === 'work') {
+                if (! isset($overallWorkByUser[$userId])) {
+                    $overallWorkByUser[$userId] = [];
+                }
+                $overallWorkByUser[$userId][$ticketKey] = true;
+            }
+        };
+
+        foreach ($workAssignedRows as $row) {
+            $addInvolvement((int) ($row->user_id ?? 0), (string) ($row->ym ?? ''), 'W-' . (string) ($row->ticket_id ?? ''), 'work');
+        }
+        foreach ($workWorkedRows as $row) {
+            $addInvolvement((int) ($row->user_id ?? 0), (string) ($row->ym ?? ''), 'W-' . (string) ($row->ticket_id ?? ''), 'work');
+        }
+        foreach ($normalAssignedRows as $row) {
+            $addInvolvement((int) ($row->user_id ?? 0), (string) ($row->ym ?? ''), 'N-' . (string) ($row->ticket_id ?? ''), 'normal');
+        }
+        foreach ($normalReassignedRows as $row) {
+            $addInvolvement((int) ($row->user_id ?? 0), (string) ($row->ym ?? ''), 'N-' . (string) ($row->ticket_id ?? ''), 'normal');
+        }
+
+        $rows = collect($userIds)->map(function (int $userId) use ($months, $target, $users, $departments, $monthlyBuckets, $overallNormalByUser, $overallWorkByUser) {
+            $monthly = [];
+            $overall = 0;
+            foreach ($months as $month) {
+                $key = $month['key'];
+                $lookup = $userId . '|' . $key;
+                $bucket = $monthlyBuckets[$lookup] ?? ['all' => [], 'normal' => [], 'work' => []];
+                $normal = count($bucket['normal']);
+                $work = count($bucket['work']);
+                $total = count($bucket['all']);
+                $overall += $total;
+                $monthly[$key] = [
+                    'normal' => $normal,
+                    'work' => $work,
+                    'total' => $total,
+                    'achievement' => round(($total / $target) * 100, 1),
+                ];
+            }
+
+            return (object) [
+                'user_id' => $userId,
+                'user_name' => (string) ($users[$userId] ?? ('User #' . $userId)),
+                'department' => (string) ($departments[$userId] ?? ''),
+                'overall_normal' => count($overallNormalByUser[$userId] ?? []),
+                'overall_work' => count($overallWorkByUser[$userId] ?? []),
+                'monthly' => $monthly,
+                'overall_total' => $overall,
+            ];
+        })->sortByDesc('overall_total')->values();
+
+        return [
+            'months' => $months,
+            'rows' => $rows,
+            'summary' => [
+                'users' => $rows->count(),
+                'total_normal' => (int) $rows->sum('overall_normal'),
+                'total_work' => (int) $rows->sum('overall_work'),
+                'total_worked' => (int) $rows->sum('overall_total'),
+            ],
+        ];
     }
 
     public function exportTicketAutomationAnalysis(Request $request)
