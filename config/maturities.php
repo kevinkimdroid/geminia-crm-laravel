@@ -16,6 +16,10 @@ return [
             'trim',
             explode(',', (string) env('INVESTMENT_MATURITY_NOTIFY_CC', 'kelvin.kimutai@geminialife.co.ke,caroline.njogu@geminialife.co.ke'))
         ))),
+        'products' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('INVESTMENT_MATURITY_PRODUCTS', ''))
+        ))),
         'days' => max(1, min(30, (int) env('INVESTMENT_MATURITY_NOTIFY_DAYS', 14))),
     ],
 

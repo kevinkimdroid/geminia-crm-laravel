@@ -3,36 +3,29 @@
 namespace App\Services;
 
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 class InvestmentMaturityService
 {
+    public function __construct(protected ErpClientService $erpClientService) {}
+
     /**
      * @return Collection<int, object>
      */
     public function dueWithinDays(int $days = 14): Collection
     {
         $days = max(1, min(90, $days));
-        $today = now()->startOfDay()->toDateString();
-        $toDate = now()->startOfDay()->addDays($days)->toDateString();
+        $cacheKey = 'investment_maturities_due_' . $days;
 
-        $rows = DB::connection('erp')->select(
-            "SELECT
-                p.pol_policy_no,
-                p.pol_maturity_date,
-                r.prp_surname || ' ' || r.prp_other_names AS full_name,
-                d.prod_desc AS product
-             FROM lms_policies p
-             JOIN lms_proposers r ON r.prp_code = p.pol_prp_code
-             JOIN lms_products d ON d.prod_code = p.pol_prod_code
-             WHERE d.prod_code IN (2024608, 2025615, 2025621)
-               AND TRUNC(p.pol_maturity_date) BETWEEN TO_DATE(?, 'YYYY-MM-DD') AND TO_DATE(?, 'YYYY-MM-DD')
-             ORDER BY p.pol_maturity_date ASC, p.pol_policy_no ASC",
-            [$today, $toDate]
-        );
+        return Cache::remember($cacheKey, now()->addMinutes(5), function () use ($days) {
+            if ($this->canUseDirectOracle()) {
+                return $this->dueWithinDaysOracle($days);
+            }
 
-        return collect($rows);
+            return $this->dueWithinDaysHttp($days);
+        });
     }
 
     public function notificationsTableExists(): bool
@@ -155,6 +148,141 @@ class InvestmentMaturityService
     private function notificationKey(string $policyNo, string $maturityDate): string
     {
         return trim($policyNo) . '|' . trim($maturityDate);
+    }
+
+    private function canUseDirectOracle(): bool
+    {
+        return extension_loaded('oci8') && function_exists('oci_connect');
+    }
+
+    /**
+     * @return Collection<int, object>
+     */
+    private function dueWithinDaysOracle(int $days): Collection
+    {
+        $today = now()->startOfDay()->toDateString();
+        $toDate = now()->startOfDay()->addDays($days)->toDateString();
+
+        $rows = DB::connection('erp')->select(
+            "SELECT
+                p.pol_policy_no,
+                p.pol_maturity_date,
+                r.prp_surname || ' ' || r.prp_other_names AS full_name,
+                d.prod_desc AS product
+             FROM lms_policies p
+             JOIN lms_proposers r ON r.prp_code = p.pol_prp_code
+             JOIN lms_products d ON d.prod_code = p.pol_prod_code
+             WHERE d.prod_code IN (2024608, 2025615, 2025621)
+               AND TRUNC(p.pol_maturity_date) BETWEEN TO_DATE(?, 'YYYY-MM-DD') AND TO_DATE(?, 'YYYY-MM-DD')
+             ORDER BY p.pol_maturity_date ASC, p.pol_policy_no ASC",
+            [$today, $toDate]
+        );
+
+        return collect($rows);
+    }
+
+    /**
+     * HTTP fallback when PHP OCI8 is unavailable on the web server.
+     *
+     * @return Collection<int, object>
+     */
+    private function dueWithinDaysHttp(int $days): Collection
+    {
+        $from = now()->startOfDay()->toDateString();
+        $to = now()->startOfDay()->addDays($days)->toDateString();
+
+        // Fast path: use dedicated maturities endpoint.
+        $result = $this->erpClientService->getMaturingPoliciesFromHttpApi($from, $to, null);
+        if (empty($result['error'])) {
+            return $this->mapAndFilterRows(collect((array) ($result['data'] ?? [])), $from, $to);
+        }
+
+        // Fallback path: pull clients in batches and filter locally.
+        // Keep strict caps to protect request latency.
+        $all = collect();
+        $limit = 100;
+        $maxBatches = 20;
+
+        for ($offset = 0; $offset < $maxBatches * $limit; $offset += $limit) {
+            $res = $this->erpClientService->getClientsFromHttpApi($limit, $offset, null, 30, false, 'individual');
+            if (! empty($res['error'])) {
+                break;
+            }
+
+            $chunk = $res['data'] instanceof Collection
+                ? $res['data']
+                : collect((array) ($res['data'] ?? []));
+
+            if ($chunk->isEmpty()) {
+                break;
+            }
+
+            $all = $all->merge($chunk);
+
+            if ($chunk->count() < $limit) {
+                break;
+            }
+        }
+
+        return $this->mapAndFilterRows($all, $from, $to);
+    }
+
+    /**
+     * @param  Collection<int, mixed>  $rawRows
+     * @return Collection<int, object>
+     */
+    private function mapAndFilterRows(Collection $rawRows, string $from, string $to): Collection
+    {
+        /** @var array<int, string> $allowedProducts */
+        $allowedProducts = array_values(array_filter(array_map(
+            fn ($v) => trim((string) $v),
+            (array) config('maturities.investment_notifications.products', [])
+        )));
+        $allowedMap = [];
+        foreach ($allowedProducts as $product) {
+            $allowedMap[strtolower($product)] = true;
+        }
+
+        $rows = $rawRows->map(function ($row) {
+            $r = is_array($row) ? (object) $row : $row;
+
+            return (object) [
+                'pol_policy_no' => $r->policy_number ?? $r->policy_no ?? null,
+                'pol_maturity_date' => $r->maturity ?? $r->maturity_date ?? null,
+                'full_name' => $r->life_assured ?? $r->life_assur ?? null,
+                'product' => $r->product ?? null,
+            ];
+        });
+
+        $rows = $rows->filter(function ($row) use ($from, $to, $allowedMap) {
+            $m = trim((string) ($row->pol_maturity_date ?? ''));
+            if ($m === '') {
+                return false;
+            }
+            try {
+                $maturityDate = \Carbon\Carbon::parse($m)->toDateString();
+            } catch (\Throwable) {
+                return false;
+            }
+            if ($maturityDate < $from || $maturityDate > $to) {
+                return false;
+            }
+
+            if ($allowedMap !== []) {
+                $product = strtolower(trim((string) ($row->product ?? '')));
+
+                return $product !== '' && isset($allowedMap[$product]);
+            }
+
+            return true;
+        })->values();
+
+        return $rows
+            ->sortBy([
+                ['pol_maturity_date', 'asc'],
+                ['pol_policy_no', 'asc'],
+            ])
+            ->values();
     }
 }
 

@@ -170,7 +170,7 @@ class TicketSlaService
 
     /**
      * Get tickets that have broken SLA (exceeded TAT).
-     * Returns open tickets past TAT, and closed tickets that were closed after TAT.
+     * Only active (not closed/resolved) tickets are considered violations.
      */
     public function getBrokenSlaTickets(int $limit = 100): \Illuminate\Support\Collection
     {
@@ -183,6 +183,7 @@ class TicketSlaService
             ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
             ->whereNotNull('t.contact_id')
             ->where('t.contact_id', '>', 0)
+            ->whereRaw("LOWER(TRIM(COALESCE(t.status, ''))) NOT IN ('closed', 'resolved')")
             ->select(
                 't.ticketid',
                 't.title',
@@ -208,20 +209,14 @@ class TicketSlaService
             $tatHours = $this->getTatForDepartment($department);
             $created = \Carbon\Carbon::parse($t->createdtime);
             $dueAt = $created->copy()->addHours($tatHours);
-
-            $resolvedAt = $t->status === 'Closed' ? \Carbon\Carbon::parse($t->modifiedtime) : null;
-            $isBreached = $resolvedAt
-                ? $resolvedAt->gt($dueAt)
-                : now()->gt($dueAt);
+            $isBreached = now()->gt($dueAt);
 
             if ($isBreached) {
                 $broken->push((object) array_merge((array) $t, [
                     'tat_hours' => $tatHours,
                     'due_at' => $dueAt,
-                    'breached_at' => $resolvedAt ?? now(),
-                    'hours_overdue' => $resolvedAt
-                        ? $resolvedAt->diffInHours($dueAt)
-                        : now()->diffInHours($dueAt),
+                    'breached_at' => now(),
+                    'hours_overdue' => now()->diffInHours($dueAt),
                 ]));
                 if ($broken->count() >= $limit) {
                     break;
