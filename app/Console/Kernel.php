@@ -16,7 +16,7 @@ class Kernel extends ConsoleKernel
         $schedule->command('tickets:create-maturity-reminders')->dailyAt('08:00');
         $schedule->command('tickets:sla-violation-reminders')->hourly();
         $schedule->command('maturities:notify-investment')
-            ->weekdays()
+            ->daily()
             ->dailyAt('07:45')
             ->withoutOverlapping(10)
             ->appendOutputTo(storage_path('logs/investment-maturities.log'));

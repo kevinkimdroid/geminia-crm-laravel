@@ -16,6 +16,12 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        // Some server OCI8 builds (or OCI8-missing CLI/FPM mismatch) do not expose OCI_DEFAULT,
+        // but yajra/pdo-via-oci8 still references it. Define a safe fallback to prevent fatals.
+        if (! defined('OCI_DEFAULT')) {
+            define('OCI_DEFAULT', 0);
+        }
+
         require_once app_path('helpers.php');
     }
 
