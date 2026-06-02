@@ -478,29 +478,44 @@ class ReportsController
         $target = max(200, min(2000, (int) $request->get('target', 200)));
         $dataset = $this->buildTicketWorkloadPerformanceDataset($dateFrom, $dateTo, $target, $userDept);
         $months = $dataset['months'];
+        // Total Worked sits right after the Normal/Work counts so it is always visible.
+        $headings = ['User', 'Section', 'Normal Tickets', 'Work Tickets', 'Total Worked'];
+        foreach ($months as $month) {
+            $headings[] = (string) ($month['label'] ?? 'Month');
+            $headings[] = (string) ($month['label'] ?? 'Month') . ' %';
+        }
+
         $rows = $dataset['rows']->map(function ($row) use ($months) {
             $line = [
                 (string) ($row->user_name ?? ''),
                 (string) ($row->department ?? ''),
                 (int) ($row->overall_normal ?? 0),
                 (int) ($row->overall_work ?? 0),
+                (int) ($row->overall_total ?? 0),
             ];
             foreach ($months as $month) {
                 $key = (string) ($month['key'] ?? '');
                 $line[] = (int) ($row->monthly[$key]['total'] ?? 0);
                 $line[] = (float) ($row->monthly[$key]['achievement'] ?? 0);
             }
-            $line[] = (int) ($row->overall_total ?? 0);
 
             return $line;
-        })->toArray();
+        })->values()->toArray();
 
-        $headings = ['User', 'Section', 'Normal Tickets', 'Work Tickets'];
+        // Grand totals row across all users.
+        $totalsRow = [
+            'TOTAL (' . $dataset['rows']->count() . ' users)',
+            '',
+            (int) $dataset['rows']->sum('overall_normal'),
+            (int) $dataset['rows']->sum('overall_work'),
+            (int) $dataset['rows']->sum('overall_total'),
+        ];
         foreach ($months as $month) {
-            $headings[] = (string) ($month['label'] ?? 'Month');
-            $headings[] = (string) ($month['label'] ?? 'Month') . ' %';
+            $key = (string) ($month['key'] ?? '');
+            $totalsRow[] = (int) $dataset['rows']->sum(fn ($r) => (int) ($r->monthly[$key]['total'] ?? 0));
+            $totalsRow[] = '';
         }
-        $headings[] = 'Total Worked';
+        $rows[] = $totalsRow;
 
         $filename = 'ticket-workload-performance-' . $dateFrom . '-to-' . $dateTo;
         if ($request->get('format') === 'csv') {
@@ -628,22 +643,38 @@ class ReportsController
             $addInvolvement((int) ($row->user_id ?? 0), (string) ($row->ym ?? ''), 'N-' . (string) ($row->ticket_id ?? ''), 'normal');
         }
 
-        $rows = collect($userIds)->map(function (int $userId) use ($months, $target, $users, $departments, $monthlyBuckets, $overallNormalByUser, $overallWorkByUser) {
+        $monthCount = max(1, count($months));
+
+        $rows = collect($userIds)->map(function (int $userId) use ($months, $monthCount, $target, $users, $departments, $monthlyBuckets) {
             $monthly = [];
             $overall = 0;
+            $normalSum = 0;
+            $workSum = 0;
+            $monthsMet = 0;
+            $bestMonthTotal = 0;
             foreach ($months as $month) {
                 $key = $month['key'];
                 $lookup = $userId . '|' . $key;
                 $bucket = $monthlyBuckets[$lookup] ?? ['all' => [], 'normal' => [], 'work' => []];
                 $normal = count($bucket['normal']);
                 $work = count($bucket['work']);
-                $total = count($bucket['all']);
+                // Within a month, normal/work keys are disjoint, so normal + work == total.
+                $total = $normal + $work;
                 $overall += $total;
+                $normalSum += $normal;
+                $workSum += $work;
+                if ($total >= $target) {
+                    $monthsMet++;
+                }
+                if ($total > $bestMonthTotal) {
+                    $bestMonthTotal = $total;
+                }
                 $monthly[$key] = [
                     'normal' => $normal,
                     'work' => $work,
                     'total' => $total,
                     'achievement' => round(($total / $target) * 100, 1),
+                    'met' => $total >= $target,
                 ];
             }
 
@@ -651,21 +682,53 @@ class ReportsController
                 'user_id' => $userId,
                 'user_name' => (string) ($users[$userId] ?? ('User #' . $userId)),
                 'department' => (string) ($departments[$userId] ?? ''),
-                'overall_normal' => count($overallNormalByUser[$userId] ?? []),
-                'overall_work' => count($overallWorkByUser[$userId] ?? []),
+                // Sum of monthly counts so Normal + Work == Total (and months sum to Total).
+                'overall_normal' => $normalSum,
+                'overall_work' => $workSum,
                 'monthly' => $monthly,
                 'overall_total' => $overall,
+                'months_met' => $monthsMet,
+                'months_total' => $monthCount,
+                'consistency_percent' => round(($monthsMet / $monthCount) * 100, 1),
+                'avg_per_month' => round($overall / $monthCount, 1),
+                'best_month_total' => $bestMonthTotal,
             ];
         })->sortByDesc('overall_total')->values();
+
+        // Aggregate monthly trend across the whole team for the trend chart.
+        $monthlyTrend = [];
+        foreach ($months as $month) {
+            $key = $month['key'];
+            $monthlyTrend[] = [
+                'label' => $month['label'],
+                'total' => (int) $rows->sum(fn ($r) => (int) ($r->monthly[$key]['total'] ?? 0)),
+                'met_users' => (int) $rows->sum(fn ($r) => ! empty($r->monthly[$key]['met']) ? 1 : 0),
+            ];
+        }
+
+        // A user is "compliant" if they met target in every month of the range.
+        $fullyCompliant = $rows->filter(fn ($r) => $r->months_met >= $monthCount)->count();
+        $usersCount = $rows->count();
 
         return [
             'months' => $months,
             'rows' => $rows,
             'summary' => [
-                'users' => $rows->count(),
+                'users' => $usersCount,
                 'total_normal' => (int) $rows->sum('overall_normal'),
                 'total_work' => (int) $rows->sum('overall_work'),
                 'total_worked' => (int) $rows->sum('overall_total'),
+                'fully_compliant' => $fullyCompliant,
+                'compliance_rate' => $usersCount > 0 ? round(($fullyCompliant / $usersCount) * 100, 1) : 0,
+                'avg_per_user_month' => ($usersCount > 0 && $monthCount > 0)
+                    ? round($rows->sum('overall_total') / ($usersCount * $monthCount), 1)
+                    : 0,
+                'months_total' => $monthCount,
+                'monthly_trend' => $monthlyTrend,
+                'top_performers' => $rows->take(10)->map(fn ($r) => [
+                    'name' => $r->user_name,
+                    'total' => (int) $r->overall_total,
+                ])->values()->all(),
             ],
         ];
     }

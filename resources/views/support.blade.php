@@ -8,6 +8,16 @@
     <p class="page-subtitle">Customer support and help desk.</p>
 </div>
 
+<div class="alert border-0 shadow-sm d-flex flex-wrap align-items-center justify-content-between gap-3 mb-4" style="background:var(--geminia-primary-muted);">
+    <div>
+        <p class="mb-1 fw-semibold text-dark">New: Investment maturities</p>
+        <p class="mb-0 text-muted small">View policies maturing in the next 14 days and send one-time notifications (sent rows are tracked).</p>
+    </div>
+    <a href="{{ route('support.investment-maturities') }}" class="btn btn-primary btn-sm d-inline-flex align-items-center gap-1">
+        <i class="bi bi-piggy-bank"></i> Open investment maturities
+    </a>
+</div>
+
 <div class="row g-4 mb-4">
     <div class="col-6 col-lg-3">
         <div class="card support-stat-card h-100">
@@ -51,6 +61,10 @@
 <p class="mb-4">
     <a href="{{ route('support.mortgage-renewals') }}" class="text-decoration-none fw-semibold"><i class="bi bi-house-heart me-1"></i>Due for renewal (mortgage)</a>
     <span class="text-muted small"> — Renewal dates due within the next 30 days (change the period on that page).</span>
+</p>
+<p class="mb-4">
+    <a href="{{ route('support.investment-maturities') }}" class="text-decoration-none fw-semibold"><i class="bi bi-piggy-bank me-1"></i>Investment maturities (next 14 days)</a>
+    <span class="text-muted small"> — Shows email sent/not sent status and sends one notification email per policy.</span>
 </p>
 <div class="row g-4">
     <div class="col-md-6 col-lg-4">
@@ -136,6 +150,18 @@
                 <div>
                     <h6 class="mb-1 fw-semibold">Maturities</h6>
                     <p class="text-muted small mb-0">Policies maturing soon → Create tickets</p>
+                </div>
+                <i class="bi bi-chevron-right ms-auto text-primary"></i>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-6 col-lg-4">
+        <a href="{{ route('support.investment-maturities') }}" class="card support-quick-card text-decoration-none h-100" style="border-color:var(--geminia-primary);">
+            <div class="card-body d-flex align-items-center gap-3">
+                <div class="support-quick-icon" style="background:rgba(14,67,133,0.15)"><i class="bi bi-piggy-bank-fill"></i></div>
+                <div>
+                    <h6 class="mb-1 fw-semibold">Investment maturities</h6>
+                    <p class="text-muted small mb-0">Next 14 days → email once → track sent rows</p>
                 </div>
                 <i class="bi bi-chevron-right ms-auto text-primary"></i>
             </div>

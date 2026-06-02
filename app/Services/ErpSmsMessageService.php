@@ -811,7 +811,9 @@ class ErpSmsMessageService
 
     private function isValidKenyanMobile(string $phone): bool
     {
-        return preg_match('/^2547\d{8}$/', $phone) === 1;
+        // Kenyan mobiles use the 2547XXXXXXXX and 2541XXXXXXXX ranges
+        // (07.. and 01.. prefixes — Safaricom/Airtel/Telkom). Landlines (e.g. 2542..) are not valid for SMS.
+        return preg_match('/^254[17]\d{8}$/', $phone) === 1;
     }
 
     private function markAsFailed(string $messageId): bool

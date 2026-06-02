@@ -15,6 +15,11 @@ class Kernel extends ConsoleKernel
         $schedule->command('maturities:sync')->dailyAt('06:00');
         $schedule->command('tickets:create-maturity-reminders')->dailyAt('08:00');
         $schedule->command('tickets:sla-violation-reminders')->hourly();
+        $schedule->command('maturities:notify-investment')
+            ->weekdays()
+            ->dailyAt('07:45')
+            ->withoutOverlapping(10)
+            ->appendOutputTo(storage_path('logs/investment-maturities.log'));
 
         if (filter_var(env('PBX_CDR_SYNC_ENABLED', true), FILTER_VALIDATE_BOOLEAN)) {
             $schedule->command('pbx:sync-cdr --minutes=30 --limit=500')->everyMinute();

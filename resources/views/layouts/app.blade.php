@@ -369,6 +369,7 @@
                     @endif
                     @if($can('tickets'))
                     <a href="{{ route('support.maturities') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('support.maturities') ? 'active' : '' }}"><i class="bi bi-calendar-event"></i><span>Maturities</span></a>
+                    <a href="{{ route('support.investment-maturities') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('support.investment-maturities*') ? 'active' : '' }}"><i class="bi bi-piggy-bank"></i><span>Investment maturities</span></a>
                     <a href="{{ route('support.mortgage-renewals') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('support.mortgage-renewals') ? 'active' : '' }}"><i class="bi bi-house-heart"></i><span>Due for renewal (mortgage)</span></a>
                     @endif
                     @if($can('compliance.complaints'))

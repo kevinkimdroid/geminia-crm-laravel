@@ -10,4 +10,13 @@ return [
         'extra_paragraph' => env('DISCHARGE_VOUCHER_EXTRA', ''),
     ],
 
+    'investment_notifications' => [
+        'to' => env('INVESTMENT_MATURITY_NOTIFY_TO', 'douglas.nyakwara@geminialife.co.ke'),
+        'cc' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('INVESTMENT_MATURITY_NOTIFY_CC', 'kelvin.kimutai@geminialife.co.ke,caroline.njogu@geminialife.co.ke'))
+        ))),
+        'days' => max(1, min(30, (int) env('INVESTMENT_MATURITY_NOTIFY_DAYS', 14))),
+    ],
+
 ];

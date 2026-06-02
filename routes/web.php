@@ -118,6 +118,8 @@ Route::get('/support/serve-client/search', [\App\Http\Controllers\ServeClientCon
 Route::post('/support/serve-client/create-ticket', [\App\Http\Controllers\ServeClientController::class, 'createTicket'])->name('serve-client.create-ticket');
 Route::get('/support/faq', fn () => view('support.faq'))->name('support.faq');
 Route::get('/support/maturities', [\App\Http\Controllers\MaturitiesController::class, 'index'])->name('support.maturities');
+Route::get('/support/investment-maturities', [\App\Http\Controllers\InvestmentMaturitiesController::class, 'index'])->name('support.investment-maturities');
+Route::post('/support/investment-maturities/send', [\App\Http\Controllers\InvestmentMaturitiesController::class, 'send'])->name('support.investment-maturities.send');
 Route::get('/support/mortgage-renewals', [\App\Http\Controllers\MortgageRenewalController::class, 'index'])->name('support.mortgage-renewals');
 Route::get('/support/mortgage-renewals/export', [\App\Http\Controllers\MortgageRenewalController::class, 'export'])->name('support.mortgage-renewals.export');
 Route::post('/support/maturities/renewal-status', [\App\Http\Controllers\MaturitiesController::class, 'updateRenewalStatus'])->name('support.maturities.renewal-status');
