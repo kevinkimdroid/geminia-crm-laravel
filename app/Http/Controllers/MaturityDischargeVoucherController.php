@@ -80,21 +80,38 @@ class MaturityDischargeVoucherController extends Controller
         $maturityCarbon = \Carbon\Carbon::parse($maturityInput)->startOfDay();
         $maturityIso = $maturityCarbon->format('Y-m-d');
 
-        $row = $erp->getPolicyDetails($policyNumber);
-        if ($row !== null) {
-            $rowMaturity = $row['maturity'] ?? $row['maturity_date'] ?? null;
+        // The maturities report lists partial/full maturity events (PPM_EXPECTED_DATE), which can
+        // legitimately differ from the policy's final maturity date (POL_MATURITY_DATE). So the
+        // local maturities cache is the source of truth for the (policy, maturity-event) pair; the
+        // live ERP policy record is used only to enrich the remaining voucher fields. The strict
+        // maturity match is kept only for ad-hoc policies that are NOT in the maturities report.
+        $cacheRow = $this->findMaturityInLocalCaches($policyNumber, $maturityIso);
+        $erpRow = $erp->getPolicyDetails($policyNumber);
+
+        if ($cacheRow === null && $erpRow === null) {
+            abort(404, 'Policy not found. Check the policy number or sync maturities / ERP.');
+        }
+
+        if ($cacheRow === null && $erpRow !== null) {
+            $rowMaturity = $erpRow['maturity'] ?? $erpRow['maturity_date'] ?? null;
             if ($rowMaturity) {
                 $rowMat = \Carbon\Carbon::parse($rowMaturity)->format('Y-m-d');
                 if ($rowMat !== $maturityIso) {
                     abort(422, 'Maturity date does not match policy record in ERP. Expected '.$rowMat.' for this policy.');
                 }
             }
-        } else {
-            $cacheRow = $this->findMaturityInLocalCaches($policyNumber, $maturityIso);
-            if (! $cacheRow) {
-                abort(404, 'Policy not found. Check the policy number or sync maturities / ERP.');
+        }
+
+        // Build the working row: prefer live ERP fields, fall back to cached values for anything
+        // the ERP lookup did not supply (or when ERP has no record for this policy at all).
+        $row = is_array($erpRow) ? $erpRow : ($erpRow !== null ? (array) $erpRow : []);
+        if ($cacheRow !== null) {
+            $cacheArr = is_array($cacheRow) ? $cacheRow : (array) $cacheRow;
+            foreach ($cacheArr as $k => $v) {
+                if (! array_key_exists($k, $row) || $row[$k] === null || $row[$k] === '') {
+                    $row[$k] = $v;
+                }
             }
-            $row = is_array($cacheRow) ? $cacheRow : (array) $cacheRow;
         }
 
         $life = trim((string) ($row['life_assured'] ?? $row['life_assur'] ?? $row['name'] ?? ''));
