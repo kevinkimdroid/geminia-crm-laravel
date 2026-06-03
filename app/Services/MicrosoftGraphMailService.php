@@ -111,7 +111,8 @@ class MicrosoftGraphMailService
         $url = sprintf(self::TOKEN_URL, $tenant);
 
         $response = Http::asForm()
-            ->timeout(15)
+            ->withOptions(['connect_timeout' => 5])
+            ->timeout(8)
             ->post($url, [
                 'client_id' => config('microsoft-graph.client_id'),
                 'client_secret' => config('microsoft-graph.client_secret'),
@@ -249,7 +250,8 @@ class MicrosoftGraphMailService
         $payload = ['message' => $message];
 
         $response = Http::withToken($token)
-            ->timeout(30)
+            ->withOptions(['connect_timeout' => 5])
+            ->timeout(12)
             ->post($url, $payload);
 
         if (! $response->successful()) {

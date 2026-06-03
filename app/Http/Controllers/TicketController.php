@@ -375,22 +375,28 @@ class TicketController extends Controller
             $this->forgetTicketListCaches();
             \App\Events\DashboardStatsUpdated::dispatch();
 
-            try {
-                $notifyPolicy = trim($validated['policy_number'] ?? '');
-                $notifyPolicy = ($notifyPolicy !== '' && ! looks_like_kra_pin($notifyPolicy)) ? $notifyPolicy : null;
-                app(\App\Services\TicketNotificationService::class)->sendTicketCreatedNotification(
-                    $id,
-                    'TT' . $id,
-                    $validated['title'],
-                    $ownerId,
-                    (int) $validated['contact_id'],
-                    $notifyPolicy,
-                    $request->boolean('send_email_to_client'),
-                    trim($validated['client_email_message'] ?? '') ?: null
-                );
-            } catch (\Throwable $e) {
-                \Illuminate\Support\Facades\Log::warning('Ticket creation notification failed', ['error' => $e->getMessage()]);
-            }
+            $notifyPolicy = trim($validated['policy_number'] ?? '');
+            $notifyPolicy = ($notifyPolicy !== '' && ! looks_like_kra_pin($notifyPolicy)) ? $notifyPolicy : null;
+            $notifyTitle = $validated['title'];
+            $notifyContactId = (int) $validated['contact_id'];
+            $notifySendClient = $request->boolean('send_email_to_client');
+            $notifyClientMsg = trim($validated['client_email_message'] ?? '') ?: null;
+            dispatch(function () use ($id, $notifyTitle, $ownerId, $notifyContactId, $notifyPolicy, $notifySendClient, $notifyClientMsg) {
+                try {
+                    app(\App\Services\TicketNotificationService::class)->sendTicketCreatedNotification(
+                        $id,
+                        'TT' . $id,
+                        $notifyTitle,
+                        $ownerId,
+                        $notifyContactId,
+                        $notifyPolicy,
+                        $notifySendClient,
+                        $notifyClientMsg
+                    );
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning('Ticket creation notification failed', ['error' => $e->getMessage()]);
+                }
+            })->afterResponse();
 
             if ($request->filled('return_to_mail_manager') && $request->filled('email_id')) {
                 \DB::connection('vtiger')->table('mail_manager_emails')->where('id', (int) $request->get('email_id'))->update(['ticket_id' => $id]);
@@ -624,12 +630,14 @@ class TicketController extends Controller
 
             $contactId = (int) ($ticketObj->contact_id ?? 0);
             if ($contactId) {
-                try {
-                    $ticketNo = $ticketObj->ticket_no ?? 'TT' . $ticket;
-                    app(\App\Services\TicketNotificationService::class)->sendFeedbackRequestEmail($ticket, $ticketNo, $contactId);
-                } catch (\Throwable $e) {
-                    \Illuminate\Support\Facades\Log::warning('Feedback request email failed', ['error' => $e->getMessage(), 'ticket' => $ticket]);
-                }
+                $ticketNo = $ticketObj->ticket_no ?? 'TT' . $ticket;
+                dispatch(function () use ($ticket, $ticketNo, $contactId) {
+                    try {
+                        app(\App\Services\TicketNotificationService::class)->sendFeedbackRequestEmail($ticket, $ticketNo, $contactId);
+                    } catch (\Throwable $e) {
+                        \Illuminate\Support\Facades\Log::warning('Feedback request email failed', ['error' => $e->getMessage(), 'ticket' => $ticket]);
+                    }
+                })->afterResponse();
             }
 
             $redirect = $request->get('redirect');
@@ -751,27 +759,33 @@ class TicketController extends Controller
             $prevOwnerId = (int) ($ticket->smownerid ?? 0);
             if ($newOwnerId !== null && $prevOwnerId !== $newOwnerId) {
                 $this->logTicketReassignment($id, $prevOwnerId, $newOwnerId, $userId);
-                try {
-                    app(\App\Services\TicketNotificationService::class)->sendTicketAssignedNotification(
-                        $id,
-                        $ticket->ticket_no ?? 'TT' . $id,
-                        $validated['title'],
-                        $newOwnerId
-                    );
-                } catch (\Throwable $e) {
-                    \Illuminate\Support\Facades\Log::warning('Ticket reassignment notification failed', ['error' => $e->getMessage(), 'ticket' => $id]);
-                }
+                $assignTicketNo = $ticket->ticket_no ?? 'TT' . $id;
+                $assignTitle = $validated['title'];
+                dispatch(function () use ($id, $assignTicketNo, $assignTitle, $newOwnerId) {
+                    try {
+                        app(\App\Services\TicketNotificationService::class)->sendTicketAssignedNotification(
+                            $id,
+                            $assignTicketNo,
+                            $assignTitle,
+                            $newOwnerId
+                        );
+                    } catch (\Throwable $e) {
+                        \Illuminate\Support\Facades\Log::warning('Ticket reassignment notification failed', ['error' => $e->getMessage(), 'ticket' => $id]);
+                    }
+                })->afterResponse();
             }
 
             if ($newStatus === 'Closed') {
                 $contactId = (int) ($validated['contact_id'] ?? $ticket->contact_id ?? 0);
                 if ($contactId) {
-                    try {
-                        $ticketNo = $ticket->ticket_no ?? 'TT' . $id;
-                        app(\App\Services\TicketNotificationService::class)->sendFeedbackRequestEmail($id, $ticketNo, $contactId);
-                    } catch (\Throwable $e) {
-                        \Illuminate\Support\Facades\Log::warning('Feedback request email failed', ['error' => $e->getMessage(), 'ticket' => $id]);
-                    }
+                    $ticketNo = $ticket->ticket_no ?? 'TT' . $id;
+                    dispatch(function () use ($id, $ticketNo, $contactId) {
+                        try {
+                            app(\App\Services\TicketNotificationService::class)->sendFeedbackRequestEmail($id, $ticketNo, $contactId);
+                        } catch (\Throwable $e) {
+                            \Illuminate\Support\Facades\Log::warning('Feedback request email failed', ['error' => $e->getMessage(), 'ticket' => $id]);
+                        }
+                    })->afterResponse();
                 }
             }
 
@@ -811,16 +825,20 @@ class TicketController extends Controller
             }
             $this->forgetTicketListCaches();
             \App\Events\DashboardStatsUpdated::dispatch();
-            try {
-                app(\App\Services\TicketNotificationService::class)->sendTicketAssignedNotification(
-                    $ticket,
-                    $ticketObj->ticket_no ?? 'TT' . $ticket,
-                    $ticketObj->title ?? '',
-                    $assignedTo
-                );
-            } catch (\Throwable $e) {
-                \Illuminate\Support\Facades\Log::warning('Ticket reassignment notification failed', ['error' => $e->getMessage()]);
-            }
+            $assignTicketNo = $ticketObj->ticket_no ?? 'TT' . $ticket;
+            $assignTitle = $ticketObj->title ?? '';
+            dispatch(function () use ($ticket, $assignTicketNo, $assignTitle, $assignedTo) {
+                try {
+                    app(\App\Services\TicketNotificationService::class)->sendTicketAssignedNotification(
+                        $ticket,
+                        $assignTicketNo,
+                        $assignTitle,
+                        $assignedTo
+                    );
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::warning('Ticket reassignment notification failed', ['error' => $e->getMessage()]);
+                }
+            })->afterResponse();
             if ($request->wantsJson()) {
                 return response()->json(['success' => true, 'message' => 'Ticket reassigned.']);
             }

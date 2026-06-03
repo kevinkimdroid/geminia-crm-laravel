@@ -163,6 +163,10 @@ class InvestmentMaturityService
         $today = now()->startOfDay()->toDateString();
         $toDate = now()->startOfDay()->addDays($days)->toDateString();
 
+        // NOTE: keep p.pol_maturity_date "bare" (no TRUNC) so Oracle can use an index
+        // on the column. Wrapping it in TRUNC() forces a full table scan of lms_policies,
+        // which is slow and a common trigger for ORA-03113 (session killed mid-query).
+        // The half-open range [today, toDate+1) reproduces the inclusive BETWEEN behaviour.
         $rows = DB::connection('erp')->select(
             "SELECT
                 p.pol_policy_no,
@@ -173,7 +177,8 @@ class InvestmentMaturityService
              JOIN lms_proposers r ON r.prp_code = p.pol_prp_code
              JOIN lms_products d ON d.prod_code = p.pol_prod_code
              WHERE d.prod_code IN (2024608, 2025615, 2025621)
-               AND TRUNC(p.pol_maturity_date) BETWEEN TO_DATE(?, 'YYYY-MM-DD') AND TO_DATE(?, 'YYYY-MM-DD')
+               AND p.pol_maturity_date >= TO_DATE(?, 'YYYY-MM-DD')
+               AND p.pol_maturity_date < TO_DATE(?, 'YYYY-MM-DD') + 1
              ORDER BY p.pol_maturity_date ASC, p.pol_policy_no ASC",
             [$today, $toDate]
         );
