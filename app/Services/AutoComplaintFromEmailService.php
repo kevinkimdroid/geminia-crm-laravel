@@ -107,6 +107,7 @@ class AutoComplaintFromEmailService
             'life@geminialife.co.ke',
             'servicinglife@geminialife.co.ke',
             'financelife@geminialife.co.ke',
+            config('pension.mailbox', 'pensions@geminialife.co.ke'),
         ]));
         foreach ($internal as $i) {
             if ($i && (str_contains($address, $i) || str_contains($i, $address))) {

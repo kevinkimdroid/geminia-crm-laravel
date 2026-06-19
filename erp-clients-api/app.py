@@ -967,13 +967,52 @@ def _do_find_policy():
         return jsonify({"policy": policy, "error": str(e)}), 500
 
 
+def _lms_qualified(table_name):
+    t = (table_name or "").strip()
+    return f"{VIEW_SCHEMA}.{t}" if VIEW_SCHEMA else t
+
+
+def _partial_maturities_sql(product_filter=None):
+    """
+    Upcoming partial/full maturities from LMS_POLICY_PRTL_MATURITIES (PPM_EXPECTED_DATE).
+    Matches Laravel maturities:sync Oracle query — not LMS_INDIVIDUAL_CRM_VIEW.MATURITY_DATE.
+    """
+    pol = _lms_qualified("LMS_POLICIES")
+    ppm = _lms_qualified("LMS_POLICY_PRTL_MATURITIES")
+    prod = _lms_qualified("LMS_PRODUCTS")
+    prp = _lms_qualified("LMS_PROPOSERS")
+    where = """
+        WHERE PPM_POL_CODE = POL_CODE
+          AND POL_PROD_CODE = PROD_CODE
+          AND POL_PRP_CODE = PRP_CODE
+          AND POL_STATUS NOT IN ('M', 'S', 'C', 'J', 'D', 'V')
+          AND PPM_MATURITY_TYPE IN ('P', 'F', 'FM')
+          AND PPM_PAID = 'N'
+          AND PPM_EXPECTED_DATE >= TO_DATE(:df, 'YYYY-MM-DD')
+          AND PPM_EXPECTED_DATE < TO_DATE(:dt, 'YYYY-MM-DD') + 1
+    """
+    if product_filter:
+        where += " AND TRIM(PROD_DESC) = :product"
+    inner = f"""
+        SELECT TO_CHAR(POL_POLICY_NO) AS POLICY_NUMBER,
+               PRP_OTHER_NAMES || '  ' || PRP_SURNAME AS LIFE_ASSURED,
+               PROD_DESC AS PRODUCT,
+               TO_CHAR(PPM_EXPECTED_DATE, 'YYYY-MM-DD') AS MATURITY_DATE
+        FROM {pol}, {ppm}, {prod}, {prp}
+        {where}
+        ORDER BY PPM_EXPECTED_DATE ASC, POL_POLICY_NO ASC
+    """
+    return inner
+
+
 @app.route("/maturities", methods=["GET"])
 @app.route("/clients/maturities", methods=["GET"])
 @app.route("/api/clients/maturities", methods=["GET"])
 def get_maturities():
     """
-    Fetch policies maturing between two dates. Optimized for maturities page.
+    Fetch policies maturing between two dates (partial maturities register).
     GET /clients/maturities?from=2026-03-05&to=2026-06-03&product=EDUCATION ENDOWMENT POLICY
+    Optional: limit (default 500, max 2000), offset (default 0) for paging.
     """
     if not PASSWORD:
         return jsonify({"data": [], "error": "ORACLE_PASSWORD not set"}), 503
@@ -983,30 +1022,47 @@ def get_maturities():
     if not date_from or not date_to:
         return jsonify({"data": [], "error": "Missing from or to (YYYY-MM-DD)"}), 400
     try:
+        limit = min(max(int(request.args.get("limit", 500)), 1), 2000)
+        offset = max(int(request.args.get("offset", 0)), 0)
+        inner = _partial_maturities_sql(product_filter or None)
+        sql = f"""
+            SELECT * FROM (
+                SELECT a.*, ROWNUM rn FROM ({inner}) a WHERE ROWNUM <= :upper
+            ) WHERE rn > :lower
+        """
+        bind = {
+            "df": date_from,
+            "dt": date_to,
+            "upper": offset + limit,
+            "lower": offset,
+        }
+        if product_filter:
+            bind["product"] = product_filter
         conn = get_connection()
         cursor = conn.cursor()
-        cols = "POLICY_NUMBER,LIFE_ASSURED,PRODUCT,MATURITY_DATE"
-        where_clause = """
-            WHERE MATURITY_DATE IS NOT NULL
-            AND TRUNC(MATURITY_DATE) >= TO_DATE(:df, 'YYYY-MM-DD')
-            AND TRUNC(MATURITY_DATE) <= TO_DATE(:dt, 'YYYY-MM-DD')
-        """
-        bind = {"df": date_from, "dt": date_to}
-        if product_filter:
-            where_clause += " AND TRIM(PRODUCT) = :product"
-            bind["product"] = product_filter
-        sql = f"""
-            SELECT {cols} FROM {INDIVIDUAL_VIEW}
-            {where_clause}
-            ORDER BY MATURITY_DATE, POLICY_NUMBER
-        """
         cursor.execute(sql, bind)
         rows = cursor.fetchall()
-        col_names = [d[0] for d in cursor.description] if cursor.description else cols.split(",")
-        data = [row_to_client(r[: len(col_names)], col_names) for r in rows]
+        col_names = [d[0] for d in cursor.description] if cursor.description else []
+        data = []
+        for r in rows:
+            row_dict = {}
+            for i, col in enumerate(col_names):
+                if col.upper() == "RN":
+                    continue
+                row_dict[col] = r[i] if i < len(r) else None
+            data.append(row_to_client(
+                [row_dict.get(c) for c in col_names if c.upper() != "RN"],
+                [c for c in col_names if c.upper() != "RN"],
+            ))
         cursor.close()
         conn.close()
-        return jsonify({"data": data, "total": len(data)})
+        return jsonify({
+            "data": data,
+            "total": len(data),
+            "offset": offset,
+            "limit": limit,
+            "has_more": len(data) >= limit,
+        })
     except Exception as e:
         return jsonify({"data": [], "error": str(e)}), 500
 

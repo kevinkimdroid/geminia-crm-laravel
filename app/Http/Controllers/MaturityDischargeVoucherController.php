@@ -81,25 +81,14 @@ class MaturityDischargeVoucherController extends Controller
         $maturityIso = $maturityCarbon->format('Y-m-d');
 
         // The maturities report lists partial/full maturity events (PPM_EXPECTED_DATE), which can
-        // legitimately differ from the policy's final maturity date (POL_MATURITY_DATE). So the
-        // local maturities cache is the source of truth for the (policy, maturity-event) pair; the
-        // live ERP policy record is used only to enrich the remaining voucher fields. The strict
-        // maturity match is kept only for ad-hoc policies that are NOT in the maturities report.
-        $cacheRow = $this->findMaturityInLocalCaches($policyNumber, $maturityIso);
+        // legitimately differ from the policy's final maturity date (POL_MATURITY_DATE). The submitted
+        // maturity is always used on the voucher; cache / maturities API only confirm the event when
+        // available. The live ERP policy record enriches client, product, and amount fields only.
+        $cacheRow = $this->findMaturityInLocalCaches($policyNumber, $maturityIso, $erp);
         $erpRow = $erp->getPolicyDetails($policyNumber);
 
         if ($cacheRow === null && $erpRow === null) {
             abort(404, 'Policy not found. Check the policy number or sync maturities / ERP.');
-        }
-
-        if ($cacheRow === null && $erpRow !== null) {
-            $rowMaturity = $erpRow['maturity'] ?? $erpRow['maturity_date'] ?? null;
-            if ($rowMaturity) {
-                $rowMat = \Carbon\Carbon::parse($rowMaturity)->format('Y-m-d');
-                if ($rowMat !== $maturityIso) {
-                    abort(422, 'Maturity date does not match policy record in ERP. Expected '.$rowMat.' for this policy.');
-                }
-            }
         }
 
         // Build the working row: prefer live ERP fields, fall back to cached values for anything
@@ -146,25 +135,46 @@ class MaturityDischargeVoucherController extends Controller
     /**
      * @return object|array|null
      */
-    protected function findMaturityInLocalCaches(string $policyNumber, string $maturityIso)
+    protected function findMaturityInLocalCaches(string $policyNumber, string $maturityIso, ErpClientService $erp)
     {
+        $policyUpper = strtoupper(trim($policyNumber));
+
         foreach (['maturities_cache', 'erp_clients_cache'] as $table) {
             if (! Schema::hasTable($table)) {
                 continue;
             }
             try {
-                $hit = DB::table($table)
-                    ->where('policy_number', $policyNumber)
-                    ->whereDate('maturity', $maturityIso)
-                    ->first();
-                if ($hit) {
-                    return $hit;
+                $rows = DB::table($table)
+                    ->whereRaw('UPPER(TRIM(policy_number)) = ?', [$policyUpper])
+                    ->get();
+                foreach ($rows as $row) {
+                    if ($this->maturityDatesEqual($row->maturity ?? null, $maturityIso)) {
+                        return $row;
+                    }
                 }
             } catch (\Throwable $e) {
                 //
             }
         }
 
+        $apiRow = $erp->findMaturityEventInRegister($policyNumber, $maturityIso);
+        if ($apiRow !== null) {
+            return (object) $apiRow;
+        }
+
         return null;
+    }
+
+    protected function maturityDatesEqual(mixed $stored, string $expectedIso): bool
+    {
+        if ($stored === null || $stored === '') {
+            return false;
+        }
+
+        try {
+            return \Carbon\Carbon::parse($stored)->format('Y-m-d') === \Carbon\Carbon::parse($expectedIso)->format('Y-m-d');
+        } catch (\Throwable $e) {
+            return false;
+        }
     }
 }

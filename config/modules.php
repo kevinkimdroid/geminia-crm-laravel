@@ -15,6 +15,7 @@ return [
         'tickets' => 'HelpDesk',
         'deals' => 'Potentials',
         'finance.payments' => null,
+        'finance.receipts' => null,
         'marketing' => 'Campaigns',
         'marketing.social-media' => null, // Custom module - always visible (not in standard Vtiger profiles)
         'marketing.campaigns' => 'Campaigns',
@@ -26,6 +27,7 @@ return [
         'support.sms-notifier' => null,
         'support.email-client' => null,
         'support.customers' => null,
+        'support.pension-administration' => null,
         'tools' => null,
         'tools.erp-messaging' => null,
         'tools.email-templates' => null,

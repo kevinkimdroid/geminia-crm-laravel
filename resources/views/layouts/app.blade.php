@@ -301,15 +301,22 @@
                         <i class="bi bi-person-lines-fill"></i><span>Contacts</span>
                     </a>
                     @endif
-                    @if($can('finance.payments'))
+                    @if($can('finance.payments') || $can('finance.receipts'))
                     <div class="app-nav-group">
                         <div class="app-nav-label">Finance</div>
+                        @if($can('finance.payments'))
                         <a href="{{ route('finance.payments.index') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('finance.payments.*') ? 'active' : '' }}">
                             <i class="bi bi-cash-coin"></i><span>Finance cheques</span>
                         </a>
                         <a href="{{ route('finance.agency-advances.index') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('finance.agency-advances.*') ? 'active' : '' }}">
                             <i class="bi bi-building"></i><span>Agency advances</span>
                         </a>
+                        @endif
+                        @if($can('finance.receipts'))
+                        <a href="{{ route('finance.receipts.index') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('finance.receipts.*') ? 'active' : '' }}">
+                            <i class="bi bi-receipt"></i><span>Receipt reprint</span>
+                        </a>
+                        @endif
                     </div>
                     @endif
                 </div>
@@ -363,6 +370,9 @@
                     @if($can('support.customers'))
                     <a href="{{ route('support.customers') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('support.customers') || request()->routeIs('support.clients.*') ? 'active' : '' }}"><i class="bi bi-people"></i><span>Clients</span></a>
                     @endif
+                    @if($can('support') || $can('support.customers') || $can('support.pension-administration'))
+                    <a href="{{ route('support.pension-administration') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('support.pension-administration') ? 'active' : '' }}"><i class="bi bi-piggy-bank"></i><span>Pension Administration</span></a>
+                    @endif
                     @if($can('support.customers') && ! ($can('leads') || $can('marketing')))
                     <a href="{{ route('marketing.broadcast') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('marketing.broadcast*') ? 'active' : '' }}"><i class="bi bi-broadcast"></i><span>Broadcast</span></a>
                     <a href="{{ route('marketing.credit-life-statements') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('marketing.credit-life-statements*') ? 'active' : '' }}"><i class="bi bi-file-earmark-text"></i><span>Credit Life Statements</span></a>
@@ -407,7 +417,8 @@
                     <a href="{{ route('marketing.credit-life-statements') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('marketing.credit-life-statements*') ? 'active' : '' }}"><i class="bi bi-file-earmark-text"></i><span>Credit Life Statements</span></a>
                     @endif
                     @if($can('tools.mail-manager'))
-                    <a href="{{ route('tools.mail-manager') }}" class="app-nav-link app-nav-sublink"><i class="bi bi-envelope-at"></i><span>Mail Manager</span></a>
+                    <a href="{{ route('tools.mail-manager', ['mailbox' => config('pension.mailbox')]) }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('tools.mail-manager') && strtolower((string) request()->get('mailbox', '')) === strtolower((string) config('pension.mailbox')) ? 'active' : '' }}"><i class="bi bi-piggy-bank"></i><span>Pension Inbox</span></a>
+                    <a href="{{ route('tools.mail-manager') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('tools.mail-manager') && ! request()->has('mailbox') ? 'active' : '' }}"><i class="bi bi-envelope-at"></i><span>Life Inbox</span></a>
                     @endif
                     @if($can('tools.erp-messaging'))
                     <a href="{{ route('tools.erp-messaging') }}" class="app-nav-link app-nav-sublink {{ request()->routeIs('tools.erp-messaging*') ? 'active' : '' }}">
@@ -475,6 +486,9 @@
                             @if($can('finance.payments'))
                             <li><a class="dropdown-item py-2" href="{{ route('finance.payments.index') }}"><i class="bi bi-cash-coin me-2"></i>Finance cheques</a></li>
                             <li><a class="dropdown-item py-2" href="{{ route('finance.agency-advances.index') }}"><i class="bi bi-building me-2"></i>Agency advances</a></li>
+                            @endif
+                            @if($can('finance.receipts'))
+                            <li><a class="dropdown-item py-2" href="{{ route('finance.receipts.index') }}"><i class="bi bi-receipt me-2"></i>Receipt reprint</a></li>
                             @endif
                         </ul>
                     </div>

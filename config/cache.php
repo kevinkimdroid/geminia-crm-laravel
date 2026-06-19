@@ -15,7 +15,8 @@ return [
     |
     */
 
-    'default' => env('CACHE_STORE', 'file'),
+    // Database avoids file-permission issues on production servers (/var/www/html/storage/...).
+    'default' => env('CACHE_STORE', env('APP_ENV') === 'production' ? 'database' : 'file'),
 
     /*
     |--------------------------------------------------------------------------

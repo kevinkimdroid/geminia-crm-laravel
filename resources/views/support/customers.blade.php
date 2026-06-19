@@ -9,9 +9,13 @@
     <span class="text-muted mx-2">/</span>
     <span class="text-dark small fw-semibold">Contacts</span>
     @else
+    @if(($system ?? '') === 'group_pension')
+    <a href="{{ route('support.pension-administration') }}" class="text-muted small text-decoration-none">Pension Administration</a>
+    @else
     <a href="{{ route('support') }}" class="text-muted small text-decoration-none">Support</a>
+    @endif
     <span class="text-muted mx-2">/</span>
-    <span class="text-dark small fw-semibold">Clients</span>
+    <span class="text-dark small fw-semibold">{{ ($system ?? '') === 'group_pension' ? config('clients_ui.tab_labels.group_pension', 'Group Pension') . ' Clients' : 'Clients' }}</span>
     @endif
 </nav>
 <div class="page-header d-flex flex-wrap justify-content-between align-items-start gap-3">

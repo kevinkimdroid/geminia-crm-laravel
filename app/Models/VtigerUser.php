@@ -5,7 +5,6 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -100,7 +99,7 @@ class VtigerUser extends Authenticatable
      */
     public function getAllowedModules(): array
     {
-        return Cache::remember('geminia_allowed_modules_v2_' . $this->id, 600, function () {
+        return safe_cache_remember('geminia_allowed_modules_v2_' . $this->id, 600, function () {
             return $this->fetchAllowedModules();
         });
     }

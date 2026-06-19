@@ -68,6 +68,18 @@
 </p>
 <div class="row g-4">
     <div class="col-md-6 col-lg-4">
+        <a href="{{ route('support.pension-administration') }}" class="card support-quick-card text-decoration-none h-100" style="border:2px solid #7c3aed;background:#f5f3ff">
+            <div class="card-body d-flex align-items-center gap-3">
+                <div class="support-quick-icon" style="background:#ede9fe;color:#5b21b6"><i class="bi bi-piggy-bank-fill"></i></div>
+                <div>
+                    <h6 class="mb-1 fw-bold">Pension Administration</h6>
+                    <p class="text-muted small mb-0">{{ config('pension.mailbox') }} · Group Pension clients</p>
+                </div>
+                <i class="bi bi-chevron-right ms-auto" style="color:#7c3aed"></i>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-6 col-lg-4">
         <a href="{{ route('support.serve-client') }}" class="card support-quick-card text-decoration-none h-100" style="border:2px solid var(--geminia-primary);background:var(--geminia-primary-muted)">
             <div class="card-body d-flex align-items-center gap-3">
                 <div class="support-quick-icon" style="background:var(--geminia-primary-muted)"><i class="bi bi-person-plus-fill"></i></div>

@@ -67,7 +67,7 @@ class TicketController extends Controller
         }
 
         $ticketCounts = $this->crm->getTicketCountsByStatus($ownerFilter);
-        $users = Cache::remember('ticket_assign_users', 300, fn () => $this->crm->getActiveUsers());
+        $users = safe_cache_remember('ticket_assign_users', 300, fn () => $this->crm->getActiveUsers());
 
         $tickets = new LengthAwarePaginator(
             $tickets instanceof Collection ? $tickets : collect($tickets),
@@ -206,7 +206,7 @@ class TicketController extends Controller
         if ($fromServeClient && $contactId) {
             $clients = collect([$crm->getContactById($contactId)])->filter();
         } else {
-            $clients = Cache::remember('ticket_create_clients_' . (crm_owner_filter() ?? 'all'), 120, fn () => $crm->getCustomers(100, 0, null, crm_owner_filter(), 'name', true));
+            $clients = safe_cache_remember('ticket_create_clients_' . (crm_owner_filter() ?? 'all'), 120, fn () => $crm->getCustomers(100, 0, null, crm_owner_filter(), 'name', true));
         }
         $contactDisplay = '';
 
@@ -230,7 +230,7 @@ class TicketController extends Controller
         $userRole = ($authUser && $authUser->primary_role) ? $authUser->primary_role->rolename : null;
 
         try {
-            $accounts = $this->sortAccountsForTickets(Cache::remember('ticket_accounts', 300, fn () => $crm->getAccounts(100)));
+            $accounts = $this->sortAccountsForTickets(safe_cache_remember('ticket_accounts', 300, fn () => $crm->getAccounts(100)));
             if ($accounts->isEmpty()) {
                 Cache::forget('ticket_accounts');
                 $accounts = $this->getFallbackProductLines();
@@ -240,7 +240,7 @@ class TicketController extends Controller
         } catch (\Throwable $e) {
             $accounts = $this->getFallbackProductLines();
         }
-        $users = Cache::remember('ticket_assign_users', 300, fn () => $crm->getActiveUsers());
+        $users = safe_cache_remember('ticket_assign_users', 300, fn () => $crm->getActiveUsers());
 
         return view('tickets.create', [
             'clients' => $clients,
@@ -515,7 +515,7 @@ class TicketController extends Controller
             Cache::forget('ticket_create_clients');
         }
         $crm = app(CrmService::class);
-        $clients = Cache::remember('ticket_create_clients_' . (crm_owner_filter() ?? 'all'), 120, fn () => $crm->getCustomers(100, 0, null, crm_owner_filter(), 'name', true));
+        $clients = safe_cache_remember('ticket_create_clients_' . (crm_owner_filter() ?? 'all'), 120, fn () => $crm->getCustomers(100, 0, null, crm_owner_filter(), 'name', true));
         $contactDisplay = '';
         if ($ticket->contact_id ?? null) {
             $client = $clients->firstWhere('contactid', $ticket->contact_id);
@@ -530,7 +530,7 @@ class TicketController extends Controller
         $authUser = \Illuminate\Support\Facades\Auth::guard('vtiger')->user();
         $userRole = ($authUser && $authUser->primary_role) ? $authUser->primary_role->rolename : null;
         try {
-            $accounts = $this->sortAccountsForTickets(Cache::remember('ticket_accounts', 300, fn () => $crm->getAccounts(100)));
+            $accounts = $this->sortAccountsForTickets(safe_cache_remember('ticket_accounts', 300, fn () => $crm->getAccounts(100)));
             if ($accounts->isEmpty()) {
                 Cache::forget('ticket_accounts');
                 $accounts = $this->getFallbackProductLines();
@@ -540,7 +540,7 @@ class TicketController extends Controller
         } catch (\Throwable $e) {
             $accounts = $this->getFallbackProductLines();
         }
-        $users = Cache::remember('ticket_assign_users', 300, fn () => $crm->getActiveUsers());
+        $users = safe_cache_remember('ticket_assign_users', 300, fn () => $crm->getActiveUsers());
         $effectiveOrgId = $ticket->parent_id;
         if (! $effectiveOrgId && preg_match('/Product Line:\s*(.+?)(?:\n|$)/', (string) ($ticket->description ?? ''), $m)) {
             $lineName = trim($m[1]);

@@ -93,6 +93,11 @@ Route::middleware('finance')->group(function () {
 Route::get('/finance/payments', [FinancePaymentController::class, 'index'])->name('finance.payments.index');
 Route::get('/finance/payments/create-ticket', [FinancePaymentController::class, 'createTicket'])->name('finance.payments.create-ticket');
 Route::get('/finance/agency-advances', [FinancePaymentController::class, 'agencyAdvances'])->name('finance.agency-advances.index');
+Route::get('/finance/receipts', [\App\Http\Controllers\FinanceReceiptReprintController::class, 'index'])->name('finance.receipts.index');
+Route::get('/finance/receipts/search', [\App\Http\Controllers\FinanceReceiptReprintController::class, 'search'])->name('finance.receipts.search');
+Route::get('/finance/receipts/{receiptNo}', [\App\Http\Controllers\FinanceReceiptReprintController::class, 'preview'])->name('finance.receipts.preview');
+Route::get('/finance/receipts/{receiptNo}/reprint', [\App\Http\Controllers\FinanceReceiptReprintController::class, 'reprint'])->name('finance.receipts.reprint');
+Route::get('/finance/receipts/{receiptNo}/xml', [\App\Http\Controllers\FinanceReceiptReprintController::class, 'xml'])->name('finance.receipts.xml');
 });
 
 Route::get('/marketing', fn () => view('marketing'))->name('marketing');
@@ -116,6 +121,7 @@ Route::get('/support/tickets', fn () => redirect()->route('tickets.index'))->nam
 Route::get('/support/serve-client', [\App\Http\Controllers\ServeClientController::class, 'index'])->name('support.serve-client');
 Route::get('/support/serve-client/search', [\App\Http\Controllers\ServeClientController::class, 'search'])->name('serve-client.search');
 Route::post('/support/serve-client/create-ticket', [\App\Http\Controllers\ServeClientController::class, 'createTicket'])->name('serve-client.create-ticket');
+Route::get('/support/pension-administration', [\App\Http\Controllers\PensionAdministrationController::class, 'index'])->name('support.pension-administration');
 Route::get('/support/faq', fn () => view('support.faq'))->name('support.faq');
 Route::get('/support/maturities', [\App\Http\Controllers\MaturitiesController::class, 'index'])->name('support.maturities');
 Route::get('/support/investment-maturities', [\App\Http\Controllers\InvestmentMaturitiesController::class, 'index'])->name('support.investment-maturities');
@@ -227,6 +233,7 @@ Route::get('/reports/tickets-by-date', [\App\Http\Controllers\ReportsController:
 Route::get('/reports/management-usage', [\App\Http\Controllers\ReportsController::class, 'managementUsage'])->name('reports.management-usage');
 Route::get('/reports/ticket-workload-performance', [\App\Http\Controllers\ReportsController::class, 'ticketWorkloadPerformance'])->name('reports.ticket-workload-performance');
 Route::get('/reports/ticket-automation-analysis', [\App\Http\Controllers\ReportsController::class, 'ticketAutomationAnalysis'])->name('reports.ticket-automation-analysis');
+Route::get('/reports/work-activities', [\App\Http\Controllers\ReportsController::class, 'workActivities'])->name('reports.work-activities');
 Route::get('/reports/assignment-handlers', [\App\Http\Controllers\ReportsController::class, 'assignmentHandlers'])->name('reports.assignment-handlers');
 Route::get('/reports/contacts-summary', [\App\Http\Controllers\ReportsController::class, 'contactsSummary'])->name('reports.contacts-summary');
 Route::get('/reports/calls-summary', [\App\Http\Controllers\ReportsController::class, 'callsSummary'])->name('reports.calls-summary');
@@ -234,6 +241,7 @@ Route::get('/reports/reassignment-audit', [\App\Http\Controllers\ReportsControll
 Route::get('/reports/bounced-emails', [\App\Http\Controllers\ReportsController::class, 'bouncedEmailsReport'])->name('reports.bounced-emails');
 Route::get('/reports/export/management-usage', [\App\Http\Controllers\ReportsController::class, 'exportManagementUsage'])->name('reports.export.management-usage');
 Route::get('/reports/export/ticket-workload-performance', [\App\Http\Controllers\ReportsController::class, 'exportTicketWorkloadPerformance'])->name('reports.export.ticket-workload-performance');
+Route::get('/reports/export/work-activities', [\App\Http\Controllers\ReportsController::class, 'exportWorkActivities'])->name('reports.export.work-activities');
 Route::get('/reports/export/ticket-automation-analysis', [\App\Http\Controllers\ReportsController::class, 'exportTicketAutomationAnalysis'])->name('reports.export.ticket-automation-analysis');
 Route::get('/reports/export/reassignment-audit', [\App\Http\Controllers\ReportsController::class, 'exportReassignmentAudit'])->name('reports.export.reassignment-audit');
 Route::get('/reports/export/assignment-handlers', [\App\Http\Controllers\ReportsController::class, 'exportAssignmentHandlers'])->name('reports.export.assignment-handlers');

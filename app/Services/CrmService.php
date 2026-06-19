@@ -2158,6 +2158,23 @@ class CrmService
     }
 
     /**
+     * Restrict a query to a set of owner ids. null = no restriction (all users);
+     * empty array = match nothing.
+     */
+    private function applyOwnerIdsScope($query, ?array $ownerIds, string $column = 'e.smownerid'): void
+    {
+        if ($ownerIds === null) {
+            return;
+        }
+        if (empty($ownerIds)) {
+            $query->whereRaw('1 = 0');
+
+            return;
+        }
+        $query->whereIn($column, array_values(array_unique(array_map('intval', $ownerIds))));
+    }
+
+    /**
      * Apply role scope (non-admin) or optional assignee filter (admin).
      */
     private function applyActivitySmownerScope($query, ?int $ownerScope, ?int $assignedToFilter): void
@@ -2309,6 +2326,230 @@ class CrmService
                 ->get();
         } catch (\Throwable $e) {
             Log::warning('CrmService::getActivitiesAssigneeSummary: ' . $e->getMessage());
+            return collect();
+        }
+    }
+
+    /**
+     * Per-user aggregate of calendar work activities for the "Work Activities by User" report.
+     * Counts in SQL (no row hydration) for speed.
+     *
+     * @return \Illuminate\Support\Collection<int, object>
+     */
+    public function getWorkActivitiesAssigneeSummaryReport(
+        string $dateFrom,
+        string $dateTo,
+        ?array $ownerIds = null,
+        ?string $activityType = null,
+        ?string $search = null
+    ): \Illuminate\Support\Collection {
+        try {
+            $query = DB::connection('vtiger')
+                ->table('vtiger_activity as a')
+                ->join('vtiger_crmentity as e', 'a.activityid', '=', 'e.crmid')
+                ->leftJoin('vtiger_users as u', 'e.smownerid', '=', 'u.id')
+                ->where('e.deleted', 0)
+                ->whereIn('e.setype', self::VTIGER_ACTIVITY_SETYPES)
+                ->whereBetween('a.date_start', [$dateFrom, $dateTo]);
+
+            $this->applyOwnerIdsScope($query, $ownerIds);
+            $this->applyActivityTypeStatusSearch($query, $activityType, null, $search);
+
+            return $query->select(
+                'e.smownerid',
+                DB::raw('COUNT(*) as cnt'),
+                DB::raw('MAX(a.date_start) as last_at'),
+                DB::raw("MAX(COALESCE(NULLIF(TRIM(CONCAT(COALESCE(u.first_name,''), ' ', COALESCE(u.last_name,''))), ''), u.user_name)) as user_name")
+            )
+                ->groupBy('e.smownerid')
+                ->get();
+        } catch (\Throwable $e) {
+            Log::warning('CrmService::getWorkActivitiesAssigneeSummaryReport: ' . $e->getMessage());
+
+            return collect();
+        }
+    }
+
+    /**
+     * Per-user aggregate of CRM trouble tickets created in the range. Counts in SQL.
+     *
+     * @return \Illuminate\Support\Collection<int, object>
+     */
+    public function getTicketActivitiesAssigneeSummaryReport(
+        string $dateFrom,
+        string $dateTo,
+        ?array $ownerIds = null,
+        ?string $search = null
+    ): \Illuminate\Support\Collection {
+        try {
+            $query = DB::connection('vtiger')
+                ->table('vtiger_troubletickets as t')
+                ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
+                ->leftJoin('vtiger_users as u', 'e.smownerid', '=', 'u.id')
+                ->where('e.deleted', 0)
+                ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
+                ->whereBetween('e.createdtime', [$dateFrom . ' 00:00:00', $dateTo . ' 23:59:59']);
+
+            $this->applyOwnerIdsScope($query, $ownerIds);
+
+            if ($search !== null && trim($search) !== '') {
+                $needle = trim($search);
+                $query->where(function ($q) use ($needle) {
+                    $q->where('t.title', 'like', '%' . $needle . '%')
+                        ->orWhere('t.ticket_no', 'like', '%' . $needle . '%');
+                });
+            }
+
+            return $query->select(
+                'e.smownerid',
+                DB::raw('COUNT(*) as cnt'),
+                DB::raw('MAX(e.createdtime) as last_at'),
+                DB::raw("MAX(COALESCE(NULLIF(TRIM(CONCAT(COALESCE(u.first_name,''), ' ', COALESCE(u.last_name,''))), ''), u.user_name)) as user_name")
+            )
+                ->groupBy('e.smownerid')
+                ->get();
+        } catch (\Throwable $e) {
+            Log::warning('CrmService::getTicketActivitiesAssigneeSummaryReport: ' . $e->getMessage());
+
+            return collect();
+        }
+    }
+
+    /**
+     * Subquery: at most one linked CRM ticket per activity (avoids duplicate rows when an
+     * activity is linked to multiple records in vtiger_seactivityrel).
+     */
+    private function activityPrimaryTicketSubquery(): \Illuminate\Database\Query\Builder
+    {
+        return DB::connection('vtiger')
+            ->table('vtiger_seactivityrel as relt')
+            ->join('vtiger_troubletickets as tt', 'relt.crmid', '=', 'tt.ticketid')
+            ->select('relt.activityid', DB::raw('MIN(tt.ticketid) as ticketid'))
+            ->groupBy('relt.activityid');
+    }
+
+    /**
+     * Get calendar work activities (Task / Event / Meeting / Call) across the whole CRM
+     * within a date range, including the assigned user's name. Unlike getActivities(), this
+     * is NOT scoped to a single contact/ticket — it powers the "Work Activities by User" report.
+     *
+     * @param  int|null  $ownerScope  From crm_owner_filter(); non-admins only see their own records.
+     * @param  int|null  $assignedToFilter  When $ownerScope is null (admin), optional assignee filter.
+     * @return \Illuminate\Support\Collection<int, object>
+     */
+    public function getWorkActivitiesReport(
+        string $dateFrom,
+        string $dateTo,
+        ?array $ownerIds = null,
+        ?string $activityType = null,
+        ?string $status = null,
+        ?string $search = null,
+        int $limit = 5000
+    ): \Illuminate\Support\Collection {
+        try {
+            $query = DB::connection('vtiger')
+                ->table('vtiger_activity as a')
+                ->join('vtiger_crmentity as e', 'a.activityid', '=', 'e.crmid')
+                ->leftJoin('vtiger_users as u', 'e.smownerid', '=', 'u.id')
+                ->where('e.deleted', 0)
+                ->whereIn('e.setype', self::VTIGER_ACTIVITY_SETYPES)
+                ->whereBetween('a.date_start', [$dateFrom, $dateTo]);
+
+            $this->applyOwnerIdsScope($query, $ownerIds);
+            $this->applyActivityTypeStatusSearch($query, $activityType, $status, $search);
+
+            $query->leftJoinSub($this->activityPrimaryContactSubquery(), 'relc', function ($join) {
+                $join->on('a.activityid', '=', 'relc.activityid');
+            });
+            $query->leftJoin('vtiger_contactdetails as c', 'relc.contactid', '=', 'c.contactid');
+
+            $query->leftJoinSub($this->activityPrimaryTicketSubquery(), 'relt', function ($join) {
+                $join->on('a.activityid', '=', 'relt.activityid');
+            });
+            $query->leftJoin('vtiger_troubletickets as t', 'relt.ticketid', '=', 't.ticketid');
+
+            $query->select(
+                'a.activityid',
+                'a.subject',
+                'a.activitytype',
+                'a.date_start',
+                'a.time_start',
+                'a.due_date',
+                'a.status',
+                'e.smownerid',
+                'e.modifiedtime',
+                'relt.ticketid as related_ticket_id',
+                't.ticket_no as related_ticket_no',
+                't.title as related_ticket_title',
+                't.status as related_ticket_status',
+                DB::raw("TRIM(CONCAT(COALESCE(c.firstname,''), ' ', COALESCE(c.lastname,''))) as related_to_name"),
+                DB::raw("COALESCE(NULLIF(TRIM(CONCAT(COALESCE(u.first_name,''), ' ', COALESCE(u.last_name,''))), ''), u.user_name) as user_name")
+            );
+
+            return $query->orderByDesc('a.date_start')
+                ->limit($limit)
+                ->get();
+        } catch (\Throwable $e) {
+            Log::warning('CrmService::getWorkActivitiesReport: ' . $e->getMessage());
+
+            return collect();
+        }
+    }
+
+    /**
+     * Get CRM trouble tickets (HelpDesk) created within a date range, attributed to the
+     * assigned user (smownerid). Used as a third source in the "Work Activities by User" report.
+     *
+     * @param  int|null  $ownerScope  From crm_owner_filter(); non-admins only see their own records.
+     * @param  int|null  $assignedToFilter  When $ownerScope is null (admin), optional assignee filter.
+     * @return \Illuminate\Support\Collection<int, object>
+     */
+    public function getTicketActivitiesReport(
+        string $dateFrom,
+        string $dateTo,
+        ?array $ownerIds = null,
+        ?string $search = null,
+        int $limit = 50000
+    ): \Illuminate\Support\Collection {
+        try {
+            $query = DB::connection('vtiger')
+                ->table('vtiger_troubletickets as t')
+                ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
+                ->leftJoin('vtiger_users as u', 'e.smownerid', '=', 'u.id')
+                ->leftJoin('vtiger_contactdetails as c', 't.contact_id', '=', 'c.contactid')
+                ->where('e.deleted', 0)
+                ->whereIn('e.setype', ['HelpDesk', 'Ticket'])
+                ->whereBetween('e.createdtime', [$dateFrom . ' 00:00:00', $dateTo . ' 23:59:59']);
+
+            $this->applyOwnerIdsScope($query, $ownerIds);
+
+            if ($search !== null && trim($search) !== '') {
+                $needle = trim($search);
+                $query->where(function ($q) use ($needle) {
+                    $q->where('t.title', 'like', '%' . $needle . '%')
+                        ->orWhere('t.ticket_no', 'like', '%' . $needle . '%')
+                        ->orWhere('c.firstname', 'like', '%' . $needle . '%')
+                        ->orWhere('c.lastname', 'like', '%' . $needle . '%');
+                });
+            }
+
+            return $query->select(
+                't.ticketid',
+                't.ticket_no',
+                't.title',
+                't.status',
+                't.contact_id',
+                'e.smownerid',
+                'e.createdtime',
+                DB::raw("TRIM(CONCAT(COALESCE(c.firstname,''), ' ', COALESCE(c.lastname,''))) as contact_name"),
+                DB::raw("COALESCE(NULLIF(TRIM(CONCAT(COALESCE(u.first_name,''), ' ', COALESCE(u.last_name,''))), ''), u.user_name) as user_name")
+            )
+                ->orderByDesc('e.createdtime')
+                ->limit($limit)
+                ->get();
+        } catch (\Throwable $e) {
+            Log::warning('CrmService::getTicketActivitiesReport: ' . $e->getMessage());
+
             return collect();
         }
     }

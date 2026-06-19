@@ -3,18 +3,31 @@
 @section('title', 'Mail Manager')
 
 @section('content')
+@php
+    $activeMailbox = $mailbox ?? null;
+    $mailboxQuery = $activeMailbox ? ['mailbox' => $activeMailbox] : [];
+    $displayMailbox = $activeMailbox ?: ($useMicrosoftGraph ?? false ? config('microsoft-graph.mailbox') : ($useEmailService ?? false ? config('email-service.sender') : config('email-service.sender', 'life@geminialife.co.ke')));
+@endphp
 <div class="page-header mb-3">
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
         <div>
-            <h1 class="page-title">Mail Manager</h1>
-            <p class="page-subtitle mb-0">Emails from {{ $useMicrosoftGraph ?? false ? config('microsoft-graph.mailbox') . ' (Microsoft Graph)' : ($useEmailService ?? false ? config('email-service.sender') . ' (HTTP)' : config('email-service.sender', 'life@geminialife.co.ke')) }}</p>
+            @if($activeMailbox)
+            <nav class="mb-1">
+                <a href="{{ route('support.pension-administration') }}" class="text-muted small text-decoration-none">Pension Administration</a>
+            </nav>
+            @endif
+            <h1 class="page-title">{{ $activeMailbox ? 'Pension Inbox' : 'Life Inbox' }}</h1>
+            <p class="page-subtitle mb-0">@if($activeMailbox)Client emails to <strong>{{ $displayMailbox }}</strong> only{{ ($useMicrosoftGraph ?? false) ? ' (Microsoft Graph)' : '' }}@else Inbox for {{ $displayMailbox }} (general customer service){{ ($useMicrosoftGraph ?? false) ? ' — Microsoft Graph' : '' }}@endif</p>
         </div>
         <div class="d-flex gap-2">
-            <a href="{{ route('tools.mail-manager.create') }}" class="btn btn-outline-primary">
+            <a href="{{ route('tools.mail-manager.create', $mailboxQuery) }}" class="btn btn-outline-primary">
                 <i class="bi bi-plus-lg me-1"></i> Create Email
             </a>
             <form action="{{ route('tools.mail-manager.fetch') }}" method="POST" class="d-inline">
                 @csrf
+                @if($activeMailbox)
+                <input type="hidden" name="mailbox" value="{{ $activeMailbox }}">
+                @endif
                 <button type="submit" class="btn btn-primary">
                     <i class="bi bi-download me-1"></i> Fetch Emails
                 </button>
@@ -32,6 +45,12 @@
 @if (session('error'))
     <div class="alert alert-danger alert-dismissible fade show d-flex align-items-center py-2" role="alert">
         <i class="bi bi-exclamation-triangle-fill me-2"></i>{{ session('error') }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+@endif
+@if (session('warning'))
+    <div class="alert alert-warning alert-dismissible fade show d-flex align-items-center py-2" role="alert">
+        <i class="bi bi-exclamation-triangle me-2"></i>{{ session('warning') }}
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     </div>
 @endif
@@ -66,6 +85,17 @@
     </div>
 </div>
 
+@if($activeMailbox && ($pensionLatestEmailAt ?? null))
+    @php $latestIsToday = $pensionLatestEmailAt->isToday(); @endphp
+    @if(! $latestIsToday)
+    <div class="alert alert-warning py-2 small mb-3">
+        <strong>Latest email received:</strong> {{ $pensionLatestEmailAt->format('M d, Y H:i') }}
+        (nothing from {{ now()->format('M d, Y') }} yet in the <code>{{ config('pension.mailbox') }}</code> mailbox on Microsoft 365).
+        If you sent a test today, ask IT to ensure mail to <code>{{ config('pension.mailbox') }}</code> is delivered to the pension inbox Graph can read.
+    </div>
+    @endif
+@endif
+
 {{-- Fixed-height container: only inner panels scroll, not the page --}}
 <div class="mail-manager-panels d-flex border rounded overflow-hidden bg-white shadow-sm">
     {{-- Left: Email list --}}
@@ -73,6 +103,9 @@
         <div class="p-2 border-bottom bg-light flex-shrink-0">
             <form method="GET" action="{{ route('tools.mail-manager') }}" class="d-flex flex-wrap gap-2 align-items-center">
                 <input type="hidden" name="selected" value="{{ $selected ?? '' }}">
+                @if($activeMailbox)
+                <input type="hidden" name="mailbox" value="{{ $activeMailbox }}">
+                @endif
                 <div class="input-group input-group-sm flex-grow-1" style="min-width: 140px;">
                     <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
                     <input type="text" name="search" class="form-control" placeholder="Search..." value="{{ $search ?? '' }}">
@@ -85,13 +118,13 @@
                 </select>
                 <button type="submit" class="btn btn-outline-primary btn-sm">Search</button>
                 @if($search ?? null)
-                    <a href="{{ route('tools.mail-manager', ['selected' => $selected ?? '', 'per_page' => $perPageParam ?? '50']) }}" class="btn btn-outline-secondary btn-sm">Clear</a>
+                    <a href="{{ route('tools.mail-manager', array_merge($mailboxQuery, ['selected' => $selected ?? '', 'per_page' => $perPageParam ?? '50'])) }}" class="btn btn-outline-secondary btn-sm">Clear</a>
                 @endif
             </form>
         </div>
         <div class="mail-list-scroll flex-grow-1 overflow-y-auto">
             @forelse($emails ?? [] as $email)
-            <a href="{{ route('tools.mail-manager', ['selected' => $email->id, 'search' => $search ?? '', 'page' => $page ?? 1, 'per_page' => $perPageParam ?? '50']) }}"
+            <a href="{{ route('tools.mail-manager', array_merge($mailboxQuery, ['selected' => $email->id, 'search' => $search ?? '', 'page' => $page ?? 1, 'per_page' => $perPageParam ?? '50'])) }}"
                class="list-group-item list-group-item-action py-2 px-3 text-decoration-none border-0 border-bottom rounded-0 {{ ($selected ?? null) == $email->id ? 'active' : '' }}">
                 <div class="d-flex justify-content-between align-items-start gap-2">
                     <span class="fw-semibold small text-truncate">{{ $email->from_name ?: $email->from_address }}</span>
@@ -123,10 +156,10 @@
             <nav>
                 <ul class="pagination pagination-sm mb-0">
                     <li class="page-item {{ ($page ?? 1) <= 1 ? 'disabled' : '' }}">
-                        <a class="page-link" href="{{ route('tools.mail-manager', ['page' => ($page ?? 1) - 1, 'search' => $search ?? '', 'selected' => $selected ?? '', 'per_page' => $perPageParam ?? '50']) }}"><i class="bi bi-chevron-left"></i></a>
+                        <a class="page-link" href="{{ route('tools.mail-manager', array_merge($mailboxQuery, ['page' => ($page ?? 1) - 1, 'search' => $search ?? '', 'selected' => $selected ?? '', 'per_page' => $perPageParam ?? '50'])) }}"><i class="bi bi-chevron-left"></i></a>
                     </li>
                     <li class="page-item {{ ($page ?? 1) * ($perPage ?? 50) >= ($total ?? 0) ? 'disabled' : '' }}">
-                        <a class="page-link" href="{{ route('tools.mail-manager', ['page' => ($page ?? 1) + 1, 'search' => $search ?? '', 'selected' => $selected ?? '', 'per_page' => $perPageParam ?? '50']) }}"><i class="bi bi-chevron-right"></i></a>
+                        <a class="page-link" href="{{ route('tools.mail-manager', array_merge($mailboxQuery, ['page' => ($page ?? 1) + 1, 'search' => $search ?? '', 'selected' => $selected ?? '', 'per_page' => $perPageParam ?? '50'])) }}"><i class="bi bi-chevron-right"></i></a>
                     </li>
                 </ul>
             </nav>

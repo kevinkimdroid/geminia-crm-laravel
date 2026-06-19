@@ -1427,6 +1427,57 @@ class ErpClientService
     }
 
     /**
+     * Find one policy row in the partial/full maturities register (PPM_EXPECTED_DATE) for a given date.
+     * Used when local maturities_cache misses but the UI listed a maturity event that differs from
+     * LMS_INDIVIDUAL_CRM_VIEW.MATURITY_DATE (final contractual maturity).
+     *
+     * @return array<string, mixed>|null
+     */
+    public function findMaturityEventInRegister(string $policyNumber, string $maturityIso): ?array
+    {
+        $policyNumber = trim($policyNumber);
+        if ($policyNumber === '') {
+            return null;
+        }
+
+        try {
+            $maturityIso = \Carbon\Carbon::parse($maturityIso)->format('Y-m-d');
+        } catch (\Throwable $e) {
+            return null;
+        }
+
+        $result = $this->getMaturingPoliciesFromHttpApi($maturityIso, $maturityIso);
+        if (! empty($result['error']) || empty($result['data'])) {
+            return null;
+        }
+
+        $norm = static fn (?string $v) => strtoupper(trim((string) $v));
+        $termNorm = $norm($policyNumber);
+
+        foreach ($result['data'] as $row) {
+            $r = is_array($row) ? $row : (array) $row;
+            $pol = $norm($r['policy_number'] ?? $r['policy_no'] ?? '');
+            if ($pol === '' || $pol !== $termNorm) {
+                continue;
+            }
+            $m = $r['maturity'] ?? $r['maturity_date'] ?? null;
+            if ($m === null || $m === '') {
+                continue;
+            }
+            try {
+                $mIso = \Carbon\Carbon::parse($m)->format('Y-m-d');
+            } catch (\Throwable $e) {
+                continue;
+            }
+            if ($mIso === $maturityIso) {
+                return $r;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Fallback: fetch from /clients in batches and filter by maturity date.
      */
     protected function getMaturingPoliciesFromClientsFallback(string $from, string $to, ?string $product): array

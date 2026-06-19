@@ -1,5 +1,25 @@
 <?php
 
+if (! function_exists('safe_cache_remember')) {
+    /**
+     * Cache::remember that falls back to the callback when the cache store is unavailable
+     * (e.g. missing or unwritable storage/framework/cache/data on the server).
+     */
+    function safe_cache_remember(string $key, int|\DateInterval $ttl, callable $callback): mixed
+    {
+        try {
+            return \Illuminate\Support\Facades\Cache::remember($key, $ttl, $callback);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('safe_cache_remember failed, using live data', [
+                'key' => $key,
+                'error' => $e->getMessage(),
+            ]);
+
+            return $callback();
+        }
+    }
+}
+
 if (! function_exists('ticket_categories')) {
     /**
      * Get all ticket categories from the CRM (vtiger) merged with config defaults.

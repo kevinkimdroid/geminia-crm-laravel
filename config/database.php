@@ -207,6 +207,32 @@ return [
             ]));
         })(),
 
+        /*
+        | Receipts (Oracle/PL-SQL) — Finance > Receipt reprint.
+        |
+        | Reads from the FMS receipts table and its PL/SQL helper packages
+        | (fms_rcts_pkg, fms_gen_pkg, tqc_interfaces_pkg, NUMBER_TO_WORDS), which
+        | live in the receipts owner schema (TQ_FMS). Those packages must be
+        | called by the OWNER user: calling them cross-schema as the ERP user
+        | (TQ_LMS) drops the session with ORA-03113. This connection therefore
+        | authenticates as the receipts owner. It points at the same database as
+        | the ERP connection by default (host/port/service fall back to ERP_*).
+        */
+        'receipts' => [
+            'driver' => 'oracle',
+            'tns' => env('RECEIPT_DB_TNS', env('ERP_TNS', '')),
+            'host' => env('RECEIPT_DB_HOST', env('ERP_HOST', '')),
+            'port' => env('RECEIPT_DB_PORT', env('ERP_PORT', '1521')),
+            'database' => env('RECEIPT_DB_SERVICE_NAME', env('ERP_SERVICE_NAME', '')),
+            'service_name' => env('RECEIPT_DB_SERVICE_NAME', env('ERP_SERVICE_NAME', '')),
+            'username' => env('RECEIPT_DB_USERNAME', ''),
+            'password' => env('RECEIPT_DB_PASSWORD', ''),
+            'charset' => env('RECEIPT_DB_CHARSET', 'AL32UTF8'),
+            'prefix' => '',
+            'prefix_schema' => env('RECEIPT_DB_SCHEMA_PREFIX', ''),
+            'skip_session_vars' => true,
+        ],
+
     ],
 
     /*

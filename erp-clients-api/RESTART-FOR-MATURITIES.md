@@ -1,7 +1,10 @@
 # Maturities Support – Restart Required
 
-The `/maturities` and `/clients/maturities` endpoints were added for the maturities page.  
-**You must restart the ERP Clients API** for them to be available.
+The `/maturities` and `/clients/maturities` endpoints use **partial maturities**
+(`LMS_POLICY_PRTL_MATURITIES.PPM_EXPECTED_DATE`), not `LMS_INDIVIDUAL_CRM_VIEW.MATURITY_DATE`.
+The old CRM-view query fails with `ORA-00932` and returns incomplete data.
+
+**You must restart the ERP Clients API** after updating `app.py` for maturities to work.
 
 ## Steps
 

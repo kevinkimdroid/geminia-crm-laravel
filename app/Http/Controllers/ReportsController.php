@@ -12,9 +12,11 @@ use App\Exports\RealIssuesBacklogExport;
 use App\Exports\AssignmentHandlersExport;
 use App\Exports\BouncedEmailsExport;
 use App\Exports\TicketWorkloadPerformanceExport;
+use App\Exports\WorkActivitiesExport;
 use Carbon\Carbon;
 use App\Models\Ticket;
 use App\Models\TicketReassignment;
+use App\Models\UserReportingLine;
 use App\Models\VtigerUser;
 use App\Models\WorkTicket;
 use App\Models\WorkTicketUpdate;
@@ -25,6 +27,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Response;
@@ -238,6 +241,571 @@ class ReportsController
             'target' => $target,
             'summary' => $dataset['summary'],
         ]);
+    }
+
+    public function workActivities(CrmService $crm, Request $request, UserDepartmentService $userDept): View
+    {
+        [$dateFrom, $dateTo] = $this->resolveDateRange($request, now()->startOfMonth(), now());
+
+        $sourceRaw = strtolower((string) $request->get('source', 'all'));
+        $source = in_array($sourceRaw, ['all', 'calendar', 'work', 'ticket'], true) ? $sourceRaw : 'all';
+
+        $typeRaw = $request->get('type');
+        $activityType = is_string($typeRaw) && trim($typeRaw) !== '' ? trim($typeRaw) : null;
+
+        $searchRaw = $request->get('search');
+        $search = is_string($searchRaw) && trim($searchRaw) !== '' ? trim($searchRaw) : null;
+
+        $scope = $this->resolveWorkActivitiesScope($request);
+
+        $detailLimit = 500;
+        $cacheKey = 'reports:work-activities:' . sha1(json_encode([
+            $dateFrom, $dateTo, $source, $activityType, $search, $scope['owner_ids'], $detailLimit,
+        ]));
+        $dataset = Cache::remember($cacheKey, 120, fn () => $this->buildWorkActivitiesDataset(
+            $crm,
+            $userDept,
+            $dateFrom,
+            $dateTo,
+            $source,
+            $activityType,
+            $search,
+            $scope['owner_ids'],
+            $detailLimit
+        ));
+
+        // Active users for the "narrow to one person" picker (admins: all; managers: their team).
+        if ($scope['is_admin']) {
+            $usersList = Cache::remember('ticket_assign_users', 300, fn () => $crm->getActiveUsers());
+        } elseif ($scope['is_manager']) {
+            $teamIds = array_values(array_unique(array_merge([$scope['self_id']], $scope['reportees'])));
+            $usersList = VtigerUser::on('vtiger')
+                ->whereIn('id', $teamIds)
+                ->orderBy('first_name')->orderBy('last_name')
+                ->get(['id', 'user_name', 'first_name', 'last_name']);
+        } else {
+            $usersList = collect();
+        }
+
+        return view('reports.work-activities', [
+            'dateFrom' => $dateFrom,
+            'dateTo' => $dateTo,
+            'source' => $source,
+            'activityType' => $activityType,
+            'search' => $search,
+            'assignedTo' => $scope['assigned_to'],
+            'managerId' => $scope['manager_id'],
+            'isAdmin' => $scope['is_admin'],
+            'isManager' => $scope['is_manager'],
+            'users' => $usersList,
+            'managers' => $scope['managers'],
+            'summary' => $dataset['summary'],
+            'userRows' => $dataset['userRows'],
+            'detailRows' => $dataset['detailRows'],
+            'detailLimit' => $detailLimit,
+            'detailTruncated' => $dataset['detailTruncated'],
+        ]);
+    }
+
+    /**
+     * Resolve who the viewer may see in the Work Activities report.
+     *
+     * - Admin: everyone by default; may pick a manager (their whole team) or a single user.
+     * - Manager (has reportees): their team (self + reportees); may narrow to one team member.
+     * - Regular user: themselves only.
+     *
+     * @return array{owner_ids: ?array<int>, self_id: int, is_admin: bool, is_manager: bool,
+     *   reportees: array<int>, manager_id: ?int, assigned_to: ?int, managers: \Illuminate\Support\Collection}
+     */
+    private function resolveWorkActivitiesScope(Request $request): array
+    {
+        $user = Auth::guard('vtiger')->user() ?? Auth::user();
+        $isAdmin = $user && method_exists($user, 'isAdministrator') && $user->isAdministrator();
+        $selfId = (int) ($user->id ?? $user?->getAuthIdentifier() ?? 0);
+
+        $reportees = $this->reporteeIds($selfId);
+        $isManager = ! empty($reportees);
+
+        $managerId = ($isAdmin && $request->filled('manager_id')) ? (int) $request->get('manager_id') : null;
+        $assignedTo = $request->filled('assigned_to') ? (int) $request->get('assigned_to') : null;
+
+        if ($isAdmin) {
+            $managers = Cache::remember('reports:work-activities:managers', 300, function () {
+                $ids = UserReportingLine::query()->distinct()->pluck('manager_id')
+                    ->map(fn ($id) => (int) $id)->filter(fn ($id) => $id > 0)->unique()->values()->all();
+                if (empty($ids)) {
+                    return collect();
+                }
+
+                return VtigerUser::on('vtiger')->whereIn('id', $ids)
+                    ->orderBy('first_name')->orderBy('last_name')
+                    ->get(['id', 'user_name', 'first_name', 'last_name']);
+            });
+
+            if ($managerId) {
+                $ownerIds = array_values(array_unique(array_merge([$managerId], $this->reporteeIds($managerId))));
+            } elseif ($assignedTo) {
+                $ownerIds = [$assignedTo];
+            } else {
+                $ownerIds = null; // all users
+            }
+        } elseif ($isManager) {
+            $allowed = array_values(array_unique(array_merge([$selfId], $reportees)));
+            $ownerIds = ($assignedTo && in_array($assignedTo, $allowed, true)) ? [$assignedTo] : $allowed;
+            $managers = collect();
+        } else {
+            $ownerIds = [$selfId];
+            $assignedTo = null;
+            $managers = collect();
+        }
+
+        return [
+            'owner_ids' => $ownerIds,
+            'self_id' => $selfId,
+            'is_admin' => (bool) $isAdmin,
+            'is_manager' => $isManager,
+            'reportees' => $reportees,
+            'manager_id' => $managerId,
+            'assigned_to' => $assignedTo,
+            'managers' => $managers,
+        ];
+    }
+
+    /**
+     * Vtiger user ids that report to the given manager (from user_reporting_lines).
+     *
+     * @return array<int>
+     */
+    private function reporteeIds(int $managerId): array
+    {
+        if ($managerId <= 0) {
+            return [];
+        }
+
+        return UserReportingLine::query()
+            ->where('manager_id', $managerId)
+            ->pluck('user_id')
+            ->map(fn ($id) => (int) $id)
+            ->filter(fn ($id) => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    public function exportWorkActivities(CrmService $crm, UserDepartmentService $userDept, Request $request)
+    {
+        [$dateFrom, $dateTo] = $this->resolveDateRange($request, now()->startOfMonth(), now());
+
+        $sourceRaw = strtolower((string) $request->get('source', 'all'));
+        $source = in_array($sourceRaw, ['all', 'calendar', 'work', 'ticket'], true) ? $sourceRaw : 'all';
+
+        $typeRaw = $request->get('type');
+        $activityType = is_string($typeRaw) && trim($typeRaw) !== '' ? trim($typeRaw) : null;
+        $searchRaw = $request->get('search');
+        $search = is_string($searchRaw) && trim($searchRaw) !== '' ? trim($searchRaw) : null;
+
+        $viewScope = $this->resolveWorkActivitiesScope($request);
+
+        $scope = strtolower((string) $request->get('scope', 'detail'));
+        // Summary export needs no detail rows; detail export caps at a sane upper bound.
+        $exportDetailLimit = $scope === 'summary' ? 1 : 20000;
+        $dataset = $this->buildWorkActivitiesDataset(
+            $crm,
+            $userDept,
+            $dateFrom,
+            $dateTo,
+            $source,
+            $activityType,
+            $search,
+            $viewScope['owner_ids'],
+            $exportDetailLimit
+        );
+
+        if ($scope === 'summary') {
+            $headings = ['User', 'Department', 'Total Activities', 'Calendar Activities', 'CRM Tickets', 'Work Ticket Updates', 'Time Logged (mins)', 'Last Activity'];
+            $rows = $dataset['userRows']->map(fn ($r) => [
+                (string) $r->user_name,
+                (string) ($r->department ?? ''),
+                (int) $r->total,
+                (int) $r->calendar_count,
+                (int) $r->ticket_count,
+                (int) $r->work_count,
+                (int) $r->time_spent_minutes,
+                $r->last_activity ? $this->formatDateTimeValue($r->last_activity, 'Y-m-d H:i') : '',
+            ])->values()->toArray();
+            $filename = 'work-activities-summary-' . $dateFrom . '-to-' . $dateTo;
+        } else {
+            $headings = ['User', 'Department', 'Source', 'Type', 'Subject / Update', 'Contact', 'Ticket', 'Ticket title', 'Ticket status', 'Activity status', 'Activity date'];
+            $rows = $dataset['detailRows']->map(fn ($r) => [
+                (string) $r->user_name,
+                (string) ($r->department ?? ''),
+                (string) $r->source,
+                (string) $r->type,
+                (string) $r->subject,
+                (string) ($r->contact ?? ''),
+                (string) ($r->ticket_no ?? ''),
+                (string) ($r->ticket_title ?? ''),
+                (string) ($r->ticket_status ?? ''),
+                (string) ($r->status ?? ''),
+                $r->activity_date ? $this->formatDateTimeValue($r->activity_date, 'Y-m-d H:i') : '',
+            ])->values()->toArray();
+            $filename = 'work-activities-' . $dateFrom . '-to-' . $dateTo;
+        }
+
+        if ($request->get('format') === 'csv') {
+            return $this->csvResponse($rows, $headings, $filename);
+        }
+
+        return Excel::download(new WorkActivitiesExport($rows, $headings), $filename . '.xlsx');
+    }
+
+    /**
+     * Build the combined "work activities by user" dataset from Vtiger calendar activities
+     * and internal work ticket updates.
+     *
+     * @return array{
+     *   summary: array<string, int>,
+     *   userRows: \Illuminate\Support\Collection<int, object>,
+     *   detailRows: \Illuminate\Support\Collection<int, object>,
+     *   detailTruncated: bool
+     * }
+     */
+    private function buildWorkActivitiesDataset(
+        CrmService $crm,
+        UserDepartmentService $userDept,
+        string $dateFrom,
+        string $dateTo,
+        string $source,
+        ?string $activityType,
+        ?string $search,
+        ?array $ownerIds,
+        int $detailLimit
+    ): array {
+        $rangeStart = $dateFrom . ' 00:00:00';
+        $rangeEnd = $dateTo . ' 23:59:59';
+
+        $includeCalendar = $source === 'all' || $source === 'calendar';
+        $includeWork = $source === 'all' || $source === 'work';
+        // CRM tickets carry no calendar "type", so skip them when a type filter is set.
+        $includeTicket = ($source === 'all' || $source === 'ticket') && $activityType === null;
+
+        // ---------------------------------------------------------------------
+        // Per-user summary — aggregated in SQL so we never hydrate every row.
+        // ---------------------------------------------------------------------
+        $agg = [];
+        $ensure = function (int $uid, ?string $name = null) use (&$agg): object {
+            if (! isset($agg[$uid])) {
+                $agg[$uid] = (object) [
+                    'user_id' => $uid,
+                    'user_name' => null,
+                    'department' => null,
+                    'calendar_count' => 0,
+                    'ticket_count' => 0,
+                    'work_count' => 0,
+                    'time_spent_minutes' => 0,
+                    'last_activity' => null,
+                ];
+            }
+            if ($name !== null && ($agg[$uid]->user_name === null || $agg[$uid]->user_name === '')) {
+                $clean = trim($name);
+                if ($clean !== '') {
+                    $agg[$uid]->user_name = $clean;
+                }
+            }
+
+            return $agg[$uid];
+        };
+        $touchLast = function (object $obj, $value): void {
+            $formatted = $this->formatDateTimeValue($value, 'Y-m-d H:i:s');
+            if ($formatted !== '' && ($obj->last_activity === null || $formatted > $obj->last_activity)) {
+                $obj->last_activity = $formatted;
+            }
+        };
+
+        if ($includeCalendar) {
+            foreach ($crm->getWorkActivitiesAssigneeSummaryReport($dateFrom, $dateTo, $ownerIds, $activityType, $search) as $r) {
+                $o = $ensure((int) ($r->smownerid ?? 0), (string) ($r->user_name ?? ''));
+                $o->calendar_count += (int) ($r->cnt ?? 0);
+                $touchLast($o, $r->last_at ?? null);
+            }
+        }
+
+        if ($includeTicket) {
+            foreach ($crm->getTicketActivitiesAssigneeSummaryReport($dateFrom, $dateTo, $ownerIds, $search) as $r) {
+                $o = $ensure((int) ($r->smownerid ?? 0), (string) ($r->user_name ?? ''));
+                $o->ticket_count += (int) ($r->cnt ?? 0);
+                $touchLast($o, $r->last_at ?? null);
+            }
+        }
+
+        if ($includeWork) {
+            $workAggQuery = WorkTicketUpdate::query()
+                ->join('work_tickets as wt', 'work_ticket_updates.work_ticket_id', '=', 'wt.id')
+                ->whereBetween('work_ticket_updates.created_at', [$rangeStart, $rangeEnd])
+                ->whereNotNull('work_ticket_updates.user_id');
+
+            if ($ownerIds !== null) {
+                if (empty($ownerIds)) {
+                    $workAggQuery->whereRaw('1 = 0');
+                } else {
+                    $workAggQuery->whereIn('work_ticket_updates.user_id', $ownerIds);
+                }
+            }
+
+            if ($search !== null) {
+                $workAggQuery->where(function ($q) use ($search) {
+                    $q->where('work_ticket_updates.update_text', 'like', '%' . $search . '%')
+                        ->orWhere('wt.ticket_no', 'like', '%' . $search . '%')
+                        ->orWhere('wt.title', 'like', '%' . $search . '%');
+                });
+            }
+
+            $workAgg = $workAggQuery
+                ->groupBy('work_ticket_updates.user_id')
+                ->selectRaw('work_ticket_updates.user_id as user_id, COUNT(*) as cnt, COALESCE(SUM(work_ticket_updates.time_spent_minutes), 0) as mins, MAX(work_ticket_updates.created_at) as last_at')
+                ->get();
+
+            foreach ($workAgg as $r) {
+                $o = $ensure((int) ($r->user_id ?? 0));
+                $o->work_count += (int) ($r->cnt ?? 0);
+                $o->time_spent_minutes += (int) ($r->mins ?? 0);
+                $touchLast($o, $r->last_at ?? null);
+            }
+        }
+
+        $userRows = collect(array_values($agg))->map(function (object $o) {
+            $o->total = $o->calendar_count + $o->ticket_count + $o->work_count;
+
+            return $o;
+        });
+
+        // Resolve names for work-only users (the work aggregate has no name column).
+        $missingIds = $userRows
+            ->filter(fn ($o) => $o->user_name === null || $o->user_name === '')
+            ->pluck('user_id')
+            ->filter(fn ($id) => $id > 0)
+            ->values()
+            ->all();
+        if (! empty($missingIds)) {
+            $names = VtigerUser::on('vtiger')
+                ->whereIn('id', $missingIds)
+                ->get()
+                ->mapWithKeys(fn (VtigerUser $u) => [(int) $u->id => $u->full_name]);
+            $userRows = $userRows->map(function (object $o) use ($names) {
+                if ($o->user_name === null || $o->user_name === '') {
+                    $o->user_name = (string) ($names[$o->user_id] ?? ('User #' . $o->user_id));
+                }
+
+                return $o;
+            });
+        }
+
+        $userIds = $userRows->pluck('user_id')->filter()->unique()->values()->all();
+        $departments = $userDept->getDepartmentsForUsers($userIds);
+        $userRows = $userRows
+            ->map(function (object $o) use ($departments) {
+                $o->department = $departments[$o->user_id] ?? null;
+
+                return $o;
+            })
+            ->sortByDesc('total')
+            ->values();
+
+        $deptByUser = $userRows->mapWithKeys(fn ($r) => [$r->user_id => $r->department]);
+        $totalActivities = (int) $userRows->sum('total');
+
+        // ---------------------------------------------------------------------
+        // Detailed log — only fetch up to the display/export limit per source.
+        // ---------------------------------------------------------------------
+        $details = collect();
+
+        // Source 1: Vtiger calendar activities (Task / Event / Meeting / Call).
+        if ($includeCalendar) {
+            $calendar = $crm->getWorkActivitiesReport(
+                $dateFrom,
+                $dateTo,
+                $ownerIds,
+                $activityType,
+                null,
+                $search,
+                $detailLimit
+            );
+
+            foreach ($calendar as $row) {
+                $start = (string) ($row->date_start ?? '');
+                $time = trim((string) ($row->time_start ?? ''));
+                $activityDate = $start !== '' ? trim($start . ' ' . $time) : null;
+                $name = trim((string) ($row->user_name ?? ''));
+
+                $details->push((object) [
+                    'user_id' => (int) ($row->smownerid ?? 0),
+                    'user_name' => $name !== '' ? $name : 'Unassigned',
+                    'source' => 'Calendar',
+                    'type' => (string) ($row->activitytype ?? 'Task'),
+                    'subject' => (string) ($row->subject ?? ''),
+                    'contact' => trim((string) ($row->related_to_name ?? '')),
+                    'ticket_id' => (int) ($row->related_ticket_id ?? 0),
+                    'ticket_module' => 'crm',
+                    'ticket_no' => trim((string) ($row->related_ticket_no ?? '')),
+                    'ticket_title' => trim((string) ($row->related_ticket_title ?? '')),
+                    'ticket_status' => trim((string) ($row->related_ticket_status ?? '')),
+                    'status' => (string) ($row->status ?? ''),
+                    'activity_date' => $activityDate,
+                    'time_spent_minutes' => 0,
+                ]);
+            }
+        }
+
+        // Source 2: internal work ticket updates (progress logs).
+        if ($includeWork) {
+            $workQuery = WorkTicketUpdate::query()
+                ->join('work_tickets as wt', 'work_ticket_updates.work_ticket_id', '=', 'wt.id')
+                ->whereBetween('work_ticket_updates.created_at', [$rangeStart, $rangeEnd])
+                ->whereNotNull('work_ticket_updates.user_id');
+
+            if ($ownerIds !== null) {
+                if (empty($ownerIds)) {
+                    $workQuery->whereRaw('1 = 0');
+                } else {
+                    $workQuery->whereIn('work_ticket_updates.user_id', $ownerIds);
+                }
+            }
+
+            if ($search !== null) {
+                $workQuery->where(function ($q) use ($search) {
+                    $q->where('work_ticket_updates.update_text', 'like', '%' . $search . '%')
+                        ->orWhere('wt.ticket_no', 'like', '%' . $search . '%')
+                        ->orWhere('wt.title', 'like', '%' . $search . '%');
+                });
+            }
+
+            $workUpdates = $workQuery
+                ->orderByDesc('work_ticket_updates.created_at')
+                ->limit($detailLimit)
+                ->get([
+                    'work_ticket_updates.user_id',
+                    'work_ticket_updates.update_text',
+                    'work_ticket_updates.status_after_update',
+                    'work_ticket_updates.time_spent_minutes',
+                    'work_ticket_updates.created_at',
+                    'wt.id as ticket_id',
+                    'wt.ticket_no',
+                    'wt.title as ticket_title',
+                    'wt.status as ticket_status',
+                ]);
+
+            $workUserIds = $workUpdates->pluck('user_id')->map(fn ($id) => (int) $id)->filter()->unique()->values()->all();
+            $workUserNames = empty($workUserIds)
+                ? collect()
+                : VtigerUser::on('vtiger')
+                    ->whereIn('id', $workUserIds)
+                    ->get()
+                    ->mapWithKeys(fn (VtigerUser $u) => [(int) $u->id => $u->full_name]);
+
+            foreach ($workUpdates as $row) {
+                $uid = (int) ($row->user_id ?? 0);
+                $statusAfter = trim((string) ($row->status_after_update ?? ''));
+
+                $details->push((object) [
+                    'user_id' => $uid,
+                    'user_name' => (string) ($workUserNames[$uid] ?? ('User #' . $uid)),
+                    'source' => 'Work Ticket',
+                    'type' => 'Update',
+                    'subject' => (string) ($row->update_text ?? ''),
+                    'contact' => '',
+                    'ticket_id' => (int) ($row->ticket_id ?? 0),
+                    'ticket_module' => 'work',
+                    'ticket_no' => trim((string) ($row->ticket_no ?? '')),
+                    'ticket_title' => trim((string) ($row->ticket_title ?? '')),
+                    'ticket_status' => trim((string) ($row->ticket_status ?? '')),
+                    'status' => $statusAfter !== '' ? $statusAfter : trim((string) ($row->ticket_status ?? '')),
+                    'activity_date' => $row->created_at,
+                    'time_spent_minutes' => (int) ($row->time_spent_minutes ?? 0),
+                ]);
+            }
+        }
+
+        // Source 3: CRM trouble tickets (HelpDesk) created in the range, attributed to owner.
+        // Skipped when a calendar-only activity type filter is applied.
+        if ($includeTicket) {
+            $tickets = $crm->getTicketActivitiesReport(
+                $dateFrom,
+                $dateTo,
+                $ownerIds,
+                $search,
+                $detailLimit
+            );
+
+            foreach ($tickets as $row) {
+                $name = trim((string) ($row->user_name ?? ''));
+
+                $details->push((object) [
+                    'user_id' => (int) ($row->smownerid ?? 0),
+                    'user_name' => $name !== '' ? $name : 'Unassigned',
+                    'source' => 'CRM Ticket',
+                    'type' => 'Ticket',
+                    'subject' => (string) ($row->title ?? ''),
+                    'contact' => trim((string) ($row->contact_name ?? '')),
+                    'ticket_id' => (int) ($row->ticketid ?? 0),
+                    'ticket_module' => 'crm',
+                    'ticket_no' => trim((string) ($row->ticket_no ?? '')),
+                    'ticket_title' => trim((string) ($row->title ?? '')),
+                    'ticket_status' => trim((string) ($row->status ?? '')),
+                    'status' => (string) ($row->status ?? ''),
+                    'activity_date' => $row->createdtime,
+                    'time_spent_minutes' => 0,
+                ]);
+            }
+        }
+
+        $detailRows = $details
+            ->map(function (object $r) use ($deptByUser) {
+                $r->department = $deptByUser[$r->user_id] ?? null;
+
+                return $r;
+            })
+            ->sortByDesc(fn ($r) => $this->formatDateTimeValue($r->activity_date, 'Y-m-d H:i:s'))
+            ->take($detailLimit)
+            ->values();
+
+        $summary = [
+            'total_activities' => $totalActivities,
+            'calendar_total' => (int) $userRows->sum('calendar_count'),
+            'ticket_total' => (int) $userRows->sum('ticket_count'),
+            'work_total' => (int) $userRows->sum('work_count'),
+            'users' => $userRows->count(),
+            'time_spent_minutes' => (int) $userRows->sum('time_spent_minutes'),
+            'avg_per_user' => $userRows->count() > 0 ? round($totalActivities / $userRows->count(), 1) : 0,
+        ];
+
+        return [
+            'summary' => $summary,
+            'userRows' => $userRows,
+            'detailRows' => $detailRows,
+            'detailTruncated' => $detailRows->count() < $totalActivities,
+        ];
+    }
+
+    /**
+     * Parse and normalize a date_from / date_to range from the request.
+     *
+     * @return array{0: string, 1: string}
+     */
+    private function resolveDateRange(Request $request, Carbon $defaultFrom, Carbon $defaultTo): array
+    {
+        $dateFrom = (string) $request->get('date_from', $defaultFrom->format('Y-m-d'));
+        $dateTo = (string) $request->get('date_to', $defaultTo->format('Y-m-d'));
+        if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateFrom)) {
+            $dateFrom = $defaultFrom->format('Y-m-d');
+        }
+        if (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateTo)) {
+            $dateTo = $defaultTo->format('Y-m-d');
+        }
+        if ($dateFrom > $dateTo) {
+            [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
+        }
+
+        return [$dateFrom, $dateTo];
     }
 
     public function ticketAutomationAnalysis(): View

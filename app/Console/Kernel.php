@@ -15,6 +15,9 @@ class Kernel extends ConsoleKernel
         $schedule->command('maturities:sync')->dailyAt('06:00');
         $schedule->command('tickets:create-maturity-reminders')->dailyAt('08:00');
         $schedule->command('tickets:sla-violation-reminders')->hourly();
+        if (config('pension.auto_ticket.enabled', false)) {
+            $schedule->command('pension:escalate-sla-tickets')->hourly();
+        }
         $schedule->command('maturities:notify-investment')
             ->daily()
             ->dailyAt('07:45')

@@ -22,13 +22,15 @@ class MailManagerController extends Controller
 
     public function create(Request $request): View
     {
-        $sender = config('email-service.sender', config('mail.from.address', 'life@geminialife.co.ke'));
+        $mailbox = $this->normalizeMailbox($request->get('mailbox'));
+        $sender = $mailbox ?: config('email-service.sender', config('mail.from.address', 'life@geminialife.co.ke'));
         $presetFrom = $request->get('from_address');
         $presetFromName = $request->get('from_name');
         return view('tools.mail-manager-create', [
             'recipientAddress' => $sender,
             'presetFrom' => $presetFrom,
             'presetFromName' => $presetFromName,
+            'mailbox' => $mailbox,
         ]);
     }
 
@@ -53,12 +55,30 @@ class MailManagerController extends Controller
         ];
 
         $id = $this->mailService->createEmail($data);
-        return redirect()->route('tools.mail-manager', ['selected' => $id])->with('success', 'Email record created.');
+        $redirectParams = ['selected' => $id];
+        if ($mailbox = $this->normalizeMailbox($request->get('mailbox'))) {
+            $redirectParams['mailbox'] = $mailbox;
+        }
+        return redirect()->route('tools.mail-manager', $redirectParams)->with('success', 'Email record created.');
     }
 
     /** @return View|RedirectResponse */
     public function index(Request $request)
     {
+        $rawMailbox = strtolower(trim((string) $request->get('mailbox', '')));
+        $mailbox = $this->normalizeMailbox($rawMailbox);
+
+        if ($rawMailbox !== '' && $mailbox !== null && $rawMailbox !== $mailbox) {
+            return redirect()->route('tools.mail-manager', array_merge(
+                $request->query(),
+                ['mailbox' => $mailbox]
+            ));
+        }
+
+        if ($mailbox === null && $request->boolean('pension')) {
+            $mailbox = strtolower(trim((string) config('pension.mailbox', ''))) ?: null;
+        }
+
         $search = $request->get('search');
         $page = max(1, (int) $request->get('page', 1));
         $selected = $request->get('selected') ? (int) $request->get('selected') : null;
@@ -67,12 +87,17 @@ class MailManagerController extends Controller
         $perPage = $perPage ?: 50;
         $offset = ($page - 1) * $perPage;
 
-        $emails = $this->mailService->getEmails($perPage, $offset, $search);
-        $total = $this->mailService->getEmailsCount($search);
+        $emails = $this->mailService->getEmails($perPage, $offset, $search, $mailbox);
+        $total = $this->mailService->getEmailsCount($search, $mailbox);
 
         $selectedEmail = null;
         if ($selected) {
-            $selectedEmail = $this->mailService->getEmail($selected);
+            $selectedEmail = $this->mailService->isPensionMailbox($mailbox)
+                ? $this->mailService->getPensionInboxEmail($selected)
+                : $this->mailService->getEmail($selected);
+            if ($selected && $this->mailService->isPensionMailbox($mailbox) && ! $selectedEmail) {
+                $selected = null;
+            }
         }
 
         $mailFetchHealth = MailFetchHealth::get();
@@ -83,6 +108,11 @@ class MailManagerController extends Controller
         $mailFetchHealth['is_stale'] = ! $lastSuccess || $lastSuccess->lt(now()->subMinutes($staleMinutes));
         $mailFetchHealth['stale_minutes'] = $staleMinutes;
 
+        $pensionLatestEmailAt = null;
+        if ($this->mailService->isPensionMailbox($mailbox)) {
+            $pensionLatestEmailAt = $this->mailService->getPensionInboxLatestReceivedAt();
+        }
+
         return view('tools.mail-manager', [
             'emails' => $emails,
             'total' => $total,
@@ -92,9 +122,11 @@ class MailManagerController extends Controller
             'search' => $search,
             'selected' => $selected,
             'selectedEmail' => $selectedEmail,
+            'mailbox' => $mailbox,
             'useMicrosoftGraph' => $this->mailService->useMicrosoftGraph(),
             'useEmailService' => $this->mailService->useHttpEmailService(),
             'mailFetchHealth' => $mailFetchHealth,
+            'pensionLatestEmailAt' => $pensionLatestEmailAt,
         ]);
     }
 
@@ -183,11 +215,13 @@ class MailManagerController extends Controller
 
     public function fetch(Request $request): RedirectResponse
     {
-        set_time_limit(120);
-        $limit = max(50, (int) config('email-service.fetch_limit', 25), (int) config('microsoft-graph.fetch_limit', 25));
+        set_time_limit(300);
+        $mailbox = $this->normalizeMailbox($request->get('mailbox'));
+        $override = $request->filled('limit') ? (int) $request->get('limit') : null;
+        $limit = $this->mailService->resolveFetchLimit($mailbox, $override);
 
         try {
-            $result = $this->mailService->fetchAndStoreEmails('INBOX', $limit);
+            $result = $this->mailService->fetchAndStoreEmails('INBOX', $limit, $mailbox);
         } catch (\Throwable $e) {
             MailFetchHealth::markFailure($e->getMessage(), 'manual');
             if (strpos($e->getMessage(), 'NOOP completed') !== false) {
@@ -199,14 +233,44 @@ class MailManagerController extends Controller
             throw $e;
         }
 
-        if (!empty($result['errors'])) {
+        if (!empty($result['errors']) && ($result['stored'] ?? 0) === 0 && ($result['fetched'] ?? 0) === 0) {
             MailFetchHealth::markFailure(implode(' ', $result['errors']), 'manual');
             return back()->with('error', implode(' ', $result['errors']));
         }
 
         MailFetchHealth::markSuccess($result, 'manual');
         Cache::forget('geminia_emails_count');
-        $msg = "Fetched {$result['fetched']} emails, stored {$result['stored']} new.";
+        $msg = "Fetched {$result['fetched']} pension emails, stored {$result['stored']} new (limit {$limit}).";
+        if ($this->mailService->isPensionMailbox($mailbox)) {
+            $visible = $this->mailService->getEmailsCount(null, $mailbox);
+            $msg .= " {$visible} visible in pension inbox.";
+        }
+        if (! empty($result['notice'])) {
+            $msg .= ' ' . $result['notice'];
+        }
+        if (! empty($result['errors'])) {
+            return back()->with('success', $msg)->with('warning', implode(' ', $result['errors']));
+        }
         return back()->with('success', $msg);
+    }
+
+    protected function normalizeMailbox(mixed $mailbox): ?string
+    {
+        $mailbox = strtolower(trim((string) ($mailbox ?? '')));
+        if ($mailbox === '' || ! filter_var($mailbox, FILTER_VALIDATE_EMAIL)) {
+            return null;
+        }
+
+        $canonical = strtolower(trim((string) config('pension.mailbox', '')));
+        $legacy = array_map('strtolower', [
+            'pensions.support@geminialife.co.ke',
+            'pensionsandinvestments@geminialife.co.ke',
+        ]);
+
+        if ($canonical !== '' && in_array($mailbox, $legacy, true)) {
+            return $canonical;
+        }
+
+        return $mailbox;
     }
 }

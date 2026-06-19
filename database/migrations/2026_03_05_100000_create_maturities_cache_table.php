@@ -8,6 +8,10 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (Schema::hasTable('maturities_cache')) {
+            return;
+        }
+
         Schema::create('maturities_cache', function (Blueprint $table) {
             $table->id();
             $table->string('policy_number', 64)->nullable()->index();

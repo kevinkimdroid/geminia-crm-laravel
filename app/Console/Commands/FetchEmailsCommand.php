@@ -16,14 +16,13 @@ class FetchEmailsCommand extends Command
 
     public function handle(MailService $mailService): int
     {
-        $limit = $this->option('limit')
-            ? (int) $this->option('limit')
-            : max(50, (int) config('email-service.fetch_limit', 25), (int) config('microsoft-graph.fetch_limit', 25));
+        $lifeLimit = $mailService->resolveFetchLimit(null, $this->option('limit') ? (int) $this->option('limit') : null);
+        $pensionLimit = $mailService->resolveFetchLimit(config('pension.mailbox'));
 
-        $this->info("Fetching up to {$limit} emails from INBOX...");
+        $this->info("Fetching up to {$lifeLimit} emails from INBOX...");
 
         try {
-            $result = $mailService->fetchAndStoreEmails('INBOX', $limit);
+            $result = $mailService->fetchAndStoreEmails('INBOX', $lifeLimit);
         } catch (\Throwable $e) {
             MailFetchHealth::markFailure($e->getMessage(), 'scheduler');
             $this->error('Fetch failed: ' . $e->getMessage());
@@ -41,6 +40,20 @@ class FetchEmailsCommand extends Command
         }
 
         Cache::forget('geminia_emails_count');
+
+        if ($pensionMailbox = config('pension.mailbox')) {
+            $this->info("Fetching pension mailbox: {$pensionMailbox} (up to {$pensionLimit})");
+            try {
+                $pensionResult = $mailService->fetchAndStoreEmails('INBOX', $pensionLimit, $pensionMailbox);
+                $this->info("Pension — fetched: {$pensionResult['fetched']}, stored: {$pensionResult['stored']} new.");
+                foreach ($pensionResult['errors'] ?? [] as $err) {
+                    $this->warn("  Pension: {$err}");
+                }
+            } catch (\Throwable $e) {
+                $this->warn('Pension fetch failed: ' . $e->getMessage());
+            }
+        }
+
         return self::SUCCESS;
     }
 }

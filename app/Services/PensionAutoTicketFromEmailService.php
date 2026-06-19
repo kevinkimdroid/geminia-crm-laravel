@@ -2,34 +2,43 @@
 
 namespace App\Services;
 
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 
 /**
- * Auto-create ticket from inbound email and send confirmation with ticket number.
+ * Auto-create CRM tickets from client emails fetched into the pension mailbox inbox.
  */
-class AutoTicketFromEmailService
+class PensionAutoTicketFromEmailService
 {
     public function __construct(
-        protected CrmService $crm
+        protected CrmService $crm,
+        protected MailService $mailService,
+        protected TicketSlaService $sla
     ) {}
 
     /**
-     * Process a newly stored inbound email: create ticket, link it, send auto-reply.
-     *
      * @return array{ticket_id: int|null, sent: bool, error: string|null}
      */
     public function processNewInboundEmail(int $emailId): array
     {
-        $config = config('tickets.auto_ticket_from_email', []);
+        $config = config('pension.auto_ticket', []);
         if (empty($config['enabled'])) {
             return ['ticket_id' => null, 'sent' => false, 'error' => 'disabled'];
+        }
+
+        if (! $this->mailService->isPensionMailboxEmail($emailId)) {
+            return ['ticket_id' => null, 'sent' => false, 'error' => 'not pension mailbox'];
         }
 
         $email = DB::connection('vtiger')->table('mail_manager_emails')->where('id', $emailId)->first();
         if (! $email) {
             return ['ticket_id' => null, 'sent' => false, 'error' => 'Email not found'];
+        }
+
+        if (! empty($email->ticket_id)) {
+            return ['ticket_id' => (int) $email->ticket_id, 'sent' => false, 'error' => 'already linked'];
         }
 
         $fromAddress = trim($email->from_address ?? '');
@@ -41,8 +50,9 @@ class AutoTicketFromEmailService
             return ['ticket_id' => null, 'sent' => false, 'error' => 'Internal sender'];
         }
 
-        if (! $this->isAllowedSenderDomain($fromAddress)) {
-            return ['ticket_id' => null, 'sent' => false, 'error' => 'Sender domain not allowed (only Gmail, Yahoo, Hotmail)'];
+        $ownerId = $this->resolveUserIdByEmail((string) ($config['assign_to_email'] ?? ''));
+        if (! $ownerId) {
+            return ['ticket_id' => null, 'sent' => false, 'error' => 'Assignee user not found: ' . ($config['assign_to_email'] ?? '')];
         }
 
         $contactResult = $this->resolveOrCreateContactWithPolicy($fromAddress, $email->from_name ?? '');
@@ -53,6 +63,9 @@ class AutoTicketFromEmailService
             return ['ticket_id' => null, 'sent' => false, 'error' => 'Could not find or create contact'];
         }
 
+        $category = trim((string) ($config['category'] ?? 'Pension Administration'));
+        $this->sla->setDepartmentTat($category, (int) ($config['tat_hours'] ?? 24));
+
         $description = $this->buildDescription($email);
         if ($policyNumber !== null && $policyNumber !== '' && ! looks_like_kra_pin($policyNumber) && ! looks_like_client_id($policyNumber)) {
             $description = trim($description) . "\n\nRelated policy: " . trim($policyNumber);
@@ -60,40 +73,45 @@ class AutoTicketFromEmailService
 
         try {
             $ticketId = $this->createTicket([
-                'title' => $email->subject ?? 'Re: ' . ($email->subject ?: 'Inquiry'),
+                'title' => $email->subject ?? 'Pension inquiry',
                 'description' => $description,
                 'contact_id' => $contactId,
-                'source' => $config['source'] ?? 'Email',
+                'source' => $config['source'] ?? 'Pension Email',
+                'category' => $category,
+                'priority' => $config['priority'] ?? 'Normal',
+                'owner_id' => $ownerId,
             ]);
 
             DB::connection('vtiger')->table('mail_manager_emails')->where('id', $emailId)->update(['ticket_id' => $ticketId]);
 
             $ticketNo = 'TT' . $ticketId;
-            $title = $email->subject ?? 'Re: ' . ($email->subject ?: 'Inquiry');
-            $ownerId = (int) ($config['assign_to_user_id'] ?? 1);
             try {
                 app(TicketNotificationService::class)->sendTicketCreatedNotification(
                     $ticketId,
                     $ticketNo,
-                    $title,
+                    $email->subject ?? 'Pension inquiry',
                     $ownerId,
                     $contactId,
                     $policyNumber ?: null,
-                    false // skip contact - they get auto-reply
+                    false
                 );
             } catch (\Throwable $notifyEx) {
-                Log::warning('AutoTicketFromEmailService: creation notification failed', ['ticket_id' => $ticketId, 'error' => $notifyEx->getMessage()]);
+                Log::warning('PensionAutoTicketFromEmailService: creation notification failed', [
+                    'ticket_id' => $ticketId,
+                    'error' => $notifyEx->getMessage(),
+                ]);
             }
 
             $sent = $this->sendAutoReply($fromAddress, $email->from_name ?? '', $ticketNo, $email->subject ?? 'Your inquiry');
 
-            \Illuminate\Support\Facades\Cache::forget('geminia_ticket_counts_by_status');
-            \Illuminate\Support\Facades\Cache::forget('geminia_tickets_count');
+            Cache::forget('geminia_ticket_counts_by_status');
+            Cache::forget('geminia_tickets_count');
             \App\Events\DashboardStatsUpdated::dispatch();
 
             return ['ticket_id' => $ticketId, 'sent' => $sent, 'error' => null];
         } catch (\Throwable $e) {
-            Log::error('AutoTicketFromEmailService', ['email_id' => $emailId, 'error' => $e->getMessage()]);
+            Log::error('PensionAutoTicketFromEmailService', ['email_id' => $emailId, 'error' => $e->getMessage()]);
+
             return ['ticket_id' => null, 'sent' => false, 'error' => $e->getMessage()];
         }
     }
@@ -102,43 +120,28 @@ class AutoTicketFromEmailService
     {
         $address = strtolower($address);
         $internal = array_map('strtolower', array_filter([
+            config('pension.mailbox'),
+            config('pension.msgraph_mailbox'),
             config('email-service.sender'),
             config('mail.from.address'),
-            'life@geminialife.co.ke',
-            'servicinglife@geminialife.co.ke',
-            'financelife@geminialife.co.ke',
-            config('pension.mailbox', 'pensions@geminialife.co.ke'),
         ]));
+
         foreach ($internal as $i) {
             if ($i && (str_contains($address, $i) || str_contains($i, $address))) {
                 return true;
             }
         }
+
         foreach (config('email-service.excluded_sender_domains', []) as $domain) {
             if ($domain && str_ends_with($address, '@' . $domain)) {
                 return true;
             }
         }
+
         return false;
     }
 
     /**
-     * Return true if sender domain is allowed (Gmail, Yahoo, Hotmail only by default).
-     * When allowed_sender_domains is empty, all domains are allowed.
-     */
-    protected function isAllowedSenderDomain(string $address): bool
-    {
-        $domains = config('tickets.auto_ticket_from_email.allowed_sender_domains', []);
-        if (empty($domains)) {
-            return true;
-        }
-        $domain = strtolower(explode('@', $address, 2)[1] ?? '');
-        return $domain !== '' && in_array($domain, $domains, true);
-    }
-
-    /**
-     * Resolve or create contact by email; return contact_id and policy_number when available.
-     *
      * @return array{contact_id: int|null, policy_number: string|null}
      */
     protected function resolveOrCreateContactWithPolicy(string $email, string $name): array
@@ -151,6 +154,7 @@ class AutoTicketFromEmailService
             if ($fullContact && ! empty($fullContact->policy_number ?? '')) {
                 $policyNumber = trim((string) $fullContact->policy_number);
             }
+
             return ['contact_id' => (int) $contact->contactid, 'policy_number' => $policyNumber ?: null];
         }
 
@@ -165,44 +169,37 @@ class AutoTicketFromEmailService
             'client_name' => $name,
         ]);
 
-        if ($contactId && app()->bound(\App\Services\ErpClientService::class)) {
-            $policyNumber = $this->getPolicyFromErpSearchExcludingPin($email);
+        if ($contactId && app()->bound(ErpClientService::class)) {
+            $erpResult = app(ErpClientService::class)->searchClients($email, 5);
+            foreach ($erpResult['data'] ?? [] as $row) {
+                $v = trim((string) ($row['policy_number'] ?? ''));
+                if ($v !== '' && ! looks_like_kra_pin($v)) {
+                    $policyNumber = $v;
+                    break;
+                }
+            }
         }
 
         return ['contact_id' => $contactId, 'policy_number' => $policyNumber ?: null];
     }
 
-    /** Get policy_number from ERP/client search by email. Uses policy_number column only (never policy_no). */
-    protected function getPolicyFromErpSearchExcludingPin(string $email): ?string
-    {
-        $erpResult = app(\App\Services\ErpClientService::class)->searchClients($email, 5);
-        foreach ($erpResult['data'] ?? [] as $row) {
-            $v = trim((string) ($row['policy_number'] ?? ''));
-            if ($v !== '' && ! looks_like_kra_pin($v)) {
-                return $v;
-            }
-        }
-        return null;
-    }
-
     protected function buildDescription(object $email): string
     {
-        $text = $email->body_text ?? '';
-        $text = \Illuminate\Support\Str::limit($text, 8000);
+        $text = \Illuminate\Support\Str::limit($email->body_text ?? '', 8000);
         $from = trim($email->from_name ?? '') ? "{$email->from_name} <{$email->from_address}>" : $email->from_address;
-        return "Received via email from {$from}\n\nSubject: " . ($email->subject ?? '') . "\n\n---\n\n{$text}";
+        $mailbox = config('pension.mailbox', 'pensions@geminialife.co.ke');
+
+        return "Received via pension mailbox ({$mailbox}) from {$from}\n\nSubject: " . ($email->subject ?? '') . "\n\n---\n\n{$text}";
     }
 
     protected function createTicket(array $data): int
     {
-        $config = config('tickets.auto_ticket_from_email', []);
         $userId = \Illuminate\Support\Facades\Auth::guard('vtiger')->id() ?? 1;
-        $ownerId = (int) ($config['assign_to_user_id'] ?? $userId);
-        $category = $config['category'] ?? 'Other';
+        $ownerId = (int) ($data['owner_id'] ?? $userId);
         $now = now()->format('Y-m-d H:i:s');
         $id = (int) DB::connection('vtiger')->table('vtiger_crmentity')->max('crmid') + 1;
 
-        DB::connection('vtiger')->transaction(function () use ($data, $userId, $ownerId, $category, $now, $id) {
+        DB::connection('vtiger')->transaction(function () use ($data, $userId, $ownerId, $now, $id) {
             DB::connection('vtiger')->table('vtiger_crmentity')->insert([
                 'crmid' => $id,
                 'smcreatorid' => $userId,
@@ -218,7 +215,7 @@ class AutoTicketFromEmailService
                 'presence' => 1,
                 'deleted' => 0,
                 'smgroupid' => 0,
-                'source' => $data['source'] ?? 'Email',
+                'source' => $data['source'] ?? 'Pension Email',
                 'label' => $data['title'],
             ]);
 
@@ -227,9 +224,9 @@ class AutoTicketFromEmailService
                 'ticket_no' => 'TT' . $id,
                 'title' => $data['title'],
                 'status' => 'Open',
-                'priority' => 'Normal',
+                'priority' => $data['priority'] ?? 'Normal',
                 'severity' => null,
-                'category' => $category,
+                'category' => $data['category'] ?? 'Pension Administration',
                 'contact_id' => $data['contact_id'],
                 'product_id' => null,
                 'parent_id' => null,
@@ -243,13 +240,13 @@ class AutoTicketFromEmailService
 
     protected function sendAutoReply(string $toAddress, string $toName, string $ticketNo, string $originalSubject): bool
     {
-        $config = config('tickets.auto_ticket_from_email', []);
+        $config = config('pension.auto_ticket', []);
         if (empty($config['auto_reply_enabled'])) {
             return false;
         }
 
         $fromName = config('mail.from.name', config('app.name'));
-        $body = trim($config['auto_reply_body'] ?? '') ?: "Thank you for your email.\n\nWe have received your message and created a support ticket for you.\n\nYour ticket number is: {ticket_no}\n\nWe will respond to your inquiry as soon as possible.\n\nKind regards,\n{$fromName}";
+        $body = trim($config['auto_reply_body'] ?? '') ?: "Thank you for contacting Geminia Pension Support.\n\nWe have received your email and created ticket {ticket_no}. Our team will respond within one business day.\n\nKind regards,\nPension Support";
         $body = str_replace(['{ticket_no}', '{{ticket_number}}'], $ticketNo, $body);
         $subject = trim($config['auto_reply_subject'] ?? '') ?: 'Re: ' . $originalSubject;
         $subject = str_replace(['{ticket_no}', '{{ticket_number}}', '{{subject}}'], [$ticketNo, $ticketNo, $originalSubject], $subject);
@@ -259,23 +256,39 @@ class AutoTicketFromEmailService
             if ($graph->sendMail($toAddress, $toName ?: null, $subject, $body, false)) {
                 return true;
             }
-            Log::warning('AutoTicketFromEmailService: Graph send failed, falling back to Laravel Mail');
         }
 
         try {
-            $fromAddress = config('mail.from.address', config('email-service.sender', 'life@geminialife.co.ke'));
-            if (config('mail.default') === 'log') {
-                Log::info('AutoTicketFromEmailService: MAIL_MAILER=log – email not actually sent. Set MAIL_MAILER=smtp for delivery.');
-            }
+            $fromAddress = config('pension.mailbox', config('mail.from.address'));
             Mail::raw($body, function ($message) use ($toAddress, $toName, $subject, $fromAddress, $fromName) {
                 $message->to($toAddress, $toName ?: null)
                     ->from($fromAddress, $fromName)
                     ->subject($subject);
             });
+
             return true;
         } catch (\Throwable $e) {
-            Log::warning('AutoTicketFromEmailService: auto-reply failed', ['to' => $toAddress, 'error' => $e->getMessage()]);
+            Log::warning('PensionAutoTicketFromEmailService: auto-reply failed', ['to' => $toAddress, 'error' => $e->getMessage()]);
+
             return false;
         }
+    }
+
+    public function resolveUserIdByEmail(string $email): ?int
+    {
+        $email = strtolower(trim($email));
+        if ($email === '') {
+            return null;
+        }
+
+        $id = DB::connection('vtiger')->table('vtiger_users')
+            ->where(function ($q) use ($email) {
+                $q->whereRaw('LOWER(TRIM(email1)) = ?', [$email])
+                    ->orWhereRaw('LOWER(TRIM(user_name)) = ?', [$email]);
+            })
+            ->where('status', 'Active')
+            ->value('id');
+
+        return $id ? (int) $id : null;
     }
 }

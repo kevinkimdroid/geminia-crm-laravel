@@ -20,4 +20,12 @@ return [
     'mailbox' => env('MSGRAPH_MAILBOX', env('MAIL_FROM_ADDRESS', '')),
 
     'fetch_limit' => (int) env('MSGRAPH_FETCH_LIMIT', 25),
+
+    // HTTP client resilience for slow DNS / transient network issues.
+    'http' => [
+        'connect_timeout' => (float) env('MSGRAPH_CONNECT_TIMEOUT', 10),
+        'timeout' => (float) env('MSGRAPH_TIMEOUT', 20),
+        'retries' => (int) env('MSGRAPH_RETRIES', 2),
+        'retry_sleep_ms' => (int) env('MSGRAPH_RETRY_SLEEP_MS', 300),
+    ],
 ];

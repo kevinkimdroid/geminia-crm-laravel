@@ -2,7 +2,10 @@
 
 namespace App\Providers;
 
+use App\Cache\ResilientFileStore;
 use App\Services\CrmService;
+use App\Support\StoragePaths;
+use Illuminate\Cache\Repository;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Cache;
@@ -16,6 +19,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        StoragePaths::ensure();
+
         // Some server OCI8 builds (or OCI8-missing CLI/FPM mismatch) do not expose OCI_DEFAULT,
         // but yajra/pdo-via-oci8 still references it. Define a safe fallback to prevent fatals.
         if (! defined('OCI_DEFAULT')) {
@@ -23,6 +28,33 @@ class AppServiceProvider extends ServiceProvider
         }
 
         require_once app_path('helpers.php');
+
+        // Receipt reprint (Finance) — choose the data source and configure the
+        // RTF/PDF renderer. Reads from the shared ERP Oracle connection.
+        $this->app->bind(\App\Services\Receipts\ReceiptDataSource::class, function () {
+            if (config('receipt.demo')) {
+                return new \App\Services\Receipts\DemoReceiptRepository();
+            }
+
+            return new \App\Services\Receipts\OracleReceiptRepository(
+                connection: (string) config('receipt.connection', 'erp'),
+                table: (string) config('receipt.table'),
+            );
+        });
+
+        $this->app->singleton(\App\Services\Receipts\RtfReceiptRenderer::class, function () {
+            $template = (string) config('receipt.template');
+            if (! is_file($template)) {
+                $template = rtrim((string) config('receipt.templates_path'), '/\\')
+                    . DIRECTORY_SEPARATOR . $template;
+            }
+
+            return new \App\Services\Receipts\RtfReceiptRenderer(
+                templatePath: $template,
+                outputPath: (string) config('receipt.output_path'),
+                sofficePath: config('receipt.soffice_path') ?: null,
+            );
+        });
     }
 
     /**
@@ -30,13 +62,23 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        Cache::extend('file', function ($app) {
+            $config = $app['config']['cache.stores.file'];
+
+            return new Repository(new ResilientFileStore(
+                $app['files'],
+                $config['path'],
+                $config['permission'] ?? null
+            ));
+        });
+
         Blade::directive('vite', function ($expression) {
             return "<?php echo app(\App\Support\ViteAssets::class)->toHtml({$expression}); ?>";
         });
 
-        View::composer(['layouts.app', 'dashboard', 'marketing', 'support'], function ($view) {
+        View::composer(['layouts.app', 'dashboard', 'marketing', 'support', 'support.pension-administration'], function ($view) {
             try {
-                $view->with('leadsTodayCount', Cache::remember(
+                $view->with('leadsTodayCount', safe_cache_remember(
                     'geminia_leads_today_' . now()->format('Y-m-d'),
                     120,
                     fn () => app(CrmService::class)->getLeadsTodayCount()
@@ -73,7 +115,7 @@ class AppServiceProvider extends ServiceProvider
             }
 
             try {
-                $layoutData = Cache::remember('geminia_user_layout_v2_' . $user->id, 600, function () use ($user) {
+                $layoutData = safe_cache_remember('geminia_user_layout_v2_' . $user->id, 600, function () use ($user) {
                     return [
                         'role' => ($user->primary_role ? $user->primary_role->rolename : null) ?? '—',
                         'allowed' => $user->getAllowedModules(),
@@ -119,7 +161,7 @@ class AppServiceProvider extends ServiceProvider
                     return false;
                 }
 
-                if ($k !== 'finance.payments') {
+                if (! str_starts_with($k, 'finance.')) {
                     return true;
                 }
 
@@ -152,4 +194,5 @@ class AppServiceProvider extends ServiceProvider
             }
         });
     }
+
 }

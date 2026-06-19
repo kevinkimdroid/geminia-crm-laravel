@@ -41,26 +41,112 @@ class MailService
      * Fetch emails and store in mail_manager_emails.
      * Priority: 1) Microsoft Graph (Office 365), 2) HTTP API, 3) IMAP.
      */
-    public function fetchAndStoreEmails(string $folder = 'INBOX', int $limit = 100): array
+    public function fetchAndStoreEmails(string $folder = 'INBOX', int $limit = 100, ?string $mailbox = null): array
     {
+        if ($this->isPensionMailbox($mailbox)) {
+            return $this->fetchPensionMailboxEmails($folder, $limit, $mailbox);
+        }
+
         if ($this->useMicrosoftGraph()) {
             return app(MicrosoftGraphMailService::class)->fetchAndStoreEmails(
                 strtolower($folder) === 'inbox' ? 'inbox' : $folder,
-                config('microsoft-graph.fetch_limit', $limit)
+                $limit,
+                null
             );
         }
 
         if ($this->useHttpEmailService()) {
-            return $this->fetchAndStoreEmailsViaHttp($folder, $limit);
+            return $this->fetchAndStoreEmailsViaHttp($folder, $limit, null);
         }
 
-        return $this->fetchAndStoreEmailsViaImap($folder, $limit);
+        return $this->fetchAndStoreEmailsViaImap($folder, $limit, null);
+    }
+
+    /**
+     * Fetch only from pensions@ — never from life@ or other primary mailboxes.
+     */
+    protected function fetchPensionMailboxEmails(string $folder, int $limit, ?string $mailbox): array
+    {
+        $graph = app(MicrosoftGraphMailService::class);
+        if (! $graph->isConfigured()) {
+            return [
+                'fetched' => 0,
+                'stored' => 0,
+                'errors' => ['Microsoft Graph is not configured. Set MSGRAPH_* in .env (same app as life@ mail).'],
+            ];
+        }
+
+        return $graph->fetchAndStoreEmails(
+            strtolower($folder) === 'inbox' ? 'inbox' : $folder,
+            $limit,
+            $mailbox
+        );
+    }
+
+    public function isPensionMailbox(?string $mailbox): bool
+    {
+        $mailbox = strtolower(trim((string) ($mailbox ?? '')));
+        $pensions = strtolower(trim((string) config('pension.mailbox', '')));
+
+        return $pensions !== '' && $mailbox === $pensions;
+    }
+
+    public function resolveFetchLimit(?string $mailbox = null, ?int $override = null): int
+    {
+        if ($override !== null && $override > 0) {
+            return $override;
+        }
+
+        if ($this->isPensionMailbox($mailbox)) {
+            return max(100, (int) config('pension.fetch_limit', 1000));
+        }
+
+        return max(50, (int) config('email-service.fetch_limit', 25), (int) config('microsoft-graph.fetch_limit', 25));
+    }
+
+    /**
+     * Resolve the Graph/HTTP mailbox UPN for a logical mailbox address.
+     */
+    public function resolveGraphMailbox(?string $mailbox = null): string
+    {
+        $mailbox = strtolower(trim((string) ($mailbox ?: config('email-service.sender', config('mail.from.address', '')))));
+        $pensions = strtolower(trim((string) config('pension.mailbox', '')));
+
+        if ($pensions !== '' && $mailbox === $pensions) {
+            return $pensions;
+        }
+
+        return trim((string) config('microsoft-graph.mailbox', config('email-service.sender', '')));
+    }
+
+    /**
+     * Folder key used when storing emails fetched for a specific mailbox.
+     */
+    public function mailboxStorageFolder(string $folder, ?string $mailbox = null): string
+    {
+        $folderKey = strtolower($folder === 'INBOX' ? 'inbox' : $folder);
+        $mailbox = strtolower(trim((string) ($mailbox ?? '')));
+        $primary = strtolower(trim((string) config('email-service.sender', config('mail.from.address', ''))));
+
+        if ($mailbox === '' || ($primary !== '' && $mailbox === $primary)) {
+            return $folderKey;
+        }
+
+        return $folderKey . '|' . $mailbox;
+    }
+
+    /**
+     * True when fetching a secondary mailbox (not the primary life@ inbox).
+     */
+    public function isAlternateMailbox(?string $mailbox): bool
+    {
+        return $this->isPensionMailbox($mailbox);
     }
 
     /**
      * Fetch emails via HTTP API (email service at 10.10.1.111:8080).
      */
-    protected function fetchAndStoreEmailsViaHttp(string $folder, int $limit): array
+    protected function fetchAndStoreEmailsViaHttp(string $folder, int $limit, ?string $mailbox = null): array
     {
         $results = ['fetched' => 0, 'stored' => 0, 'errors' => []];
 
@@ -312,13 +398,16 @@ class MailService
     /**
      * Fetch emails via IMAP (fallback when HTTP service not configured).
      */
-    protected function fetchAndStoreEmailsViaImap(string $folder, int $limit): array
+    protected function fetchAndStoreEmailsViaImap(string $folder, int $limit, ?string $mailbox = null, ?string $account = null): array
     {
         $results = ['fetched' => 0, 'stored' => 0, 'errors' => []];
+        $storageFolder = $mailbox
+            ? $this->mailboxStorageFolder($folder, $mailbox)
+            : (strtolower($folder) === 'inbox' ? 'inbox' : $folder);
 
         try {
             $cm = new ClientManager(config('imap'));
-            $client = $cm->account($this->account);
+            $client = $cm->account($account ?? $this->account);
             $client->connect();
 
             $folders = $client->getFolders();
@@ -339,7 +428,7 @@ class MailService
                     $exists = DB::connection('vtiger')
                         ->table('mail_manager_emails')
                         ->where('message_uid', $uid)
-                        ->where('folder', $targetFolder->path)
+                        ->where('folder', $storageFolder)
                         ->exists();
 
                     if ($exists) {
@@ -354,7 +443,7 @@ class MailService
 
                     $emailId = DB::connection('vtiger')->table('mail_manager_emails')->insertGetId([
                         'message_uid' => $uid,
-                        'folder' => $targetFolder->path,
+                        'folder' => $storageFolder,
                         'from_address' => ($from ? $from->mail : null) ?? '',
                         'from_name' => $from ? $from->personal : null,
                         'to_addresses' => $to ?: null,
@@ -403,14 +492,40 @@ class MailService
     protected function processAutoTicketFromEmail(int $emailId): void
     {
         try {
-            app(AutoTicketFromEmailService::class)->processNewInboundEmail($emailId);
+            if ($this->isPensionMailboxEmail($emailId)) {
+                app(PensionAutoTicketFromEmailService::class)->processNewInboundEmail($emailId);
+            } else {
+                app(AutoTicketFromEmailService::class)->processNewInboundEmail($emailId);
+            }
         } catch (\Throwable $e) {
             Log::warning('MailService auto-ticket: ' . $e->getMessage());
         }
     }
 
+    public function isPensionMailboxEmail(int $emailId): bool
+    {
+        $email = DB::connection('vtiger')->table('mail_manager_emails')->where('id', $emailId)->first();
+        if (! $email) {
+            return false;
+        }
+
+        $pensionMailbox = strtolower(trim((string) config('pension.mailbox', '')));
+        if ($pensionMailbox === '') {
+            return false;
+        }
+
+        $folders = $this->mailboxStorageFolders('inbox', $pensionMailbox);
+        $folder = strtolower(trim((string) ($email->folder ?? '')));
+
+        return in_array($folder, array_map('strtolower', $folders), true);
+    }
+
     protected function processAutoComplaintFromEmail(int $emailId): void
     {
+        if ($this->isPensionMailboxEmail($emailId)) {
+            return;
+        }
+
         try {
             app(AutoComplaintFromEmailService::class)->processNewInboundEmail($emailId);
         } catch (\Throwable $e) {
@@ -421,12 +536,15 @@ class MailService
     /**
      * Get paginated emails for list view. Selects only list columns (excludes body_text/body_html for speed).
      */
-    public function getEmails(int $perPage = 20, int $offset = 0, ?string $search = null): array
+    public function getEmails(int $perPage = 20, int $offset = 0, ?string $search = null, ?string $mailbox = null): array
     {
         $query = DB::connection('vtiger')
             ->table('mail_manager_emails')
             ->select('id', 'from_address', 'from_name', 'subject', 'date', 'has_attachments', 'ticket_id')
             ->orderByDesc('date');
+
+        $this->applyMailboxFilter($query, $mailbox);
+        $this->applyPensionInboxExclusions($query, $mailbox);
 
         if ($search) {
             $term = '%' . $search . '%';
@@ -441,17 +559,21 @@ class MailService
         return $query->offset($offset)->limit($perPage)->get()->all();
     }
 
-    public function getEmailsCount(?string $search = null): int
+    public function getEmailsCount(?string $search = null, ?string $mailbox = null): int
     {
-        if (!$search || trim($search) === '') {
-            return (int) Cache::remember('geminia_emails_count', 60, fn () => $this->fetchEmailsCount(null));
+        $mailboxKey = strtolower(trim((string) ($mailbox ?? '')));
+        if ((! $search || trim($search) === '') && $mailboxKey === '') {
+            return (int) Cache::remember('geminia_emails_count', 60, fn () => $this->fetchEmailsCount(null, null));
         }
-        return $this->fetchEmailsCount($search);
+
+        return $this->fetchEmailsCount($search, $mailbox);
     }
 
-    protected function fetchEmailsCount(?string $search): int
+    protected function fetchEmailsCount(?string $search, ?string $mailbox = null): int
     {
         $query = DB::connection('vtiger')->table('mail_manager_emails');
+        $this->applyMailboxFilter($query, $mailbox);
+        $this->applyPensionInboxExclusions($query, $mailbox);
 
         if ($search && trim($search) !== '') {
             $term = '%' . trim($search) . '%';
@@ -464,6 +586,310 @@ class MailService
         }
 
         return $query->count();
+    }
+
+    protected function applyMailboxFilter($query, ?string $mailbox): void
+    {
+        $mailbox = strtolower(trim((string) ($mailbox ?? '')));
+        if ($mailbox === '') {
+            return;
+        }
+
+        $folders = $this->mailboxStorageFolders('inbox', $mailbox);
+        if (count($folders) === 1) {
+            $query->where('folder', $folders[0]);
+        } else {
+            $query->whereIn('folder', $folders);
+        }
+    }
+
+    /**
+     * Storage folder keys for a mailbox (includes legacy pension folder aliases).
+     *
+     * @return list<string>
+     */
+    public function mailboxStorageFolders(string $folder, ?string $mailbox = null): array
+    {
+        return [$this->mailboxStorageFolder($folder, $mailbox)];
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function pensionInboxExcludedAddresses(): array
+    {
+        return config('pension.inbox_exclude_addresses', []);
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function pensionInboxOutboundExcludedAddresses(): array
+    {
+        return config('pension.inbox_outbound_exclude_addresses', []);
+    }
+
+    public function pensionGraphFetchMailbox(): string
+    {
+        return strtolower(trim((string) config('pension.graph_fetch_mailbox', config('pension.msgraph_mailbox', ''))));
+    }
+
+    /**
+     * Mailboxes that count as mail to pensions@ (includes internal delivery alias).
+     *
+     * @return list<string>
+     */
+    public function pensionInboxRecipientAddresses(): array
+    {
+        $addresses = [
+            $this->pensionInboxCanonicalAddress(),
+            $this->pensionGraphFetchMailbox(),
+        ];
+
+        return array_values(array_filter(array_unique(array_filter($addresses))));
+    }
+
+    public function messageHasPensionRecipient(?string $to, ?string $cc): bool
+    {
+        $combined = strtolower(trim((string) $to . ' ' . (string) $cc));
+        if ($combined === '') {
+            return false;
+        }
+
+        foreach ($this->pensionInboxRecipientAddresses() as $address) {
+            if ($address !== '' && str_contains($combined, $address)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public function isPensionInboxOutboundExcludedSender(?string $from): bool
+    {
+        $from = strtolower(trim((string) $from));
+        if ($from === '') {
+            return true;
+        }
+
+        foreach ($this->pensionInboxOutboundExcludedAddresses() as $excluded) {
+            if ($excluded !== '' && str_contains($from, $excluded)) {
+                return true;
+            }
+        }
+
+        foreach ($this->pensionInboxExcludedAddresses() as $excluded) {
+            if ($excluded !== '' && str_contains($from, $excluded)) {
+                return true;
+            }
+        }
+
+        if (config('pension.inbox_exclude_life_mailbox', true)) {
+            $life = $this->pensionInboxLifeMailbox();
+            if ($life !== '' && str_contains($from, $life)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public function pensionInboxCanonicalAddress(): string
+    {
+        return strtolower(trim((string) config('pension.mailbox', 'pensions@geminialife.co.ke')));
+    }
+
+    public function pensionInboxLifeMailbox(): string
+    {
+        return strtolower(trim((string) config('pension.life_mailbox', 'life@geminialife.co.ke')));
+    }
+
+    public function isPensionInboxStorableMessage(?string $from, ?string $to, ?string $cc): bool
+    {
+        if ($this->isPensionInboxOutboundExcludedSender($from)) {
+            return false;
+        }
+
+        return strtolower(trim((string) $from)) !== '';
+    }
+
+    public function isPensionInboxEligibleMessage(?string $from, ?string $to, ?string $cc): bool
+    {
+        if ($this->isPensionInboxOutboundExcludedSender($from)) {
+            return false;
+        }
+
+        if (config('pension.inbox_require_canonical_recipient', true) && ! $this->messageHasPensionRecipient($to, $cc)) {
+            return false;
+        }
+
+        if (config('pension.inbox_exclude_life_mailbox', true)) {
+            $life = $this->pensionInboxLifeMailbox();
+            $to = strtolower(trim((string) $to));
+            $cc = strtolower(trim((string) $cc));
+            if ($life !== '' && str_contains($to, $life) && ! $this->messageHasPensionRecipient($to, $cc)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public function isPensionInboxEligibleEmail(object $email): bool
+    {
+        return $this->isPensionInboxEligibleMessage(
+            $email->from_address ?? '',
+            $email->to_addresses ?? '',
+            $email->cc_addresses ?? ''
+        );
+    }
+
+    public function sanitizePensionMailboxText(?string $text): ?string
+    {
+        if ($text === null || $text === '') {
+            return $text;
+        }
+
+        $canonical = $this->pensionInboxCanonicalAddress();
+        foreach ($this->pensionInboxRecipientAddresses() as $address) {
+            if ($address !== '' && $address !== $canonical) {
+                $text = str_ireplace($address, $canonical, $text);
+            }
+        }
+
+        $fetchMailbox = $this->pensionGraphFetchMailbox();
+        if ($fetchMailbox !== '' && $fetchMailbox !== $canonical) {
+            $text = str_ireplace($fetchMailbox, $canonical, $text);
+        }
+
+        foreach ($this->pensionInboxOutboundExcludedAddresses() as $excluded) {
+            if ($excluded !== '' && $excluded !== $canonical) {
+                $text = str_ireplace($excluded, $canonical, $text);
+            }
+        }
+
+        if (config('pension.inbox_exclude_life_mailbox', true)) {
+            $life = $this->pensionInboxLifeMailbox();
+            if ($life !== '' && $life !== $canonical) {
+                $text = preg_replace('/,?\s*' . preg_quote($life, '/') . '/i', '', $text) ?? $text;
+                $text = preg_replace('/' . preg_quote($life, '/') . '\s*,?\s*/i', '', $text) ?? $text;
+            }
+        }
+
+        return trim(preg_replace('/\s+/', ' ', $text) ?? $text);
+    }
+
+    public function sanitizePensionInboxEmail(object $email): object
+    {
+        $email->from_address = $this->sanitizePensionMailboxText($email->from_address ?? '');
+        $email->to_addresses = $this->sanitizePensionMailboxText($email->to_addresses ?? '');
+        $email->cc_addresses = $this->sanitizePensionMailboxText($email->cc_addresses ?? '');
+        $email->body_text = $this->sanitizePensionMailboxText($email->body_text ?? '');
+        if (! empty($email->body_html)) {
+            $email->body_html = $this->sanitizePensionMailboxText($email->body_html);
+        }
+
+        return $email;
+    }
+
+    public function getPensionInboxEmail(int $id): ?object
+    {
+        $email = $this->getEmail($id);
+        if (! $email || ! $this->isPensionInboxEligibleEmail($email)) {
+            return null;
+        }
+
+        return $this->sanitizePensionInboxEmail($email);
+    }
+
+    /** @deprecated Use pensionInboxExcludedAddresses() */
+    public function pensionInboxExcludedSenders(): array
+    {
+        return $this->pensionInboxExcludedAddresses();
+    }
+
+    public function isPensionInboxExcludedSender(?string $address): bool
+    {
+        $address = strtolower(trim((string) $address));
+        if ($address === '') {
+            return false;
+        }
+
+        foreach ($this->pensionInboxExcludedAddresses() as $excluded) {
+            if ($excluded !== '' && str_contains($address, $excluded)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    protected function applyPensionInboxExclusions($query, ?string $mailbox): void
+    {
+        if (! $this->isPensionMailbox($mailbox)) {
+            return;
+        }
+
+        $canonical = $this->pensionInboxCanonicalAddress();
+
+        if (config('pension.inbox_require_canonical_recipient', true)) {
+            $query->where(function ($q) use ($canonical) {
+                foreach ($this->pensionInboxRecipientAddresses() as $address) {
+                    if ($address === '') {
+                        continue;
+                    }
+                    $like = '%' . $address . '%';
+                    $q->orWhereRaw('LOWER(COALESCE(to_addresses, "")) LIKE ?', [$like])
+                        ->orWhereRaw('LOWER(COALESCE(cc_addresses, "")) LIKE ?', [$like]);
+                }
+            });
+        }
+
+        foreach ($this->pensionInboxOutboundExcludedAddresses() as $excluded) {
+            if ($excluded === '') {
+                continue;
+            }
+            $query->whereRaw('LOWER(COALESCE(from_address, "")) NOT LIKE ?', ['%' . $excluded . '%']);
+        }
+
+        foreach ($this->pensionInboxExcludedAddresses() as $excluded) {
+            if ($excluded === '') {
+                continue;
+            }
+            $query->whereRaw('LOWER(COALESCE(from_address, "")) NOT LIKE ?', ['%' . $excluded . '%']);
+        }
+
+        if (config('pension.inbox_exclude_life_mailbox', true)) {
+            $life = $this->pensionInboxLifeMailbox();
+            if ($life !== '') {
+                $like = '%' . $life . '%';
+                $query->whereRaw('LOWER(COALESCE(from_address, "")) NOT LIKE ?', [$like]);
+                $query->where(function ($q) use ($like) {
+                    $q->whereRaw('LOWER(COALESCE(to_addresses, "")) NOT LIKE ?', [$like])
+                        ->orWhere(function ($inner) {
+                            foreach ($this->pensionInboxRecipientAddresses() as $address) {
+                                if ($address === '') {
+                                    continue;
+                                }
+                                $recipientLike = '%' . $address . '%';
+                                $inner->orWhereRaw('LOWER(COALESCE(to_addresses, "")) LIKE ?', [$recipientLike])
+                                    ->orWhereRaw('LOWER(COALESCE(cc_addresses, "")) LIKE ?', [$recipientLike]);
+                            }
+                        });
+                });
+            }
+        }
+    }
+
+    public function getPensionInboxLatestReceivedAt(): ?\Carbon\Carbon
+    {
+        $folder = $this->mailboxStorageFolder('inbox', config('pension.mailbox'));
+        $latest = DB::connection('vtiger')
+            ->table('mail_manager_emails')
+            ->where('folder', $folder)
+            ->max('date');
+
+        return $latest ? \Carbon\Carbon::parse($latest) : null;
     }
 
     public function getEmail(int $id): ?object
