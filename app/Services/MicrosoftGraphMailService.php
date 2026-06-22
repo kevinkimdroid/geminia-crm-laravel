@@ -64,6 +64,8 @@ class MicrosoftGraphMailService
                     $messages = $groupResult['messages'];
                 }
             }
+
+            $messages = $this->appendPensionScanMailboxMessages($token, $messages, $limit, $mailService);
         } else {
             $graphMailbox = $mailService->resolveGraphMailbox($mailbox);
             $fetchResult = $this->requestInboxMessages($token, $folder, $limit, $graphMailbox);
@@ -139,7 +141,53 @@ class MicrosoftGraphMailService
             }
         }
 
+        if (($results['stored'] ?? 0) > 0) {
+            MailService::forgetListCaches();
+        }
+
         return $results;
+    }
+
+    /**
+     * Pull pension-related messages from team mailboxes (e.g. assignee sent items with pensions@ on CC).
+     *
+     * @param  array<int, array<string, mixed>>  $messages
+     * @return array<int, array<string, mixed>>
+     */
+    protected function appendPensionScanMailboxMessages(string $token, array $messages, int $limit, MailService $mailService): array
+    {
+        $seen = [];
+        foreach ($messages as $msg) {
+            $id = (string) ($msg['id'] ?? '');
+            if ($id !== '') {
+                $seen[$id] = true;
+            }
+        }
+
+        $scanLimit = min(30, max(1, $limit));
+        foreach ($mailService->pensionGraphScanMailboxes() as $scanMailbox) {
+            foreach (['inbox', 'sentitems'] as $scanFolder) {
+                $scanResult = $this->requestInboxMessages($token, $scanFolder, $scanLimit, $scanMailbox);
+                foreach ($scanResult['messages'] ?? [] as $msg) {
+                    $id = (string) ($msg['id'] ?? '');
+                    if ($id === '' || isset($seen[$id])) {
+                        continue;
+                    }
+
+                    $from = strtolower(trim((string) ($msg['from']['emailAddress']['address'] ?? '')));
+                    $toAddresses = $this->formatRecipients($msg['toRecipients'] ?? []);
+                    $ccAddresses = $this->formatRecipients($msg['ccRecipients'] ?? []);
+                    if (! $mailService->isPensionInboxEligibleMessage($from, $toAddresses, $ccAddresses)) {
+                        continue;
+                    }
+
+                    $seen[$id] = true;
+                    $messages[] = $msg;
+                }
+            }
+        }
+
+        return $messages;
     }
 
     protected function getAccessToken(): ?string
@@ -194,13 +242,16 @@ class MicrosoftGraphMailService
         $folderId = strtolower($folder) === 'inbox' ? 'inbox' : $folder;
         $pageSize = min(100, max(1, $limit));
         $select = 'id,subject,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime,body,hasAttachments';
-        $query = "\$top={$pageSize}&\$orderby=receivedDateTime%20desc&\$select={$select}";
+        $orderField = strtolower($folderId) === 'sentitems' ? 'sentDateTime' : 'receivedDateTime';
+        $query = "\$top={$pageSize}&\$orderby={$orderField}%20desc&\$select={$select}";
 
         $sinceDays = (int) config('pension.fetch_since_days', 0);
         $pensionFetch = strtolower(trim((string) config('pension.graph_fetch_mailbox', config('pension.msgraph_mailbox', ''))));
-        if ($sinceDays > 0 && $pensionFetch !== '' && strtolower(trim((string) $mailbox)) === $pensionFetch) {
+        $scanMailboxes = array_map('strtolower', app(MailService::class)->pensionGraphScanMailboxes());
+        $mailboxLower = strtolower(trim((string) $mailbox));
+        if ($sinceDays > 0 && ($mailboxLower === $pensionFetch || in_array($mailboxLower, $scanMailboxes, true))) {
             $since = now()->subDays($sinceDays)->startOfDay()->utc()->format('Y-m-d\TH:i:s\Z');
-            $query .= '&$filter=' . rawurlencode("receivedDateTime ge {$since}");
+            $query .= '&$filter=' . rawurlencode("{$orderField} ge {$since}");
         }
 
         $url = self::GRAPH_BASE . "/users/{$mailboxEncoded}/mailFolders/{$folderId}/messages?{$query}";

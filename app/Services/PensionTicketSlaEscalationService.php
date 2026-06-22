@@ -88,11 +88,13 @@ class PensionTicketSlaEscalationService
                         ]);
                 });
 
-                $this->notifier->sendTicketAssignedNotification(
+                $this->notifier->sendPensionSlaEscalationNotification(
                     (int) $ticket->ticketid,
                     (string) $ticket->ticket_no,
                     (string) ($ticket->title ?? 'Pension ticket'),
-                    $escalateId
+                    $escalateId,
+                    $tatHours,
+                    $assignEmail
                 );
 
                 Cache::forever($cacheKey, true);

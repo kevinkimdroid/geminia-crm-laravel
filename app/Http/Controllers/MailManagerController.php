@@ -4,10 +4,12 @@ namespace App\Http\Controllers;
 
 use App\Services\MailService;
 use App\Support\MailFetchHealth;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\View\View;
 
 class MailManagerController extends Controller
@@ -213,6 +215,125 @@ class MailManagerController extends Controller
         return null;
     }
 
+    /**
+     * Lightweight live feed for the pension inbox list (JSON, no full page reload).
+     * Reads from DB only — never blocks on Microsoft Graph.
+     */
+    public function live(Request $request): JsonResponse
+    {
+        $mailbox = $this->normalizeMailbox($request->get('mailbox'));
+        $search = $request->get('search');
+        $page = max(1, (int) $request->get('page', 1));
+        $selected = $request->get('selected') ? (int) $request->get('selected') : null;
+        $perPageParam = $request->get('per_page', '50');
+        $perPage = strtolower((string) $perPageParam) === 'all' ? 9999 : max(10, min(9999, (int) $perPageParam));
+        $perPage = $perPage ?: 50;
+        $offset = ($page - 1) * $perPage;
+
+        $cacheSeconds = max(5, (int) env('PENSION_INBOX_LIVE_CACHE_SECONDS', 20));
+        $cacheKey = 'mail:live:' . md5(json_encode([
+            'mailbox' => $mailbox,
+            'search' => $search,
+            'page' => $page,
+            'per_page' => $perPage,
+            'selected' => $selected,
+        ]));
+
+        $payload = Cache::remember($cacheKey, $cacheSeconds, function () use ($search, $perPage, $offset, $mailbox, $selected) {
+            $emails = $this->mailService->getEmails($perPage, $offset, $search, $mailbox);
+            $total = $this->mailService->getEmailsCount($search, $mailbox);
+
+            return [
+                'success' => true,
+                'emails' => array_map(function ($email) {
+                    return [
+                        'id' => (int) $email->id,
+                        'from_name' => $email->from_name,
+                        'from_address' => $email->from_address,
+                        'subject' => $email->subject,
+                        'date_label' => $email->date ? Carbon::parse($email->date)->format('M d') : '',
+                        'has_attachments' => (bool) $email->has_attachments,
+                        'ticket_id' => $email->ticket_id ? (int) $email->ticket_id : null,
+                    ];
+                }, $emails),
+                'total' => $total,
+                'selected' => $selected,
+            ];
+        });
+
+        return response()->json($payload);
+    }
+
+    /**
+     * Throttled background Graph fetch for pension inbox (separate from fast list polling).
+     */
+    public function sync(Request $request): JsonResponse
+    {
+        $mailbox = $this->normalizeMailbox($request->get('mailbox'));
+        if (! $this->mailService->isPensionMailbox($mailbox)) {
+            return response()->json(['success' => true, 'synced' => false, 'throttled' => true]);
+        }
+
+        $synced = $this->maybeFetchLiveMailbox($mailbox);
+
+        return response()->json([
+            'success' => true,
+            'synced' => $synced,
+            'throttled' => ! $synced,
+        ]);
+    }
+
+    protected function maybeFetchLiveMailbox(?string $mailbox): bool
+    {
+        if (! filter_var(env('MAIL_AUTO_FETCH_ENABLED', true), FILTER_VALIDATE_BOOLEAN)) {
+            return false;
+        }
+
+        $mailboxKey = strtolower(trim((string) ($mailbox ?? 'life')));
+        $throttleKey = 'mail:live-fetch:last-run:' . md5($mailboxKey);
+        $lockKey = 'mail:live-fetch:lock:' . md5($mailboxKey);
+        $interval = max(60, (int) env('PENSION_INBOX_LIVE_FETCH_SECONDS', 120));
+
+        if ((time() - (int) Cache::get($throttleKey, 0)) < $interval) {
+            return false;
+        }
+
+        $lock = Cache::lock($lockKey, 120);
+        if (! $lock->get()) {
+            return false;
+        }
+
+        try {
+            if ((time() - (int) Cache::get($throttleKey, 0)) < $interval) {
+                return false;
+            }
+
+            $limit = min(25, $this->mailService->resolveFetchLimit($mailbox));
+            $result = $this->mailService->fetchAndStoreEmails('INBOX', $limit, $mailbox);
+
+            if (
+                ! empty($result['errors'])
+                && ($result['stored'] ?? 0) === 0
+                && ($result['fetched'] ?? 0) === 0
+            ) {
+                return false;
+            }
+
+            MailFetchHealth::markSuccess($result, 'live');
+            MailService::forgetListCaches();
+            Cache::forget('mail:live:' . md5(json_encode(['mailbox' => $mailbox])));
+            Cache::put($throttleKey, time(), now()->addHours(2));
+
+            return true;
+        } catch (\Throwable $e) {
+            Log::warning('MailManager live fetch: ' . $e->getMessage());
+
+            return false;
+        } finally {
+            $lock->release();
+        }
+    }
+
     public function fetch(Request $request): RedirectResponse
     {
         set_time_limit(300);
@@ -239,7 +360,7 @@ class MailManagerController extends Controller
         }
 
         MailFetchHealth::markSuccess($result, 'manual');
-        Cache::forget('geminia_emails_count');
+        MailService::forgetListCaches();
         $msg = "Fetched {$result['fetched']} pension emails, stored {$result['stored']} new (limit {$limit}).";
         if ($this->mailService->isPensionMailbox($mailbox)) {
             $visible = $this->mailService->getEmailsCount(null, $mailbox);

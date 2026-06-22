@@ -120,6 +120,78 @@ class TicketNotificationService
         return $this->send($user->email1, $userName, $subject, $body);
     }
 
+    /**
+     * Notify escalation contact when a pension email ticket exceeds its TAT.
+     */
+    public function sendPensionSlaEscalationNotification(
+        int $ticketId,
+        string $ticketNo,
+        string $title,
+        int $escalateToUserId,
+        int $tatHours,
+        string $originalAssigneeEmail
+    ): bool {
+        $config = config('tickets.notify_on_reassignment', []);
+        if (empty($config['enabled'])) {
+            return false;
+        }
+
+        $user = DB::connection('vtiger')->table('vtiger_users')
+            ->where('id', $escalateToUserId)
+            ->select('id', 'email1', 'first_name', 'last_name', 'user_name')
+            ->first();
+        if (! $user || empty(trim($user->email1 ?? ''))) {
+            Log::warning('TicketNotificationService: pension SLA escalation user not found', [
+                'ticket' => $ticketNo,
+                'user_id' => $escalateToUserId,
+            ]);
+
+            return false;
+        }
+
+        $userName = trim(($user->first_name ?? '') . ' ' . ($user->last_name ?? '')) ?: $user->user_name;
+        $appName = config('app.name', 'Geminia Life');
+        $ticketUrl = rtrim(config('app.url', ''), '/') . '/tickets/' . $ticketId;
+        $subject = "Pension SLA breach ({$tatHours}hr TAT): {$ticketNo} — {$title}";
+        $body = "Hello {$userName},\n\n"
+            . "A pension inbox ticket has exceeded the {$tatHours}-hour turnaround time and has been escalated to you.\n\n"
+            . "Ticket: {$ticketNo}\n"
+            . "Title: {$title}\n"
+            . "Originally assigned to: {$originalAssigneeEmail}\n\n"
+            . "View ticket: {$ticketUrl}\n\n"
+            . "Kind regards,\n{$appName}";
+
+        return $this->send($user->email1, $userName, $subject, $body);
+    }
+
+    /**
+     * Notify escalation contact when auto-ticket creation from a pension email fails.
+     */
+    public function sendPensionAutoTicketFailureNotification(
+        string $escalateEmail,
+        string $emailSubject,
+        string $fromAddress,
+        string $error
+    ): bool {
+        $escalateEmail = trim($escalateEmail);
+        if ($escalateEmail === '') {
+            return false;
+        }
+
+        $appName = config('app.name', 'Geminia Life');
+        $mailbox = config('pension.mailbox', 'pensions@geminialife.co.ke');
+        $subject = "Pension inbox ticket creation failed — {$emailSubject}";
+        $body = "Hello,\n\n"
+            . "An email to {$mailbox} could not be converted into a support ticket automatically.\n\n"
+            . "From: {$fromAddress}\n"
+            . "Subject: {$emailSubject}\n"
+            . "Error: {$error}\n\n"
+            . "Please review the Pension Inbox and create or assign the ticket manually.\n\n"
+            . "Kind regards,\n{$appName}";
+
+        return $this->send($escalateEmail, null, $subject, $body);
+    }
+
     protected function buildTicketAssignedBody(int $ticketId, string $ticketNo, string $title, string $recipientName): string
     {
         $appName = config('app.name', 'Geminia Life');

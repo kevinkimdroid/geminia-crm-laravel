@@ -174,6 +174,8 @@ Route::post('/tools/pdf-maker/{module}/template', [\App\Http\Controllers\PdfMake
 Route::get('/tools/pdf-maker/{module}/preview', [\App\Http\Controllers\PdfMakerController::class, 'preview'])->name('tools.pdf-maker.preview');
 Route::post('/tools/pdf-maker/{module}/logo/remove', [\App\Http\Controllers\PdfMakerController::class, 'removeLogo'])->name('tools.pdf-maker.logo.remove');
 Route::get('/tools/mail-manager', [\App\Http\Controllers\MailManagerController::class, 'index'])->name('tools.mail-manager');
+Route::get('/tools/mail-manager/live', [\App\Http\Controllers\MailManagerController::class, 'live'])->name('tools.mail-manager.live');
+Route::get('/tools/mail-manager/sync', [\App\Http\Controllers\MailManagerController::class, 'sync'])->name('tools.mail-manager.sync');
 Route::get('/tools/mail-manager/create', [\App\Http\Controllers\MailManagerController::class, 'create'])->name('tools.mail-manager.create');
 Route::post('/tools/mail-manager', [\App\Http\Controllers\MailManagerController::class, 'store'])->name('tools.mail-manager.store');
 Route::post('/tools/mail-manager/fetch', [\App\Http\Controllers\MailManagerController::class, 'fetch'])->name('tools.mail-manager.fetch');

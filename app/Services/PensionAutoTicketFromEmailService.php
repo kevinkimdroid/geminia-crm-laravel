@@ -50,9 +50,29 @@ class PensionAutoTicketFromEmailService
             return ['ticket_id' => null, 'sent' => false, 'error' => 'Internal sender'];
         }
 
+        if (! empty($config['first_email_only'])) {
+            $threadTicketId = $this->resolveThreadTicketId($fromAddress, (string) ($email->subject ?? ''));
+            if ($threadTicketId) {
+                DB::connection('vtiger')->table('mail_manager_emails')->where('id', $emailId)->update(['ticket_id' => $threadTicketId]);
+
+                return ['ticket_id' => $threadTicketId, 'sent' => false, 'error' => 'linked to existing thread ticket'];
+            }
+
+            if ($this->isFollowUpEmail($email)) {
+                return ['ticket_id' => null, 'sent' => false, 'error' => 'Follow-up email — only the original message creates a ticket'];
+            }
+
+            if ($this->hasPriorInboundInThread($fromAddress, (string) ($email->subject ?? ''), (int) $email->id)) {
+                return ['ticket_id' => null, 'sent' => false, 'error' => 'Not the first email in this thread'];
+            }
+        }
+
         $ownerId = $this->resolveUserIdByEmail((string) ($config['assign_to_email'] ?? ''));
         if (! $ownerId) {
-            return ['ticket_id' => null, 'sent' => false, 'error' => 'Assignee user not found: ' . ($config['assign_to_email'] ?? '')];
+            $error = 'Assignee user not found: ' . ($config['assign_to_email'] ?? '');
+            $this->notifyEscalationContactOfFailure($email, $error);
+
+            return ['ticket_id' => null, 'sent' => false, 'error' => $error];
         }
 
         $contactResult = $this->resolveOrCreateContactWithPolicy($fromAddress, $email->from_name ?? '');
@@ -60,7 +80,10 @@ class PensionAutoTicketFromEmailService
         $policyNumber = $contactResult['policy_number'] ?? null;
 
         if (! $contactId) {
-            return ['ticket_id' => null, 'sent' => false, 'error' => 'Could not find or create contact'];
+            $error = 'Could not find or create contact';
+            $this->notifyEscalationContactOfFailure($email, $error);
+
+            return ['ticket_id' => null, 'sent' => false, 'error' => $error];
         }
 
         $category = trim((string) ($config['category'] ?? 'Pension Administration'));
@@ -111,8 +134,162 @@ class PensionAutoTicketFromEmailService
             return ['ticket_id' => $ticketId, 'sent' => $sent, 'error' => null];
         } catch (\Throwable $e) {
             Log::error('PensionAutoTicketFromEmailService', ['email_id' => $emailId, 'error' => $e->getMessage()]);
+            $this->notifyEscalationContactOfFailure($email, $e->getMessage());
 
             return ['ticket_id' => null, 'sent' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    protected function isFollowUpEmail(object $email): bool
+    {
+        $subject = trim((string) ($email->subject ?? ''));
+
+        return (bool) preg_match('/^(re|fw|fwd|aw|sv|antw|ref)\s*[:]|^\[(re|fw|fwd)\]/i', $subject);
+    }
+
+    protected function isOriginalInboundSubject(?string $subject): bool
+    {
+        return ! $this->isFollowUpEmail((object) ['subject' => $subject]);
+    }
+
+    /**
+     * Find an existing ticket for this email thread (prior mail link or open pension ticket).
+     */
+    protected function resolveThreadTicketId(string $fromAddress, string $subject): ?int
+    {
+        $normalizedSubject = $this->normalizeEmailSubject($subject);
+        if ($normalizedSubject === '') {
+            return null;
+        }
+
+        $fromAddress = strtolower(trim($fromAddress));
+        $pensionMailbox = strtolower(trim((string) config('pension.mailbox', '')));
+        $folders = $this->mailService->mailboxStorageFolders('inbox', $pensionMailbox);
+
+        $priorMails = DB::connection('vtiger')
+            ->table('mail_manager_emails')
+            ->whereIn('folder', $folders)
+            ->whereRaw('LOWER(TRIM(from_address)) = ?', [$fromAddress])
+            ->whereNotNull('ticket_id')
+            ->where('ticket_id', '>', 0)
+            ->orderBy('date')
+            ->limit(50)
+            ->get(['subject', 'ticket_id']);
+
+        foreach ($priorMails as $prior) {
+            if ($this->normalizeEmailSubject((string) ($prior->subject ?? '')) === $normalizedSubject) {
+                return (int) $prior->ticket_id;
+            }
+        }
+
+        return $this->findOpenTicketForThread($fromAddress, $subject);
+    }
+
+    /**
+     * True when an earlier inbound message from the same sender already exists for this thread.
+     */
+    protected function hasPriorInboundInThread(string $fromAddress, string $subject, int $currentEmailId): bool
+    {
+        $normalizedSubject = $this->normalizeEmailSubject($subject);
+        if ($normalizedSubject === '') {
+            return false;
+        }
+
+        $fromAddress = strtolower(trim($fromAddress));
+        $pensionMailbox = strtolower(trim((string) config('pension.mailbox', '')));
+        $folders = $this->mailService->mailboxStorageFolders('inbox', $pensionMailbox);
+
+        $priorMails = DB::connection('vtiger')
+            ->table('mail_manager_emails')
+            ->whereIn('folder', $folders)
+            ->where('id', '<>', $currentEmailId)
+            ->whereRaw('LOWER(TRIM(from_address)) = ?', [$fromAddress])
+            ->orderBy('date')
+            ->limit(100)
+            ->get(['id', 'subject', 'date']);
+
+        foreach ($priorMails as $prior) {
+            if ($this->normalizeEmailSubject((string) ($prior->subject ?? '')) !== $normalizedSubject) {
+                continue;
+            }
+
+            if ($this->isOriginalInboundSubject((string) ($prior->subject ?? ''))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    protected function normalizeEmailSubject(?string $subject): string
+    {
+        $subject = trim((string) $subject);
+
+        while (preg_match('/^(re|fw|fwd|aw|sv|antw)\s*[:]\s*/i', $subject, $matches)) {
+            $subject = trim(substr($subject, strlen($matches[0])));
+        }
+
+        return strtolower($subject);
+    }
+
+    protected function findOpenTicketForThread(string $fromAddress, string $subject): ?int
+    {
+        $normalizedSubject = $this->normalizeEmailSubject($subject);
+        if ($normalizedSubject === '') {
+            return null;
+        }
+
+        $config = config('pension.auto_ticket', []);
+        $category = trim((string) ($config['category'] ?? 'Pension Administration'));
+        $source = trim((string) ($config['source'] ?? 'Pension Email'));
+        $inactive = strtolower((string) config('tickets.inactive_status', 'Inactive'));
+
+        $contact = $this->crm->findContactByPhoneOrEmail(null, $fromAddress);
+        if (! $contact) {
+            return null;
+        }
+
+        $tickets = DB::connection('vtiger')
+            ->table('vtiger_troubletickets as t')
+            ->join('vtiger_crmentity as e', 't.ticketid', '=', 'e.crmid')
+            ->where('e.deleted', 0)
+            ->where('t.contact_id', (int) $contact->contactid)
+            ->where('t.category', $category)
+            ->where('e.source', $source)
+            ->whereRaw("LOWER(TRIM(COALESCE(t.status, ''))) NOT IN ('closed', 'resolved', ?)", [$inactive])
+            ->select('t.ticketid', 't.title')
+            ->orderByDesc('e.createdtime')
+            ->limit(20)
+            ->get();
+
+        foreach ($tickets as $ticket) {
+            if ($this->normalizeEmailSubject((string) ($ticket->title ?? '')) === $normalizedSubject) {
+                return (int) $ticket->ticketid;
+            }
+        }
+
+        return null;
+    }
+
+    protected function notifyEscalationContactOfFailure(object $email, string $error): void
+    {
+        $config = config('pension.auto_ticket', []);
+        $escalateEmail = trim((string) ($config['escalate_to_email'] ?? ''));
+        if ($escalateEmail === '') {
+            return;
+        }
+
+        try {
+            app(TicketNotificationService::class)->sendPensionAutoTicketFailureNotification(
+                $escalateEmail,
+                (string) ($email->subject ?? 'Pension inquiry'),
+                trim((string) ($email->from_address ?? '')),
+                $error
+            );
+        } catch (\Throwable $notifyEx) {
+            Log::warning('PensionAutoTicketFromEmailService: failure notification failed', [
+                'error' => $notifyEx->getMessage(),
+            ]);
         }
     }
 

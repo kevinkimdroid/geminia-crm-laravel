@@ -39,7 +39,7 @@ class FetchEmailsCommand extends Command
             MailFetchHealth::markSuccess($result, 'scheduler');
         }
 
-        Cache::forget('geminia_emails_count');
+        MailService::forgetListCaches();
 
         if ($pensionMailbox = config('pension.mailbox')) {
             $this->info("Fetching pension mailbox: {$pensionMailbox} (up to {$pensionLimit})");

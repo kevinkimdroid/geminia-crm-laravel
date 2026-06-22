@@ -648,7 +648,7 @@ document.querySelector('.pbx-claim-latest-btn')?.addEventListener('click', funct
 
 // Live-refresh call rows without full page reload.
 (function () {
-    var REFRESH_MS = 700;
+    var REFRESH_MS = 10000;
     var tbody = document.getElementById('pbx-live-tbody');
     if (!tbody || (tbody.dataset.source || 'local') !== 'local') return;
     var liveUrl = tbody.dataset.liveUrl;

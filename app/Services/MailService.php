@@ -268,6 +268,10 @@ class MailService
             }
         }
 
+        if (($results['stored'] ?? 0) > 0) {
+            self::forgetListCaches();
+        }
+
         return $results;
     }
 
@@ -486,6 +490,10 @@ class MailService
             Log::error('MailService::fetchAndStoreEmails: ' . $e->getMessage());
         }
 
+        if (($results['stored'] ?? 0) > 0) {
+            self::forgetListCaches();
+        }
+
         return $results;
     }
 
@@ -566,7 +574,18 @@ class MailService
             return (int) Cache::remember('geminia_emails_count', 60, fn () => $this->fetchEmailsCount(null, null));
         }
 
+        if ((! $search || trim($search) === '') && $this->isPensionMailbox($mailbox)) {
+            return (int) Cache::remember('geminia_pension_emails_count', 60, fn () => $this->fetchEmailsCount(null, $mailbox));
+        }
+
         return $this->fetchEmailsCount($search, $mailbox);
+    }
+
+    public static function forgetListCaches(): void
+    {
+        Cache::forget('geminia_emails_count');
+        Cache::forget('geminia_pension_emails_count');
+        Cache::forget('mail:pension:latest_at');
     }
 
     protected function fetchEmailsCount(?string $search, ?string $mailbox = null): int
@@ -632,6 +651,32 @@ class MailService
     public function pensionGraphFetchMailbox(): string
     {
         return strtolower(trim((string) config('pension.graph_fetch_mailbox', config('pension.msgraph_mailbox', ''))));
+    }
+
+    /**
+     * Additional team mailboxes to scan for pension CC/sent mail not delivered to pensions.support@.
+     *
+     * @return list<string>
+     */
+    public function pensionGraphScanMailboxes(): array
+    {
+        $configured = config('pension.graph_scan_mailboxes', []);
+        if (! is_array($configured)) {
+            $configured = [];
+        }
+
+        $assignee = strtolower(trim((string) config('pension.auto_ticket.assign_to_email', '')));
+        $primary = array_filter([
+            strtolower(trim($this->pensionGraphFetchMailbox())),
+            strtolower(trim($this->pensionInboxCanonicalAddress())),
+        ]);
+
+        $addresses = array_values(array_unique(array_filter(array_merge(
+            $configured,
+            $assignee !== '' ? [$assignee] : []
+        ))));
+
+        return array_values(array_filter($addresses, fn ($address) => ! in_array($address, $primary, true)));
     }
 
     /**
@@ -883,11 +928,14 @@ class MailService
 
     public function getPensionInboxLatestReceivedAt(): ?\Carbon\Carbon
     {
-        $folder = $this->mailboxStorageFolder('inbox', config('pension.mailbox'));
-        $latest = DB::connection('vtiger')
-            ->table('mail_manager_emails')
-            ->where('folder', $folder)
-            ->max('date');
+        $latest = Cache::remember('mail:pension:latest_at', 120, function () {
+            $folder = $this->mailboxStorageFolder('inbox', config('pension.mailbox'));
+
+            return DB::connection('vtiger')
+                ->table('mail_manager_emails')
+                ->where('folder', $folder)
+                ->max('date');
+        });
 
         return $latest ? \Carbon\Carbon::parse($latest) : null;
     }
@@ -1017,7 +1065,8 @@ class MailService
         ];
 
         $id = DB::connection('vtiger')->table('mail_manager_emails')->insertGetId($row);
-        Cache::forget('geminia_emails_count');
+        self::forgetListCaches();
+
         return (int) $id;
     }
 

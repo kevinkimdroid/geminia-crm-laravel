@@ -19,6 +19,9 @@ return [
     // IT can copy this from Azure Portal → Groups → pensions → Object ID.
     'graph_group_id' => env('MSGRAPH_PENSIONS_GROUP_ID'),
 
+    // Extra mailboxes to scan for pension-related mail (inbox + sent items). Assignee is always included.
+    'graph_scan_mailboxes' => array_values(array_filter(array_map('strtolower', array_map('trim', explode(',', (string) env('PENSION_GRAPH_SCAN_MAILBOXES', '')))))),
+
     // How many inbox messages to pull from Graph for the pension mailbox (paginated).
     'fetch_limit' => (int) env('PENSION_FETCH_LIMIT', 250),
 
@@ -30,11 +33,12 @@ return [
     | Auto-create tickets from pensions@ client emails
     |--------------------------------------------------------------------------
     */
-    'auto_ticket' => [
+        'auto_ticket' => [
         'enabled' => filter_var(env('PENSION_AUTO_TICKET_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
-        'assign_to_email' => env('PENSION_AUTO_TICKET_ASSIGN_TO', 'daniel.wangendo@geminialife.co.ke'),
-        'escalate_to_email' => env('PENSION_AUTO_TICKET_ESCALATE_TO', 'caroline.wanjiku@geminialife.co.ke'),
-        'tat_hours' => (int) env('PENSION_AUTO_TICKET_TAT_HOURS', 24),
+        'first_email_only' => filter_var(env('PENSION_AUTO_TICKET_FIRST_EMAIL_ONLY', true), FILTER_VALIDATE_BOOLEAN),
+        'assign_to_email' => env('PENSION_AUTO_TICKET_ASSIGN_TO', 'edith.kamau@geminialife.co.ke'),
+        'escalate_to_email' => env('PENSION_AUTO_TICKET_ESCALATE_TO', 'daniel.wangendo@geminialife.co.ke'),
+        'tat_hours' => (int) env('PENSION_AUTO_TICKET_TAT_HOURS', 3),
         'category' => env('PENSION_AUTO_TICKET_CATEGORY', 'Pension Administration'),
         'source' => env('PENSION_AUTO_TICKET_SOURCE', 'Pension Email'),
         'priority' => env('PENSION_AUTO_TICKET_PRIORITY', 'Normal'),

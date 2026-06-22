@@ -181,8 +181,6 @@ class PbxController extends Controller
      */
     public function live(Request $request): JsonResponse
     {
-        $this->maybeSyncRecentCdr();
-
         $query = PbxCall::query();
 
         if ($request->filled('list')) {

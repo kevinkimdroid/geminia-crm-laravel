@@ -17,7 +17,7 @@
             </nav>
             @endif
             <h1 class="page-title">{{ $activeMailbox ? 'Pension Inbox' : 'Life Inbox' }}</h1>
-            <p class="page-subtitle mb-0">@if($activeMailbox)Client emails to <strong>{{ $displayMailbox }}</strong> only{{ ($useMicrosoftGraph ?? false) ? ' (Microsoft Graph)' : '' }}@else Inbox for {{ $displayMailbox }} (general customer service){{ ($useMicrosoftGraph ?? false) ? ' — Microsoft Graph' : '' }}@endif</p>
+            <p class="page-subtitle mb-0">@if($activeMailbox)Client emails to <strong>{{ $displayMailbox }}</strong> only{{ ($useMicrosoftGraph ?? false) ? ' (Microsoft Graph)' : '' }} · <span class="text-success" id="mail-live-status"><i class="bi bi-arrow-repeat"></i> Auto-refreshing</span>@else Inbox for {{ $displayMailbox }} (general customer service){{ ($useMicrosoftGraph ?? false) ? ' — Microsoft Graph' : '' }}@endif</p>
         </div>
         <div class="d-flex gap-2">
             <a href="{{ route('tools.mail-manager.create', $mailboxQuery) }}" class="btn btn-outline-primary">
@@ -122,7 +122,18 @@
                 @endif
             </form>
         </div>
-        <div class="mail-list-scroll flex-grow-1 overflow-y-auto">
+        <div class="mail-list-scroll flex-grow-1 overflow-y-auto"
+             id="mail-live-list"
+             @if($activeMailbox)
+             data-live-url="{{ route('tools.mail-manager.live', array_merge($mailboxQuery, ['search' => $search ?? '', 'page' => $page ?? 1, 'per_page' => $perPageParam ?? '50', 'selected' => $selected ?? ''])) }}"
+             data-sync-url="{{ route('tools.mail-manager.sync', $mailboxQuery) }}"
+             data-list-base-url="{{ route('tools.mail-manager', $mailboxQuery) }}"
+             data-mailbox="{{ $activeMailbox }}"
+             data-search="{{ $search ?? '' }}"
+             data-page="{{ $page ?? 1 }}"
+             data-per-page="{{ $perPageParam ?? '50' }}"
+             data-selected="{{ $selected ?? '' }}"
+             @endif>
             @forelse($emails ?? [] as $email)
             <a href="{{ route('tools.mail-manager', array_merge($mailboxQuery, ['selected' => $email->id, 'search' => $search ?? '', 'page' => $page ?? 1, 'per_page' => $perPageParam ?? '50'])) }}"
                class="list-group-item list-group-item-action py-2 px-3 text-decoration-none border-0 border-bottom rounded-0 {{ ($selected ?? null) == $email->id ? 'active' : '' }}">
@@ -152,7 +163,7 @@
         </div>
         @if(($total ?? 0) > 0)
         <div class="p-2 border-top bg-light flex-shrink-0 d-flex justify-content-between align-items-center">
-            <span class="text-muted small">{{ number_format($total) }} emails</span>
+            <span class="text-muted small" id="mail-live-total">{{ number_format($total) }} emails</span>
             <nav>
                 <ul class="pagination pagination-sm mb-0">
                     <li class="page-item {{ ($page ?? 1) <= 1 ? 'disabled' : '' }}">
@@ -248,4 +259,130 @@
     height: auto;
 }
 </style>
+@if($activeMailbox)
+<script>
+(function () {
+    var REFRESH_MS = 30000;
+    var SYNC_MS = 120000;
+    var listEl = document.getElementById('mail-live-list');
+    if (!listEl) return;
+    var liveUrl = listEl.dataset.liveUrl;
+    if (!liveUrl) return;
+    var syncUrl = listEl.dataset.syncUrl || '';
+
+    var baseUrl = listEl.dataset.listBaseUrl || '';
+    var mailbox = listEl.dataset.mailbox || '';
+    var search = listEl.dataset.search || '';
+    var page = listEl.dataset.page || '1';
+    var perPage = listEl.dataset.perPage || '50';
+    var selectedId = listEl.dataset.selected || '';
+    var lastPayloadSig = '';
+    var inflight = false;
+
+    function esc(v) {
+        return String(v ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function buildEmailUrl(id) {
+        var params = new URLSearchParams();
+        if (mailbox) params.set('mailbox', mailbox);
+        params.set('selected', String(id));
+        if (search) params.set('search', search);
+        params.set('page', page);
+        params.set('per_page', perPage);
+        var qs = params.toString();
+        return baseUrl + (qs ? '?' + qs : '');
+    }
+
+    function shouldSkipRefresh() {
+        if (document.hidden) return true;
+        var active = document.activeElement;
+        if (!active) return false;
+        var tag = (active.tagName || '').toUpperCase();
+        return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || active.isContentEditable;
+    }
+
+    function renderEmails(emails, total, selected) {
+        if (!Array.isArray(emails)) return;
+
+        var nextSig = String(total) + '::' + emails.map(function (e) {
+            return [e.id, e.subject, e.ticket_id || '', e.date_label || ''].join('|');
+        }).join('||');
+        if (nextSig !== '' && nextSig === lastPayloadSig) return;
+        lastPayloadSig = nextSig;
+
+        var totalEl = document.getElementById('mail-live-total');
+        if (totalEl) {
+            totalEl.textContent = Number(total || 0).toLocaleString() + ' emails';
+        }
+
+        if (emails.length === 0) {
+            listEl.innerHTML = '<div class="list-group-item text-center py-5 text-muted small border-0">' +
+                (search
+                    ? 'No emails match your search.'
+                    : 'No emails yet. New mail appears here automatically.') +
+                '</div>';
+            return;
+        }
+
+        listEl.innerHTML = emails.map(function (email) {
+            var isActive = String(selected || selectedId) === String(email.id);
+            var sender = esc(email.from_name || email.from_address || '');
+            var subject = esc((email.subject || '(No subject)').substring(0, 55));
+            var attach = email.has_attachments ? '<i class="bi bi-paperclip ms-1 opacity-75"></i>' : '';
+            var ticket = email.ticket_id ? '<i class="bi bi-ticket-perforated-fill ms-1 opacity-75" title="Linked to ticket"></i>' : '';
+            var activeClass = isActive ? ' active' : '';
+            var dateClass = isActive ? 'text-white-50' : 'text-muted';
+            var subjectClass = isActive ? 'text-white' : 'text-dark';
+
+            return '<a href="' + esc(buildEmailUrl(email.id)) + '" ' +
+                'class="list-group-item list-group-item-action py-2 px-3 text-decoration-none border-0 border-bottom rounded-0' + activeClass + '">' +
+                '<div class="d-flex justify-content-between align-items-start gap-2">' +
+                '<span class="fw-semibold small text-truncate">' + sender + '</span>' +
+                '<small class="text-nowrap flex-shrink-0 ' + dateClass + '">' + esc(email.date_label || '') + '</small>' +
+                '</div>' +
+                '<div class="small mt-0 mb-1 ' + subjectClass + '">' + subject + attach + ticket + '</div>' +
+                '</a>';
+        }).join('');
+    }
+
+    function pollLiveInbox() {
+        if (shouldSkipRefresh() || inflight) return;
+        inflight = true;
+        fetch(liveUrl, { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (data) {
+                if (data && data.success) {
+                    renderEmails(data.emails || [], data.total || 0, data.selected);
+                }
+            })
+            .catch(function () {})
+            .finally(function () { inflight = false; });
+    }
+
+    function pollMailSync() {
+        if (document.hidden || !syncUrl) return;
+        fetch(syncUrl, { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (data) {
+                if (data && data.success && data.synced) {
+                    pollLiveInbox();
+                }
+            })
+            .catch(function () {});
+    }
+
+    setInterval(pollLiveInbox, REFRESH_MS);
+    if (syncUrl) {
+        setInterval(pollMailSync, SYNC_MS);
+        setTimeout(pollMailSync, 5000);
+    }
+})();
+</script>
+@endif
 @endsection

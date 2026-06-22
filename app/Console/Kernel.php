@@ -16,7 +16,7 @@ class Kernel extends ConsoleKernel
         $schedule->command('tickets:create-maturity-reminders')->dailyAt('08:00');
         $schedule->command('tickets:sla-violation-reminders')->hourly();
         if (config('pension.auto_ticket.enabled', false)) {
-            $schedule->command('pension:escalate-sla-tickets')->hourly();
+            $schedule->command('pension:escalate-sla-tickets')->everyFifteenMinutes();
         }
         $schedule->command('maturities:notify-investment')
             ->daily()
@@ -25,7 +25,7 @@ class Kernel extends ConsoleKernel
             ->appendOutputTo(storage_path('logs/investment-maturities.log'));
 
         if (filter_var(env('PBX_CDR_SYNC_ENABLED', true), FILTER_VALIDATE_BOOLEAN)) {
-            $schedule->command('pbx:sync-cdr --minutes=30 --limit=500')->everyMinute();
+            $schedule->command('pbx:sync-cdr --minutes=30 --limit=500')->everyFiveMinutes();
             $schedule->command('pbx:health')->everyFiveMinutes();
         }
 
